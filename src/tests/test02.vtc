@@ -1,0 +1,141 @@
+varnishtest "Tests general execution of commands"
+
+server s1 {
+   rxreq
+   txresp
+} -repeat 1 -start
+
+varnish v1 -vcl+backend {
+    import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
+
+    sub vcl_init {
+        redis.init("127.0.0.1", ${redis_port}, 500);
+    }
+
+    sub vcl_deliver {
+        # SET.
+        redis.call("SET foo hello");
+        if (redis.reply_is_status()) {
+            set resp.http.Reply-1 = redis.get_status_reply();
+        }
+
+        # SETEX.
+        redis.command("SETEX");
+        redis.push("bar");
+        redis.push("3600");
+        redis.push("Hello world!");
+        redis.execute();
+        if (redis.reply_is_status()) {
+            set resp.http.Reply-2 = redis.get_status_reply();
+        }
+
+        # GET.
+        redis.call("GET bar");
+        if (redis.reply_is_string()) {
+            set resp.http.Reply-3 = redis.get_string_reply();
+        }
+
+        # DEL.
+        redis.call("DEL bar");
+        if (redis.reply_is_integer()) {
+            set resp.http.Reply-4 = redis.get_integer_reply();
+        }
+
+        # MGET.
+        redis.call("MGET foo bar");
+        if (redis.reply_is_array()) {
+            set resp.http.Reply-5-Length = redis.get_array_reply_length();
+            set resp.http.Reply-5-Value-1 = redis.get_array_reply_value(0);
+            set resp.http.Reply-5-Value-2 = redis.get_array_reply_value(1);
+        }
+
+        # HMSET.
+        redis.command("HMSET");
+        redis.push("bar");
+        redis.push("field1");
+        redis.push("Hello world!");
+        redis.push("field2");
+        redis.push("42");
+        redis.execute();
+        if (redis.reply_is_status()) {
+            set resp.http.Reply-6 = redis.get_status_reply();
+        }
+
+        # HMGET.
+        redis.call("HGET bar field1");
+        if (redis.reply_is_string()) {
+            set resp.http.Reply-7 = redis.get_string_reply();
+        }
+
+        # INCR.
+        redis.call("INCR foo");
+        if (redis.reply_is_error()) {
+            set resp.http.Reply-8 = redis.get_error_reply();
+        }
+
+        # EVAL.
+        set req.http.Script = {"
+            redis.call('SET', KEYS[1], ARGV[1]);
+            redis.call('SET', KEYS[2], ARGV[1]);
+        "};
+        redis.command("EVAL");
+        redis.push(req.http.Script);
+        redis.push("2");
+        redis.push("foo");
+        redis.push("bar");
+        redis.push("Atomic!");
+        redis.execute();
+        if (redis.reply_is_nil()) {
+            set resp.http.Reply-9 = "o/";
+        }
+
+        # EVAL.
+        redis.command("EVAL");
+        redis.push(req.http.Script);
+        redis.push("2");
+        redis.push("foo");
+        redis.push("bar");
+        redis.push("Atomic x 2!");
+        redis.execute();
+        if (redis.reply_is_nil()) {
+            set resp.http.Reply-10 = "o/";
+        }
+
+        # GET.
+        redis.call("GET foo");
+        if (redis.reply_is_string()) {
+            set resp.http.Reply-11 = redis.get_string_reply();
+        }
+    }
+} -start
+
+client c1 {
+    txreq
+    rxresp
+
+    expect resp.http.Reply-1 == "OK"
+
+    expect resp.http.Reply-2 == "OK"
+
+    expect resp.http.Reply-3 == "Hello world!"
+
+    expect resp.http.Reply-4 == "1"
+
+    expect resp.http.Reply-5-Length == "2"
+    expect resp.http.Reply-5-Value-1 == "hello"
+    expect resp.http.Reply-5-Value-2 == <undef>
+
+    expect resp.http.Reply-6 == "OK"
+
+    expect resp.http.Reply-7 == "Hello world!"
+
+    expect resp.http.Reply-8 != <undef>
+
+    expect resp.http.Reply-9 == "o/"
+
+    expect resp.http.Reply-10 == "o/"
+
+    expect resp.http.Reply-11 == "Atomic x 2!"
+} -run
+
+varnish v1 -expect client_req == 1
