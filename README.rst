@@ -19,9 +19,11 @@ import redis;
 DESCRIPTION
 ===========
 
-VMOD using the synchronous hiredis library API (https://github.com/redis/hiredis) to access Redis servers from VCL. Highlights:
+VMOD using the synchronous hiredis library API (https://github.com/redis/hiredis) to access Redis servers from VCL.
 
-* **All Redis commands are supported**. Two VMOD APIS are provided: ``redis.call()`` for simple commands, and ``redis.command()`` + ``redis.push()`` + ``redis.execute()`` for advanced execution.
+Highlights:
+
+* **All Redis commands are supported**. Two VMOD APIs are provided: ``redis.call()`` for simple commands, and ``redis.command()`` + ``redis.push()`` + ``redis.execute()`` for advanced execution.
 * **Full support for execution of LUA scripts** (i.e. ``EVAL`` command), including optimistic automatic execution of ``EVALSHA`` commands.
 * **All Redis reply data types are supported**, including partial support to access to components of simple (i.e. not nested) array replies.
 * **Redis pipelines are not (and won't be) supported**. LUA scripting, which is fully supported by the VMOD, it's a much more flexible alternative to pipelines for atomic execution and minimizing latency. Pipelines are hard to use and error prone, specially when using the ``WATCH`` command.
@@ -83,7 +85,9 @@ Prototype
                 init(STRING host, INT port, INT timeout)
 Arguments
     host: host where the Redis server is running.
+
     port: port where the Redis server is running.
+
     timeout: connection timeout (milliseconds) to the Redis server.
 Return value
     VOID
