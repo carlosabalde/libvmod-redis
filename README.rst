@@ -186,7 +186,7 @@ Prototype
 Return value
     BOOL
 Description
-    Returns TRUE if a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an nil reply.
+    Returns TRUE if a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned a nil reply.
 
 reply_is_status
 ---------------
@@ -198,7 +198,7 @@ Prototype
 Return value
     BOOL
 Description
-    Returns TRUE if a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an status reply.
+    Returns TRUE if a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned a status reply.
 
 reply_is_integer
 ----------------
@@ -222,7 +222,7 @@ Prototype
 Return value
     BOOL
 Description
-    Returns TRUE if a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an string reply.
+    Returns TRUE if a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned a string reply.
 
 reply_is_array
 --------------
