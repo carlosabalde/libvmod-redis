@@ -106,6 +106,17 @@ varnish v1 -vcl+backend {
         if (redis.reply_is_string()) {
             set resp.http.Reply-11 = redis.get_string_reply();
         }
+
+        # SETEX.
+        set req.http.Key = "foo";
+        set req.http.Value = "Hello world!";
+        redis.call(
+            "SETEX %s 3600 %s" +
+            req.http.Key +
+            req.http.Value);
+        if (redis.reply_is_status()) {
+            set resp.http.Reply-12 = redis.get_status_reply();
+        }
     }
 } -start
 
@@ -136,6 +147,8 @@ client c1 {
     expect resp.http.Reply-10 == "o/"
 
     expect resp.http.Reply-11 == "Atomic x 2!"
+
+    expect resp.http.Reply-12 == "OK"
 } -run
 
 varnish v1 -expect client_req == 1

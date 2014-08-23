@@ -11,7 +11,7 @@ Function VOID init(PRIV_VCL, STRING, INT, INT)
 ## Simple command execution.
 ###############################################################################
 
-Function VOID call(PRIV_VCL, STRING)
+Function VOID call(PRIV_VCL, STRING_LIST)
 
 ###############################################################################
 ## Advanced command execution.

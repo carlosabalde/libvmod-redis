@@ -110,7 +110,7 @@ vmod_init(
  *****************************************************************************/
 
 void
-vmod_call(struct sess *sp, struct vmod_priv *vcl_priv, const char *command)
+vmod_call(struct sess *sp, struct vmod_priv *vcl_priv, const char *command, ...)
 {
     // Check input.
     if (command != NULL) {
@@ -120,7 +120,12 @@ vmod_call(struct sess *sp, struct vmod_priv *vcl_priv, const char *command)
         // Do not continue if a Redis context is not available.
         if (state->context != NULL) {
             // Send command.
-            state->reply = redisCommand(state->context, command);
+            // XXX: beware of the ugly hack to partially support usage of '%s',
+            // '%d', etc. placeholders in VCL.
+            va_list args;
+            va_start(args, command);
+            state->reply = redisvCommand(state->context, command, args);
+            va_end(args);
 
             // Check reply.
             if (state->context->err) {

@@ -46,6 +46,13 @@ EXAMPLES
         redis.call("GET foo");
         set req.http.X-Foo = redis.get_string_reply();
 
+        # Simple command execution using placeholders.
+        set req.http.X-Key = "foo";
+        set req.http.X-Value = "Hello world!";
+        redis.call("SET %s %s" + req.http.X-Key + req.http.X-Value);
+        redis.call("GET %s" + req.http.X-Key);
+        set req.http.X-Foo = redis.get_string_reply();
+
         # Advanced command execution.
         redis.command("SET");
         redis.push("bar");
@@ -105,7 +112,7 @@ call
 Prototype
         ::
 
-                call(STRING command)
+                call(STRING_LIST command)
 Arguments
     command: full Redis command.
 Return value
@@ -113,7 +120,8 @@ Return value
 Description
     Executes a simple Redis command.
     Reply can be fetched with ``redis.reply_is_.*()`` and ``redis.get_.*()`` functions.
-    Do not use this function to execute ``EVAL`` commands.
+    This function implements an ugly hack based on the VMOD STRING_LIST data type in order to support some formatting placeholders like ``%s``, ``%d``, etc.
+    Please, use ``redis.command()`` + ``redis.push()`` + ``redis.execute()`` for extra flexibility and optimistic execution of ``EVALSHA`` commands.
 
 ADVANCED COMAND EXECUTION FUNCTIONS
 ===================================
