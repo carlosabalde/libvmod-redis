@@ -9,7 +9,7 @@ varnish v1 -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
-        redis.init("127.0.0.1", ${redis_port}, 500);
+        redis.init("127.0.0.1", ${redis_port}, 500, 0);
     }
 } -start
 

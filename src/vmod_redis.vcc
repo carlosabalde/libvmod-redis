@@ -5,7 +5,7 @@ Init init_function
 ## Configuration.
 ###############################################################################
 
-Function VOID init(PRIV_VCL, STRING, INT, INT)
+Function VOID init(PRIV_VCL, STRING, INT, INT, INT)
 
 ###############################################################################
 ## Simple command execution.

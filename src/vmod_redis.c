@@ -25,6 +25,7 @@ typedef struct vcl_priv {
     const char *host;
     unsigned port;
     struct timeval timeout;
+    unsigned ttl;
 } vcl_priv_t;
 
 typedef struct thread_state {
@@ -36,6 +37,7 @@ typedef struct thread_state {
 
     // Redis context.
     redisContext *context;
+    time_t context_tst;
 
     // Redis command: arguments + reply.
 #define MAX_REDIS_COMMAND_ARGS 128
@@ -96,10 +98,10 @@ init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
 void
 vmod_init(
     struct sess *sp, struct vmod_priv *vcl_priv,
-    const char *host, int port, int timeout)
+    const char *host, int port, int timeout, int ttl)
 {
     vcl_priv_t *old = vcl_priv->priv;
-    vcl_priv->priv = new_vcl_priv(host, port, timeout);
+    vcl_priv->priv = new_vcl_priv(host, port, timeout, ttl);
     if (old != NULL) {
         free_vcl_priv(old);
     }
@@ -395,7 +397,7 @@ vmod_free(struct sess *sp, struct vmod_priv *vcl_priv)
  *****************************************************************************/
 
 static vcl_priv_t *
-new_vcl_priv(const char *host, int port, int timeout)
+new_vcl_priv(const char *host, unsigned port, unsigned timeout, unsigned ttl)
 {
     vcl_priv_t *result;
     ALLOC_OBJ(result, VCL_PRIV_MAGIC);
@@ -406,6 +408,7 @@ new_vcl_priv(const char *host, int port, int timeout)
     result->port = port;
     result->timeout.tv_sec = timeout / 1000;;
     result->timeout.tv_usec = (timeout % 1000) * 1000;
+    result->ttl = ttl;
 
     return result;
 }
@@ -426,9 +429,10 @@ get_thread_state(
     // Initializations.
     vcl_priv_t *config = vcl_priv->priv;
     thread_state_t *result = pthread_getspecific(thread_key);
+    time_t now = time(NULL);
 
     // Create thread state if not created yet, and flush Redis context
-    // if found in an error state.
+    // if it's in an error state or it's too old.
     if (result == NULL) {
         ALLOC_OBJ(result, THREAD_STATE_MAGIC);
         AN(result);
@@ -436,6 +440,7 @@ get_thread_state(
         result->xid = sp->xid;
         result->id = sp->id;
         result->context = NULL;
+        result->context_tst = 0;
         result->argc = 0;
         result->reply = NULL;
 
@@ -443,9 +448,12 @@ get_thread_state(
     } else {
         CHECK_OBJ(result, THREAD_STATE_MAGIC);
 
-        if ((result->context != NULL) && result->context->err) {
+        if ((result->context != NULL) &&
+            (result->context->err ||
+             ((config->ttl > 0) && (now - result->context_tst > config->ttl)))) {
             redisFree(result->context);
             result->context = NULL;
+            result->context_tst = 0;
         }
     }
 
@@ -461,6 +469,9 @@ get_thread_state(
                 result->context->errstr);
             redisFree(result->context);
             result->context = NULL;
+            result->context_tst = 0;
+        } else {
+            result->context_tst = now;
         }
     }
 

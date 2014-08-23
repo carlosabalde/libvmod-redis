@@ -37,7 +37,7 @@ EXAMPLES
 
     sub vcl_init {
         # VMOD configuration.
-        redis.init("127.0.0.1", 6379, 500);
+        redis.init("127.0.0.1", 6379, 500, 0);
     }
 
     sub vcl_deliver {
@@ -89,13 +89,15 @@ init
 Prototype
         ::
 
-                init(STRING host, INT port, INT timeout)
+                init(STRING host, INT port, INT timeout, INT ttl)
 Arguments
     host: host where the Redis server is running.
 
     port: port where the Redis server is running.
 
     timeout: connection timeout (milliseconds) to the Redis server.
+
+    ttl: TTL (seconds) of Redis connections (0 means no TTL). Once the TTL of a connection is consumed, the module transparently reestablishes it. See "Client timeouts" in http://redis.io/topics/clients for extra information.
 Return value
     VOID
 Description
