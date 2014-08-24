@@ -69,10 +69,6 @@ AC_CHECK_LIB(
 	hiredis, redisCommand, [],
 	[AC_MSG_ERROR([libvmod-redis requires libhiredis.])])
 
-AC_CHECK_LIB(
-	mhash, mhash_count, [],
-	[AC_MSG_ERROR([libvmod-redis requires libmhash.])])
-
 AC_CONFIG_FILES([
 	Makefile
 	src/Makefile

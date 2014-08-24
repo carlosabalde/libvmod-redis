@@ -5,18 +5,11 @@
 #include <pthread.h>
 #include <hiredis/hiredis.h>
 
-/**
- * mhash.h has a habit of pulling in assert(). Let's hope it's a define,
- * and that we can undef it, since Varnish has a better one.
- */
-#include <mhash.h>
-#ifdef assert
-#   undef assert
-#endif
-
 #include "vrt.h"
 #include "bin/varnishd/cache.h"
 #include "vcc_if.h"
+
+#include "sha1.h"
 
 typedef struct vcl_priv {
 #define VCL_PRIV_MAGIC 0x77feec11
@@ -565,18 +558,18 @@ static const char *
 sha1(const char *script)
 {
     // Hash.
-    unsigned block_size = mhash_get_block_size(MHASH_SHA1);
-    unsigned char buffer[block_size];
-    MHASH td = mhash_init(MHASH_SHA1);
-    mhash(td, script, strlen(script));
-    mhash_deinit(td, buffer);
+    unsigned char buffer[20];
+    SHA1_CTX ctx;
+    SHA1Init(&ctx);
+    SHA1Update(&ctx, script, strlen(script));
+    SHA1Final(buffer, &ctx);
 
     // Encode.
-    char *result = malloc(block_size * 2);
+    char *result = malloc(40);
     AN(result);
     char *ptr = result;
-    for (int i = 0; i < block_size; i++) {
-        sprintf(ptr, "%.2x", buffer[i]);
+    for (int i = 0; i < 20; i++) {
+        sprintf(ptr, "%02x", buffer[i]);
         ptr += 2;
     }
 

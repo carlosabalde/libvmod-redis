@@ -28,8 +28,6 @@ Highlights:
 * **All Redis reply data types are supported**, including partial support to access to components of simple (i.e. not nested) array replies.
 * **Redis pipelines are not (and won't be) supported**. LUA scripting, which is fully supported by the VMOD, it's a much more flexible alternative to pipelines for atomic execution and minimizing latency. Pipelines are hard to use and error prone, specially when using the ``WATCH`` command.
 
-In addition to the hiredis library, the VMOD also depends on the mhash library (http://mhash.sourceforge.net) to implement the optimistic automatic execution of ``EVALSHA`` commands.
-
 EXAMPLES
 ========
 
@@ -369,11 +367,16 @@ Make targets:
 Dependencies:
 
 * hiredis - minimalistic C Redis client library (https://github.com/redis/hiredis)
-* mhash - uniform interface to a large number of hash algorithms (http://mhash.sourceforge.net)
 
 COPYRIGHT
 =========
 
 This document is licensed under the same license as the libvmod-redis project. See LICENSE for details.
 
-* Copyright (c) 2014 Carlos Abalde <carlos.abalde@gmail.com>
+Implementation of the SHA-1 cryptographic hash function embedded in this VMOD (required to the optimistic execution of ``EVALSHA`` commands) is borrowed from the Redis server implementation:
+
+* http://download.redis.io/redis-stable/src/sha1.c
+* http://download.redis.io/redis-stable/src/sha1.h
+* http://download.redis.io/redis-stable/src/config.h
+
+Copyright (c) 2014 Carlos Abalde <carlos.abalde@gmail.com>

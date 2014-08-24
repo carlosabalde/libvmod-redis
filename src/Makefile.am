@@ -4,10 +4,12 @@ vmoddir = $(VMODDIR)
 vmod_LTLIBRARIES = libvmod_redis.la
 
 libvmod_redis_la_LDFLAGS = -module -export-dynamic -avoid-version
-libvmod_redis_la_LIBADD = -lhiredis -lmhash
+libvmod_redis_la_LIBADD = -lhiredis
 
 libvmod_redis_la_SOURCES = \
     vcc_if.c vcc_if.h \
+    config.h \
+    sha1.c sha1.h \
     vmod_redis.c vmod_redis.h
 
 vcc_if.c vcc_if.h: $(VARNISHSRC)/lib/libvmod_std/vmod.py $(top_srcdir)/src/vmod_redis.vcc
