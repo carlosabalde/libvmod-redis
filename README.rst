@@ -343,7 +343,7 @@ Return value
     VOID
 Description
     Frees memory internally used by Redis commands an replies.
-    If this function is not called this will be handled automatically.
+    It's recommended to use this function, but if not called this will be handled automatically during the next call to ``redis.call()`` or ``redis.command()``.
 
 INSTALLATION
 ============

@@ -24,10 +24,6 @@ typedef struct vcl_priv {
 typedef struct thread_state {
 #define THREAD_STATE_MAGIC 0xa6bc103e
     unsigned magic;
-    // Current request XID & ID.
-    unsigned xid;
-    int id;
-
     // Redis context.
     redisContext *context;
     time_t context_tst;
@@ -430,8 +426,6 @@ get_thread_state(
         ALLOC_OBJ(result, THREAD_STATE_MAGIC);
         AN(result);
 
-        result->xid = sp->xid;
-        result->id = sp->id;
         result->context = NULL;
         result->context_tst = 0;
         result->argc = 0;
@@ -466,17 +460,6 @@ get_thread_state(
         } else {
             result->context_tst = now;
         }
-    }
-
-    // Is this a new request? Check the XID (and the ID just in case we have
-    // non-unique XIDs, as in some versions of Varnish 3).
-    if ((result->xid != sp->xid) || (result->id != sp->id)) {
-        // Update XID & ID.
-        result->xid = sp->xid;
-        result->id = sp->id;
-
-        // Drop previous Redis command.
-        flush = 1;
     }
 
     // Drop previously stored Redis command.
