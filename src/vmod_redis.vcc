@@ -1,49 +1,49 @@
-Module redis
-Init init_function
+$Module redis 3 Redis VMOD
+$Init init_function
 
 ###############################################################################
 ## Configuration.
 ###############################################################################
 
-Function VOID init(PRIV_VCL, STRING, INT, INT, INT)
+$Function VOID init(PRIV_VCL, STRING, INT, INT, INT)
 
 ###############################################################################
 ## Simple command execution.
 ###############################################################################
 
-Function VOID call(PRIV_VCL, STRING_LIST)
+$Function VOID call(PRIV_VCL, STRING_LIST)
 
 ###############################################################################
 ## Advanced command execution.
 ###############################################################################
 
-Function VOID command(PRIV_VCL, STRING)
-Function VOID push(PRIV_VCL, STRING)
-Function VOID execute(PRIV_VCL)
+$Function VOID command(PRIV_VCL, STRING)
+$Function VOID push(PRIV_VCL, STRING)
+$Function VOID execute(PRIV_VCL)
 
 ###############################################################################
 ## Access to replies.
 ###############################################################################
 
-Function BOOL reply_is_error(PRIV_VCL)
-Function BOOL reply_is_nil(PRIV_VCL)
-Function BOOL reply_is_status(PRIV_VCL)
-Function BOOL reply_is_integer(PRIV_VCL)
-Function BOOL reply_is_string(PRIV_VCL)
-Function BOOL reply_is_array(PRIV_VCL)
+$Function BOOL reply_is_error(PRIV_VCL)
+$Function BOOL reply_is_nil(PRIV_VCL)
+$Function BOOL reply_is_status(PRIV_VCL)
+$Function BOOL reply_is_integer(PRIV_VCL)
+$Function BOOL reply_is_string(PRIV_VCL)
+$Function BOOL reply_is_array(PRIV_VCL)
 
-Function STRING get_reply(PRIV_VCL)
+$Function STRING get_reply(PRIV_VCL)
 
-Function STRING get_error_reply(PRIV_VCL)
-Function STRING get_status_reply(PRIV_VCL)
-Function INT get_integer_reply(PRIV_VCL)
-Function STRING get_string_reply(PRIV_VCL)
+$Function STRING get_error_reply(PRIV_VCL)
+$Function STRING get_status_reply(PRIV_VCL)
+$Function INT get_integer_reply(PRIV_VCL)
+$Function STRING get_string_reply(PRIV_VCL)
 
-Function INT get_array_reply_length(PRIV_VCL)
-Function STRING get_array_reply_value(PRIV_VCL, INT)
+$Function INT get_array_reply_length(PRIV_VCL)
+$Function STRING get_array_reply_value(PRIV_VCL, INT)
 
 ###############################################################################
 ## Other.
 ###############################################################################
 
-Function VOID free(PRIV_VCL)
+$Function VOID free(PRIV_VCL)

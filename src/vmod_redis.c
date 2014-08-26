@@ -6,7 +6,7 @@
 #include <hiredis/hiredis.h>
 
 #include "vrt.h"
-#include "bin/varnishd/cache.h"
+#include "cache/cache.h"
 #include "vcc_if.h"
 
 #include "sha1.h"
@@ -38,13 +38,13 @@ typedef struct thread_state {
     redisReply *reply;
 } thread_state_t;
 
-#define REDIS_LOG(sp, message, ...) \
+#define REDIS_LOG(ctx, message, ...) \
     do { \
         char _buffer[512]; \
         snprintf( \
             _buffer, sizeof(_buffer), \
             "[REDIS][%s] %s", __func__, message); \
-        WSP(sp, SLT_Error, _buffer, ##__VA_ARGS__); \
+        VSLb(ctx->vsl, SLT_Error, _buffer, ##__VA_ARGS__); \
     } while (0)
 
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -55,10 +55,10 @@ static pthread_key_t thread_key;
 static vcl_priv_t * new_vcl_priv();
 static void free_vcl_priv(vcl_priv_t *priv);
 
-static thread_state_t *get_thread_state(struct sess *sp, struct vmod_priv *vcl_priv, unsigned drop_reply);
+static thread_state_t *get_thread_state(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, unsigned drop_reply);
 static void make_thread_key();
 
-static const char *get_reply(struct sess *sp, redisReply *reply);
+static const char *get_reply(const struct vrt_ctx *ctx, redisReply *reply);
 
 static const char *sha1(const char *script);
 
@@ -97,8 +97,8 @@ init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
 
 void
 vmod_init(
-    struct sess *sp, struct vmod_priv *vcl_priv,
-    const char *host, int port, int timeout, int ttl)
+    const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv,
+    VCL_STRING host, VCL_INT port, VCL_INT timeout, VCL_INT ttl)
 {
     vcl_priv_t *old = vcl_priv->priv;
     vcl_priv->priv = new_vcl_priv(host, port, timeout, ttl);
@@ -112,12 +112,12 @@ vmod_init(
  *****************************************************************************/
 
 void
-vmod_call(struct sess *sp, struct vmod_priv *vcl_priv, const char *command, ...)
+vmod_call(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, VCL_STRING command, ...)
 {
     // Check input.
     if (command != NULL) {
         // Fetch local thread state & flush previous command.
-        thread_state_t *state = get_thread_state(sp, vcl_priv, 1);
+        thread_state_t *state = get_thread_state(ctx, vcl_priv, 1);
 
         // Do not continue if a Redis context is not available.
         if (state->context != NULL) {
@@ -131,17 +131,17 @@ vmod_call(struct sess *sp, struct vmod_priv *vcl_priv, const char *command, ...)
 
             // Check reply.
             if (state->context->err) {
-                REDIS_LOG(sp,
+                REDIS_LOG(ctx,
                     "Failed to execute Redis command (%s): [%d] %s",
                     command,
                     state->context->err,
                     state->context->errstr);
             } else if (state->reply == NULL) {
-                REDIS_LOG(sp,
+                REDIS_LOG(ctx,
                     "Failed to execute Redis command (%s)",
                     command);
             } else if (state->reply->type == REDIS_REPLY_ERROR) {
-                REDIS_LOG(sp,
+                REDIS_LOG(ctx,
                     "Got error reply while executing Redis command (%s): %s",
                     command,
                     state->reply->str);
@@ -155,12 +155,12 @@ vmod_call(struct sess *sp, struct vmod_priv *vcl_priv, const char *command, ...)
  *****************************************************************************/
 
 void
-vmod_command(struct sess *sp, struct vmod_priv *vcl_priv, const char *name)
+vmod_command(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, VCL_STRING name)
 {
     // Check input.
     if ((name != NULL) && (strlen(name) > 0)) {
         // Fetch local thread state & flush previous command.
-        thread_state_t *state = get_thread_state(sp, vcl_priv, 1);
+        thread_state_t *state = get_thread_state(ctx, vcl_priv, 1);
 
         // Convert command name to uppercase (for later comparison with the
         // 'EVAL' string).
@@ -180,10 +180,10 @@ vmod_command(struct sess *sp, struct vmod_priv *vcl_priv, const char *name)
  *****************************************************************************/
 
 void
-vmod_push(struct sess *sp, struct vmod_priv *vcl_priv, const char *arg)
+vmod_push(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, VCL_STRING arg)
 {
     // Fetch local thread state.
-    thread_state_t *state = get_thread_state(sp, vcl_priv, 0);
+    thread_state_t *state = get_thread_state(ctx, vcl_priv, 0);
 
     // Do not continue if the maximum number of allowed arguments has been
     // reached or if the initial call to redis.command() was not executed.
@@ -196,7 +196,7 @@ vmod_push(struct sess *sp, struct vmod_priv *vcl_priv, const char *arg)
         }
         AN(state->argv[state->argc - 1]);
     } else {
-        REDIS_LOG(sp, "Failed to push Redis argument");
+        REDIS_LOG(ctx, "Failed to push Redis argument");
     }
 }
 
@@ -205,10 +205,10 @@ vmod_push(struct sess *sp, struct vmod_priv *vcl_priv, const char *arg)
  *****************************************************************************/
 
 void
-vmod_execute(struct sess *sp, struct vmod_priv *vcl_priv)
+vmod_execute(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
 {
     // Fetch local thread state.
-    thread_state_t *state = get_thread_state(sp, vcl_priv, 0);
+    thread_state_t *state = get_thread_state(ctx, vcl_priv, 0);
 
     // Do not continue if a Redis context is not available or if the initial
     // call to redis.command() was not executed.
@@ -263,17 +263,17 @@ vmod_execute(struct sess *sp, struct vmod_priv *vcl_priv)
 
         // Check reply.
         if (state->context->err) {
-            REDIS_LOG(sp,
+            REDIS_LOG(ctx,
                 "Failed to execute Redis command (%s): [%d] %s",
                 state->argv[0],
                 state->context->err,
                 state->context->errstr);
         } else if (state->reply == NULL) {
-            REDIS_LOG(sp,
+            REDIS_LOG(ctx,
                 "Failed to execute Redis command (%s)",
                 state->argv[0]);
         } else if (state->reply->type == REDIS_REPLY_ERROR) {
-            REDIS_LOG(sp,
+            REDIS_LOG(ctx,
                 "Got error reply while executing Redis command (%s): %s",
                 state->argv[0],
                 state->reply->str);
@@ -291,10 +291,10 @@ vmod_execute(struct sess *sp, struct vmod_priv *vcl_priv)
  *****************************************************************************/
 
 #define VMOD_REPLY_IS_FOO(lower, upper) \
-unsigned \
-vmod_reply_is_ ## lower(struct sess *sp, struct vmod_priv *vcl_priv) \
+VCL_BOOL \
+vmod_reply_is_ ## lower(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv) \
 { \
-    thread_state_t *state = get_thread_state(sp, vcl_priv, 0); \
+    thread_state_t *state = get_thread_state(ctx, vcl_priv, 0); \
     return \
         (state->reply != NULL) && \
         (state->reply->type == REDIS_REPLY_ ## upper); \
@@ -311,12 +311,12 @@ VMOD_REPLY_IS_FOO(array, ARRAY)
  * redis.get_reply();
  *****************************************************************************/
 
-const char *
-vmod_get_reply(struct sess *sp, struct vmod_priv *vcl_priv)
+VCL_STRING
+vmod_get_reply(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
 {
-    thread_state_t *state = get_thread_state(sp, vcl_priv, 0);
+    thread_state_t *state = get_thread_state(ctx, vcl_priv, 0);
     if (state->reply != NULL) {
-        return get_reply(sp, state->reply);
+        return get_reply(ctx, state->reply);
     } else {
         return 0;
     }
@@ -331,9 +331,9 @@ vmod_get_reply(struct sess *sp, struct vmod_priv *vcl_priv)
 
 #define VMOD_GET_FOO_REPLY(lower, upper, return_type, reply_field, fallback_value) \
 return_type \
-vmod_get_ ## lower ## _reply(struct sess *sp, struct vmod_priv *vcl_priv) \
+vmod_get_ ## lower ## _reply(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv) \
 { \
-    thread_state_t *state = get_thread_state(sp, vcl_priv, 0); \
+    thread_state_t *state = get_thread_state(ctx, vcl_priv, 0); \
     if ((state->reply != NULL) && \
         (state->reply->type == REDIS_REPLY_ ## upper)) { \
         return state->reply->reply_field; \
@@ -342,19 +342,19 @@ vmod_get_ ## lower ## _reply(struct sess *sp, struct vmod_priv *vcl_priv) \
     } \
 }
 
-VMOD_GET_FOO_REPLY(error, ERROR, const char *, str, NULL)
-VMOD_GET_FOO_REPLY(status, STATUS, const char *, str, NULL)
-VMOD_GET_FOO_REPLY(integer, INTEGER, int, integer, 0)
-VMOD_GET_FOO_REPLY(string, STRING, const char *, str, NULL)
+VMOD_GET_FOO_REPLY(error, ERROR, VCL_STRING, str, NULL)
+VMOD_GET_FOO_REPLY(status, STATUS, VCL_STRING, str, NULL)
+VMOD_GET_FOO_REPLY(integer, INTEGER, VCL_INT, integer, 0)
+VMOD_GET_FOO_REPLY(string, STRING, VCL_STRING, str, NULL)
 
 /******************************************************************************
  * redis.get_array_reply_length();
  *****************************************************************************/
 
-int
-vmod_get_array_reply_length(struct sess *sp, struct vmod_priv *vcl_priv)
+VCL_INT
+vmod_get_array_reply_length(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
 {
-    thread_state_t *state = get_thread_state(sp, vcl_priv, 0);
+    thread_state_t *state = get_thread_state(ctx, vcl_priv, 0);
     if ((state->reply != NULL) &&
         (state->reply->type == REDIS_REPLY_ARRAY)) {
         return state->reply->elements;
@@ -367,16 +367,16 @@ vmod_get_array_reply_length(struct sess *sp, struct vmod_priv *vcl_priv)
  * redis.get_array_reply_value();
  *****************************************************************************/
 
-const char *
+VCL_STRING
 vmod_get_array_reply_value(
-    struct sess *sp, struct vmod_priv *vcl_priv,
-    int index)
+    const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv,
+    VCL_INT index)
 {
-    thread_state_t *state = get_thread_state(sp, vcl_priv, 0);
+    thread_state_t *state = get_thread_state(ctx, vcl_priv, 0);
     if ((state->reply != NULL) &&
         (state->reply->type == REDIS_REPLY_ARRAY) &&
         (index < state->reply->elements)) {
-        return get_reply(sp, state->reply->element[index]);
+        return get_reply(ctx, state->reply->element[index]);
     } else {
         return NULL;
     }
@@ -387,9 +387,9 @@ vmod_get_array_reply_value(
  *****************************************************************************/
 
 void
-vmod_free(struct sess *sp, struct vmod_priv *vcl_priv)
+vmod_free(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
 {
-    get_thread_state(sp, vcl_priv, 1);
+    get_thread_state(ctx, vcl_priv, 1);
 }
 
 /******************************************************************************
@@ -423,7 +423,7 @@ free_vcl_priv(vcl_priv_t *priv)
 
 static thread_state_t *
 get_thread_state(
-    struct sess *sp, struct vmod_priv *vcl_priv,
+    const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv,
     unsigned flush)
 {
     // Initializations.
@@ -464,7 +464,7 @@ get_thread_state(
         result->context = redisConnectWithTimeout(config->host, config->port, config->timeout);
         AN(result->context);
         if (result->context->err) {
-            REDIS_LOG(sp,
+            REDIS_LOG(ctx,
                 "Failed to establish Redis connection (%d): %s",
                 result->context->err,
                 result->context->errstr);
@@ -518,7 +518,7 @@ make_thread_key()
 }
 
 static const char *
-get_reply(struct sess *sp, redisReply *reply)
+get_reply(const struct vrt_ctx *ctx, redisReply *reply)
 {
     // Default result.
     const char *result = NULL;
@@ -530,18 +530,18 @@ get_reply(struct sess *sp, redisReply *reply)
         case REDIS_REPLY_ERROR:
         case REDIS_REPLY_STATUS:
         case REDIS_REPLY_STRING:
-            result = WS_Dup(sp->ws, reply->str);
+            result = WS_Copy(ctx->ws, reply->str, -1);
             AN(result);
             break;
 
         case REDIS_REPLY_INTEGER:
             sprintf(buffer, "%lld", reply->integer);
-            result = WS_Dup(sp->ws, buffer);
+            result = WS_Copy(ctx->ws, buffer, -1);
             AN(result);
             break;
 
         case REDIS_REPLY_ARRAY:
-            result = WS_Dup(sp->ws, "array");
+            result = WS_Copy(ctx->ws, "array", -1);
             AN(result);
             break;
 

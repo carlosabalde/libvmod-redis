@@ -2,7 +2,7 @@ ACLOCAL_AMFLAGS = -I m4
 
 SUBDIRS = src
 
-doc_DATA = README.rst LICENSE
+EXTRA_DIST = README.rst
 
 dist_man_MANS = vmod_redis.3
 MAINTAINERCLEANFILES = $(dist_man_MANS)
@@ -18,4 +18,3 @@ else
 	@echo "========================================"
 	@false
 endif
-
