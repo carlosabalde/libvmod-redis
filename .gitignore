@@ -28,3 +28,5 @@ Makefile.in
 
 /src/vcc_if.c
 /src/vcc_if.h
+/src/vmod_*.man.rst
+/src/vmod_*.rst
