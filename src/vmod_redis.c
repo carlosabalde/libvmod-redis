@@ -11,10 +11,12 @@
 
 #include "sha1.h"
 
+static unsigned version = 0;
+
 typedef struct vcl_priv {
 #define VCL_PRIV_MAGIC 0x77feec11
     unsigned magic;
-    // Redis connection.
+    // Redis.
     const char *host;
     unsigned port;
     struct timeval timeout;
@@ -26,6 +28,7 @@ typedef struct thread_state {
     unsigned magic;
     // Redis context.
     redisContext *context;
+    unsigned context_version;
     time_t context_tst;
 
     // Redis command: arguments + reply.
@@ -43,6 +46,8 @@ typedef struct thread_state {
             "[REDIS][%s] %s", __func__, message); \
         WSP(sp, SLT_Error, _buffer, ##__VA_ARGS__); \
     } while (0)
+
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static pthread_once_t thread_once = PTHREAD_ONCE_INIT;
 static pthread_key_t thread_key;
@@ -66,7 +71,13 @@ init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
 {
     // Initialize global state shared with all VCLs. This code *is
     // required* to be thread safe.
+    //   - Initialize (once) the key required to store thread-specific data.
+    //   - Increase (every time the VMOD is initialized) the global version.
+    //     This will be used to reestablish Redis connections on reloads.
     AZ(pthread_once(&thread_once, make_thread_key));
+    AZ(pthread_mutex_lock(&mutex));
+    version++;
+    AZ(pthread_mutex_unlock(&mutex));
 
     // Initialize the local VCL data structure and set its free function.
     // Code initializing / freeing the VCL private data structure *is
@@ -427,6 +438,7 @@ get_thread_state(
         AN(result);
 
         result->context = NULL;
+        result->context_version = 0;
         result->context_tst = 0;
         result->argc = 0;
         result->reply = NULL;
@@ -437,9 +449,11 @@ get_thread_state(
 
         if ((result->context != NULL) &&
             (result->context->err ||
+             (result->context_version != version) ||
              ((config->ttl > 0) && (now - result->context_tst > config->ttl)))) {
             redisFree(result->context);
             result->context = NULL;
+            result->context_version = 0;
             result->context_tst = 0;
         }
     }
@@ -456,8 +470,10 @@ get_thread_state(
                 result->context->errstr);
             redisFree(result->context);
             result->context = NULL;
+            result->context_version = 0;
             result->context_tst = 0;
         } else {
+            result->context_version = version;
             result->context_tst = now;
         }
     }
