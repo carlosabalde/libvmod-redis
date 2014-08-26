@@ -115,8 +115,8 @@ vmod_call(struct sess *sp, struct vmod_priv *vcl_priv, const char *command, ...)
         // Do not continue if a Redis context is not available.
         if (state->context != NULL) {
             // Send command.
-            // XXX: beware of the ugly hack to partially support usage of '%s',
-            // '%d', etc. placeholders in VCL.
+            // XXX: beware of the ugly hack to support usage of '%s'
+            // placeholders in VCL.
             va_list args;
             va_start(args, command);
             state->reply = redisvCommand(state->context, command, args);

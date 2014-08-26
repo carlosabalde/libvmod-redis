@@ -120,7 +120,7 @@ Return value
 Description
     Executes a simple Redis command.
     Reply can be fetched with ``redis.reply_is_.*()`` and ``redis.get_.*()`` functions.
-    This function implements an ugly hack based on the VMOD STRING_LIST data type in order to support some formatting placeholders like ``%s``, ``%d``, etc.
+    This function implements an ugly hack based on the VMOD STRING_LIST data type in order to support ``%s`` placeholders.
     Please, use ``redis.command()`` + ``redis.push()`` + ``redis.execute()`` for extra flexibility and optimistic execution of ``EVALSHA`` commands.
 
 ADVANCED COMAND EXECUTION FUNCTIONS
