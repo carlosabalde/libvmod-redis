@@ -134,13 +134,13 @@ client c1 {
 
     expect resp.http.Reply-5-Length == "2"
     expect resp.http.Reply-5-Value-1 == "hello"
-    expect resp.http.Reply-5-Value-2 == <undef>
+    expect resp.http.Reply-5-Value-2 == ""
 
     expect resp.http.Reply-6 == "OK"
 
     expect resp.http.Reply-7 == "Hello world!"
 
-    expect resp.http.Reply-8 != <undef>
+    expect resp.http.Reply-8 != ""
 
     expect resp.http.Reply-9 == "o/"
 
