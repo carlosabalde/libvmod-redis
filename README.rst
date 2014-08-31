@@ -28,6 +28,8 @@ Highlights:
 * **All Redis reply data types are supported**, including partial support to access to components of simple (i.e. not nested) array replies.
 * **Redis pipelines are not (and won't be) supported**. LUA scripting, which is fully supported by the VMOD, it's a much more flexible alternative to pipelines for atomic execution and minimizing latency. Pipelines are hard to use and error prone, specially when using the ``WATCH`` command.
 
+Looking for official support for this VMOD? Please, contact Allenta Consulting (http://www.allenta.com), the Varnish Software integration partner for Spain and Portugal (https://www.varnish-software.com/partner/allenta-consulting).
+
 EXAMPLES
 ========
 
