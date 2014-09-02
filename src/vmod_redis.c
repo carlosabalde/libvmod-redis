@@ -217,7 +217,7 @@ vmod_execute(struct sess *sp, struct vmod_priv *vcl_priv)
         unsigned done = 0;
         if ((strcmp(state->argv[0], "EVAL") == 0) && (state->argc >= 2)) {
             // Replace EVAL with EVALSHA.
-            state->argv[0] = WS_Dup(sp->wrk->ws, "EVALSHA");
+            state->argv[0] = WS_Dup(sp->ws, "EVALSHA");
             AN(state->argv[0]);
             const char *script = state->argv[1];
             state->argv[1] = sha1(sp, script);
@@ -237,7 +237,7 @@ vmod_execute(struct sess *sp, struct vmod_priv *vcl_priv)
                 (state->reply->type == REDIS_REPLY_ERROR) &&
                 (strncmp(state->reply->str, "NOSCRIPT", 8) == 0)) {
                 // Replace EVALSHA with EVAL.
-                state->argv[0] = WS_Dup(sp->wrk->ws, "EVAL");
+                state->argv[0] = WS_Dup(sp->ws, "EVAL");
                 AN(state->argv[0]);
                 state->argv[1] = script;
 
