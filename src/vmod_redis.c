@@ -31,7 +31,7 @@ typedef struct thread_state {
     unsigned context_version;
     time_t context_tst;
 
-    // Redis command: arguments + reply.
+    // Redis command: arguments (allocated in the session workspace) + reply.
 #define MAX_REDIS_COMMAND_ARGS 128
     unsigned argc;
     const char *argv[MAX_REDIS_COMMAND_ARGS];
@@ -60,7 +60,7 @@ static void make_thread_key();
 
 static const char *get_reply(const struct vrt_ctx *ctx, redisReply *reply);
 
-static const char *sha1(const char *script);
+static const char *sha1(const struct vrt_ctx *ctx, const char *script);
 
 /******************************************************************************
  * VMOD INITIALIZATION.
@@ -164,7 +164,7 @@ vmod_command(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, VCL_STRING n
 
         // Convert command name to uppercase (for later comparison with the
         // 'EVAL' string).
-        char *command = strdup(name);
+        char *command = WS_Copy(ctx->ws, name, -1);
         AN(command);
         char *ptr = command;
         while (*ptr++ = toupper(*ptr));
@@ -190,11 +190,11 @@ vmod_push(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, VCL_STRING arg)
     if ((state->argc >= 1) && (state->argc < MAX_REDIS_COMMAND_ARGS)) {
         // Handle NULL arguments as empty strings.
         if (arg != NULL) {
-            state->argv[state->argc++] = strdup(arg);
+            state->argv[state->argc++] = arg;
         } else {
-            state->argv[state->argc++] = strdup("");
+            state->argv[state->argc++] = WS_Copy(ctx->ws, "", -1);
+            AN(state->argv[state->argc - 1]);
         }
-        AN(state->argv[state->argc - 1]);
     } else {
         REDIS_LOG(ctx, "Failed to push Redis argument");
     }
@@ -217,11 +217,10 @@ vmod_execute(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
         unsigned done = 0;
         if ((strcmp(state->argv[0], "EVAL") == 0) && (state->argc >= 2)) {
             // Replace EVAL with EVALSHA.
-            free((void *) state->argv[0]);
-            state->argv[0] = strdup("EVALSHA");
+            state->argv[0] = WS_Copy(ctx->ws, "EVALSHA", -1);
             AN(state->argv[0]);
             const char *script = state->argv[1];
-            state->argv[1] = sha1(script);
+            state->argv[1] = sha1(ctx, script);
 
             // Execute the EVALSHA command.
             state->reply = redisCommandArgv(
@@ -238,15 +237,12 @@ vmod_execute(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
                 (state->reply->type == REDIS_REPLY_ERROR) &&
                 (strncmp(state->reply->str, "NOSCRIPT", 8) == 0)) {
                 // Replace EVALSHA with EVAL.
-                free((void *) state->argv[0]);
-                state->argv[0] = strdup("EVAL");
+                state->argv[0] = WS_Copy(ctx->ws, "EVAL", -1);
                 AN(state->argv[0]);
-                free((void *) state->argv[1]);
                 state->argv[1] = script;
 
             // The command execution is completed.
             } else {
-                free((void *) script);
                 done = 1;
             }
         }
@@ -318,7 +314,7 @@ vmod_get_reply(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
     if (state->reply != NULL) {
         return get_reply(ctx, state->reply);
     } else {
-        return 0;
+        return NULL;
     }
 }
 
@@ -345,7 +341,18 @@ vmod_get_ ## lower ## _reply(const struct vrt_ctx *ctx, struct vmod_priv *vcl_pr
 VMOD_GET_FOO_REPLY(error, ERROR, VCL_STRING, str, NULL)
 VMOD_GET_FOO_REPLY(status, STATUS, VCL_STRING, str, NULL)
 VMOD_GET_FOO_REPLY(integer, INTEGER, VCL_INT, integer, 0)
-VMOD_GET_FOO_REPLY(string, STRING, VCL_STRING, str, NULL)
+
+STRING
+vmod_get_string_reply(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
+{
+    thread_state_t *state = get_thread_state(ctx, vcl_priv, 0);
+    if ((state->reply != NULL) &&
+        (state->reply->type == REDIS_REPLY_STRING)) {
+        return state->reply->str;
+    } else {
+        return NULL;
+    }
+}
 
 /******************************************************************************
  * redis.get_array_reply_length();
@@ -480,9 +487,7 @@ get_thread_state(
 
     // Drop previously stored Redis command.
     if (flush) {
-        while (result->argc > 0) {
-            free((void *) result->argv[--(result->argc)]);
-        }
+        result->argc = 0;
         if (result->reply != NULL) {
             freeReplyObject(result->reply);
             result->reply = NULL;
@@ -498,10 +503,6 @@ free_thread_state(thread_state_t *state)
 {
     if (state->context != NULL) {
         redisFree(state->context);
-    }
-
-    while (state->argc > 0) {
-        free((void *) state->argv[--(state->argc)]);
     }
 
     if (state->reply != NULL) {
@@ -554,7 +555,7 @@ get_reply(const struct vrt_ctx *ctx, redisReply *reply)
 }
 
 static const char *
-sha1(const char *script)
+sha1(const struct vrt_ctx *ctx, const char *script)
 {
     // Hash.
     unsigned char buffer[20];
@@ -564,7 +565,7 @@ sha1(const char *script)
     SHA1Final(buffer, &ctx);
 
     // Encode.
-    char *result = malloc(40);
+    char *result = WS_Alloc(ctx->wrk->ws, 41);
     AN(result);
     char *ptr = result;
     for (int i = 0; i < 20; i++) {
