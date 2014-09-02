@@ -342,13 +342,13 @@ VMOD_GET_FOO_REPLY(error, ERROR, VCL_STRING, str, NULL)
 VMOD_GET_FOO_REPLY(status, STATUS, VCL_STRING, str, NULL)
 VMOD_GET_FOO_REPLY(integer, INTEGER, VCL_INT, integer, 0)
 
-STRING
+VCL_STRING
 vmod_get_string_reply(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
 {
     thread_state_t *state = get_thread_state(ctx, vcl_priv, 0);
     if ((state->reply != NULL) &&
         (state->reply->type == REDIS_REPLY_STRING)) {
-        return state->reply->str;
+        return WS_Copy(ctx->ws, state->reply->str, -1);
     } else {
         return NULL;
     }
@@ -559,13 +559,13 @@ sha1(const struct vrt_ctx *ctx, const char *script)
 {
     // Hash.
     unsigned char buffer[20];
-    SHA1_CTX ctx;
-    SHA1Init(&ctx);
-    SHA1Update(&ctx, script, strlen(script));
-    SHA1Final(buffer, &ctx);
+    SHA1_CTX sha1_ctx;
+    SHA1Init(&sha1_ctx);
+    SHA1Update(&sha1_ctx, script, strlen(script));
+    SHA1Final(buffer, &sha1_ctx);
 
     // Encode.
-    char *result = WS_Alloc(ctx->wrk->ws, 41);
+    char *result = WS_Alloc(ctx->ws, 41);
     AN(result);
     char *ptr = result;
     for (int i = 0; i < 20; i++) {
