@@ -193,8 +193,8 @@ vmod_push(struct sess *sp, struct vmod_priv *vcl_priv, const char *arg)
             state->argv[state->argc++] = arg;
         } else {
             state->argv[state->argc++] = WS_Dup(sp->ws, "");
+            AN(state->argv[state->argc - 1]);
         }
-        AN(state->argv[state->argc - 1]);
     } else {
         REDIS_LOG(sp, "Failed to push Redis argument");
     }
@@ -503,10 +503,6 @@ free_thread_state(thread_state_t *state)
 {
     if (state->context != NULL) {
         redisFree(state->context);
-    }
-
-    while (state->argc > 0) {
-        free((void *) state->argv[--(state->argc)]);
     }
 
     if (state->reply != NULL) {
