@@ -531,18 +531,18 @@ get_reply(struct sess *sp, redisReply *reply)
         case REDIS_REPLY_ERROR:
         case REDIS_REPLY_STATUS:
         case REDIS_REPLY_STRING:
-            result = WS_Dup(sp->ws, reply->str);
+            result = WS_Dup(sp->wrk->ws, reply->str);
             AN(result);
             break;
 
         case REDIS_REPLY_INTEGER:
             sprintf(buffer, "%lld", reply->integer);
-            result = WS_Dup(sp->ws, buffer);
+            result = WS_Dup(sp->wrk->ws, buffer);
             AN(result);
             break;
 
         case REDIS_REPLY_ARRAY:
-            result = WS_Dup(sp->ws, "array");
+            result = WS_Dup(sp->wrk->ws, "array");
             AN(result);
             break;
 
