@@ -168,7 +168,7 @@ vmod_command(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, VCL_STRING n
         AN(command);
         char *ptr = command;
         while (*ptr) {
-            toupper(*ptr);
+            *ptr = toupper(*ptr);
             ptr++;
         }
 
