@@ -167,7 +167,10 @@ vmod_command(struct sess *sp, struct vmod_priv *vcl_priv, const char *name)
         char *command = WS_Dup(sp->ws, name);
         AN(command);
         char *ptr = command;
-        while (*ptr++ = toupper(*ptr));
+        while (*ptr) {
+            *ptr = toupper(*ptr);
+            ptr++;
+        }
 
         // Initialize.
         state->argc = 1;
