@@ -11,14 +11,19 @@
 
 #include "sha1.h"
 
+#define MAX_SERVERS 32
+
 static unsigned version = 0;
 
 typedef struct vcl_priv {
 #define VCL_PRIV_MAGIC 0x77feec11
     unsigned magic;
-    // Redis.
-    const char *host;
-    unsigned port;
+    // Redis servers.
+    unsigned servers;
+    const char *hosts[MAX_SERVERS];
+    unsigned ports[MAX_SERVERS];
+
+    // Redis context timeout & TTL.
     struct timeval timeout;
     unsigned ttl;
 } vcl_priv_t;
@@ -100,10 +105,38 @@ vmod_init(
     const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv,
     VCL_STRING host, VCL_INT port, VCL_INT timeout, VCL_INT ttl)
 {
-    vcl_priv_t *old = vcl_priv->priv;
-    vcl_priv->priv = new_vcl_priv(host, port, timeout, ttl);
-    if (old != NULL) {
-        free_vcl_priv(old);
+    if ((host != NULL) && (strlen(host) > 0)) {
+        vcl_priv_t *old = vcl_priv->priv;
+        vcl_priv->priv = new_vcl_priv(host, port, timeout, ttl);
+        if (old != NULL) {
+            free_vcl_priv(old);
+        }
+    }
+}
+
+/******************************************************************************
+ * redis.add_server();
+ *****************************************************************************/
+
+void
+vmod_add_server(
+    const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv,
+    VCL_STRING host, VCL_INT port)
+{
+    // Check input.
+    if ((host != NULL) && (strlen(host) > 0)) {
+        // Initializations.
+        vcl_priv_t *config = vcl_priv->priv;
+
+        // Add new server.
+        if (config->servers < MAX_SERVERS) {
+            AZ(pthread_mutex_lock(&mutex));
+            config->hosts[config->servers] = strdup(host);
+            AN(config->hosts[config->servers]);
+            config->ports[config->servers] = port;
+            config->servers++;
+            AZ(pthread_mutex_unlock(&mutex));
+        }
     }
 }
 
@@ -413,9 +446,10 @@ new_vcl_priv(const char *host, unsigned port, unsigned timeout, unsigned ttl)
     ALLOC_OBJ(result, VCL_PRIV_MAGIC);
     AN(result);
 
-    result->host = strdup(host);
-    AN(result->host);
-    result->port = port;
+    result->servers = 1;
+    result->hosts[0] = strdup(host);
+    AN(result->hosts[0]);
+    result->ports[0] = port;
     result->timeout.tv_sec = timeout / 1000;;
     result->timeout.tv_usec = (timeout % 1000) * 1000;
     result->ttl = ttl;
@@ -426,7 +460,10 @@ new_vcl_priv(const char *host, unsigned port, unsigned timeout, unsigned ttl)
 static void
 free_vcl_priv(vcl_priv_t *priv)
 {
-    free((void *) priv->host);
+    while (priv->servers > 0) {
+        priv->servers--;
+        free((void *) priv->hosts[priv->servers]);
+    }
 
     FREE_OBJ(priv);
 }
@@ -468,10 +505,14 @@ get_thread_state(
         }
     }
 
-    // Create Redis context. If any error arises discard the context and
-    // continue.
+    // Create Redis context using a random Redis server. If any error arises
+    // discard the context and continue.
     if (result->context == NULL) {
-        result->context = redisConnectWithTimeout(config->host, config->port, config->timeout);
+        unsigned server = rand() % config->servers;
+        result->context = redisConnectWithTimeout(
+            config->hosts[server],
+            config->ports[server],
+            config->timeout);
         AN(result->context);
         if (result->context->err) {
             REDIS_LOG(ctx,

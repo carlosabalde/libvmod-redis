@@ -6,6 +6,7 @@ $Init init_function
 ###############################################################################
 
 $Function VOID init(PRIV_VCL, STRING, INT, INT, INT)
+$Function VOID add_server(PRIV_VCL, STRING, INT)
 
 ###############################################################################
 ## Simple command execution.

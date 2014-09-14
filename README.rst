@@ -105,6 +105,24 @@ Description
     Must be used during the ``vcl_init`` phase.
     If not called some default values will be used.
 
+add_server
+----------
+
+Prototype
+        ::
+
+                add_server(STRING host, INT port)
+Arguments
+    host: host where the Redis server is running.
+
+    port: port where the Redis server is running.
+Return value
+    VOID
+Description
+    Adds an extra Redis server.
+    When more that one Redis server is available, each Varnish worker thread will establish its internal connection to a randomly selected server.
+    Use this feature when using some kind of proxy assisted partitioning (e.g. https://github.com/twitter/twemproxy) and more than one proxy is available.
+
 SIMPLE COMAND EXECUTION FUNCTIONS
 =================================
 
