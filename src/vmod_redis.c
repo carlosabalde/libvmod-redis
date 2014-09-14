@@ -328,34 +328,34 @@ vmod_get_reply(struct sess *sp, struct vmod_priv *vcl_priv)
  * redis.get_string_reply();
  *****************************************************************************/
 
-#define VMOD_GET_FOO_REPLY(lower, upper, return_type, reply_field, fallback_value) \
-return_type \
+int
+vmod_get_integer_reply(struct sess *sp, struct vmod_priv *vcl_priv)
+{
+    thread_state_t *state = get_thread_state(sp, vcl_priv, 0);
+    if ((state->reply != NULL) &&
+        (state->reply->type == REDIS_REPLY_INTEGER)) {
+        return state->reply->integer;
+    } else {
+        return 0;
+    }
+}
+
+#define VMOD_GET_FOO_REPLY(lower, upper) \
+const char * \
 vmod_get_ ## lower ## _reply(struct sess *sp, struct vmod_priv *vcl_priv) \
 { \
     thread_state_t *state = get_thread_state(sp, vcl_priv, 0); \
     if ((state->reply != NULL) && \
         (state->reply->type == REDIS_REPLY_ ## upper)) { \
-        return state->reply->reply_field; \
+        return WS_Dup(sp->wrk->ws, state->reply->str); \
     } else { \
-        return fallback_value; \
+        return NULL; \
     } \
 }
 
-VMOD_GET_FOO_REPLY(error, ERROR, const char *, str, NULL)
-VMOD_GET_FOO_REPLY(status, STATUS, const char *, str, NULL)
-VMOD_GET_FOO_REPLY(integer, INTEGER, int, integer, 0)
-
-const char *
-vmod_get_string_reply(struct sess *sp, struct vmod_priv *vcl_priv)
-{
-    thread_state_t *state = get_thread_state(sp, vcl_priv, 0);
-    if ((state->reply != NULL) &&
-        (state->reply->type == REDIS_REPLY_STRING)) {
-        return WS_Dup(sp->wrk->ws, state->reply->str);
-    } else {
-        return NULL;
-    }
-}
+VMOD_GET_FOO_REPLY(error, ERROR)
+VMOD_GET_FOO_REPLY(status, STATUS)
+VMOD_GET_FOO_REPLY(string, STRING)
 
 /******************************************************************************
  * redis.get_array_reply_length();
@@ -550,7 +550,7 @@ get_reply(struct sess *sp, redisReply *reply)
             break;
 
         default:
-            return NULL;
+            result = NULL;
     }
 
     // Done!
