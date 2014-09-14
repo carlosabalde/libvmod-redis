@@ -328,34 +328,34 @@ vmod_get_reply(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
  * redis.get_string_reply();
  *****************************************************************************/
 
-#define VMOD_GET_FOO_REPLY(lower, upper, return_type, reply_field, fallback_value) \
-return_type \
+VCL_INT
+vmod_get_integer_reply(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
+{
+    thread_state_t *state = get_thread_state(ctx, vcl_priv, 0);
+    if ((state->reply != NULL) &&
+        (state->reply->type == REDIS_REPLY_INTEGER)) {
+        return state->reply->integer;
+    } else {
+        return 0;
+    }
+}
+
+#define VMOD_GET_FOO_REPLY(lower, upper) \
+VCL_STRING \
 vmod_get_ ## lower ## _reply(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv) \
 { \
     thread_state_t *state = get_thread_state(ctx, vcl_priv, 0); \
     if ((state->reply != NULL) && \
         (state->reply->type == REDIS_REPLY_ ## upper)) { \
-        return state->reply->reply_field; \
+        return WS_Copy(ctx->ws, state->reply->str, -1); \
     } else { \
-        return fallback_value; \
+        return NULL; \
     } \
 }
 
-VMOD_GET_FOO_REPLY(error, ERROR, VCL_STRING, str, NULL)
-VMOD_GET_FOO_REPLY(status, STATUS, VCL_STRING, str, NULL)
-VMOD_GET_FOO_REPLY(integer, INTEGER, VCL_INT, integer, 0)
-
-VCL_STRING
-vmod_get_string_reply(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
-{
-    thread_state_t *state = get_thread_state(ctx, vcl_priv, 0);
-    if ((state->reply != NULL) &&
-        (state->reply->type == REDIS_REPLY_STRING)) {
-        return WS_Copy(ctx->ws, state->reply->str, -1);
-    } else {
-        return NULL;
-    }
-}
+VMOD_GET_FOO_REPLY(error, ERROR)
+VMOD_GET_FOO_REPLY(status, STATUS)
+VMOD_GET_FOO_REPLY(string, STRING)
 
 /******************************************************************************
  * redis.get_array_reply_length();
@@ -550,7 +550,7 @@ get_reply(const struct vrt_ctx *ctx, redisReply *reply)
             break;
 
         default:
-            return NULL;
+            result = NULL;
     }
 
     // Done!
