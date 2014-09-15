@@ -16,6 +16,49 @@ SYNOPSIS
 
 import redis;
 
+::
+
+    # Configuration.
+    Function VOID init(TAG, HOST, PORT, TIMEOUT, TTL)
+    Function VOID add_server(TAG, HOST, PORT, TIMEOUT, TTL)
+    Function VOID set_max_connections(LIMIT)
+
+    # Simple command execution.
+    Function VOID call(COMMAND + ARGUMENTS)
+
+    # Advanced command execution.
+    Function VOID command(COMMAND)
+    Function VOID server(TAG)
+    Function VOID push(ARGUMENT)
+    Function VOID execute()
+
+    # Access to replies.
+    Function BOOL reply_is_error()
+    Function BOOL reply_is_nil()
+    Function BOOL reply_is_status()
+    Function BOOL reply_is_integer()
+    Function BOOL reply_is_string()
+    Function BOOL reply_is_array()
+
+    Function STRING get_reply()
+
+    Function STRING get_error_reply()
+    Function STRING get_status_reply()
+    Function INT get_integer_reply()
+    Function STRING get_string_reply()
+
+    Function INT get_array_reply_length()
+    Function BOOL array_reply_is_error(INDEX)
+    Function BOOL array_reply_is_nil(INDEX)
+    Function BOOL array_reply_is_status(INDEX)
+    Function BOOL array_reply_is_integer(INDEX)
+    Function BOOL array_reply_is_string(INDEX)
+    Function BOOL array_reply_is_array(INDEX)
+    Function STRING get_array_reply_value(INDEX)
+
+    # Other.
+    Function VOID free()
+
 DESCRIPTION
 ===========
 
