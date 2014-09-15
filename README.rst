@@ -23,21 +23,26 @@ VMOD using the synchronous hiredis library API (https://github.com/redis/hiredis
 
 Highlights:
 
-* **All Redis commands are supported**. Two VMOD APIs are provided: ``redis.call()`` for simple commands, and ``redis.command()`` + ``redis.push()`` + ``redis.execute()`` for advanced execution.
+* **All Redis commands are supported**. Two VMOD APIs are provided: ``redis.call()`` for simple commands, and ``redis.command()`` + ``redis.server()`` + ``redis.push()`` + ``redis.execute()`` for advanced execution.
 * **Full support for execution of LUA scripts** (i.e. ``EVAL`` command), including optimistic automatic execution of ``EVALSHA`` commands.
 * **All Redis reply data types are supported**, including partial support to access to components of simple (i.e. not nested) array replies.
 * **Redis pipelines are not (and won't be) supported**. LUA scripting, which is fully supported by the VMOD, it's a much more flexible alternative to pipelines for atomic execution and minimizing latency. Pipelines are hard to use and error prone, specially when using the ``WATCH`` command.
+* **Support for multiple Redis servers and multiple Redis connections per worker thread**.
 
 Looking for official support for this VMOD? Please, contact Allenta Consulting (http://www.allenta.com), the Varnish Software integration partner for Spain and Portugal (https://www.varnish-software.com/partner/allenta-consulting).
 
 EXAMPLES
 ========
 
+Single server
+-------------
+
 ::
 
     sub vcl_init {
-        # VMOD configuration.
-        redis.init("127.0.0.1", 6379, 500, 0);
+        # VMOD configuration: simple case, keeping up to one Redis connection
+        # per Varnish worker thread.
+        redis.init("main", "192.168.1.100", 6379, 500, 0);
     }
 
     sub vcl_deliver {
@@ -80,6 +85,38 @@ EXAMPLES
         }
     }
 
+Multiple servers
+----------------
+
+::
+
+    sub vcl_init {
+        # VMOD configuration: master-slave replication, keeping up to two
+        # Redis connections per Varnish worker thread (up to one to the master
+        # server & up to one to a randomly selected slave server).
+        redis.init("master", "192.168.1.100", 6379, 500, 0);
+        redis.add_server("slave", "192.168.1.101", 6379, 500, 0);
+        redis.add_server("slave", "192.168.1.102", 6379, 500, 0);
+        redis.add_server("slave", "192.168.1.103", 6379, 500, 0);
+        redis.set_max_connections(2);
+    }
+
+    sub vcl_deliver {
+        # SET submitted to the master server.
+        redis.command("SET");
+        redis.server("master");
+        redis.push("foo");
+        redis.push("Hello world!");
+        redis.execute();
+
+        # GET submitted to one of the slave servers.
+        redis.command("GET");
+        redis.server("slave");
+        redis.push("foo");
+        redis.execute();
+        set req.http.X-Foo = redis.get_string_reply();
+    }
+
 CONFIGURATION FUNCTIONS
 =======================
 
@@ -89,8 +126,10 @@ init
 Prototype
         ::
 
-                init(STRING host, INT port, INT timeout, INT ttl)
+                init(STRING tag, STRING host, INT port, INT timeout, INT ttl)
 Arguments
+    tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.).
+
     host: host where the Redis server is running.
 
     port: port where the Redis server is running.
@@ -111,17 +150,43 @@ add_server
 Prototype
         ::
 
-                add_server(STRING host, INT port)
+                add_server(STRING tag, STRING host, INT port, INT timeout, INT ttl)
 Arguments
+    tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.).
+
     host: host where the Redis server is running.
 
     port: port where the Redis server is running.
-Return value
+
+    timeout: connection timeout (milliseconds) to the Redis server.
+
+    ttl: TTL (seconds) of Redis connections (0 means no TTL). Once the TTL of a connection is consumed, the module transparently reestablishes it. See "Client timeouts" in http://redis.io/topics/clients for extra information.Return value
     VOID
 Description
     Adds an extra Redis server.
-    When more that one Redis server is available, each Varnish worker thread will establish its internal connection to a randomly selected server.
-    Use this feature when using some kind of proxy assisted partitioning (e.g. https://github.com/twitter/twemproxy) and more than one proxy is available.
+    Must be used during the ``vcl_init`` phase.
+
+    Use this feature (1) when using master-slave replication; or (2) when using multiple independent servers; or (3) when using some kind of proxy assisted partitioning (e.g. https://github.com/twitter/twemproxy) and more than one proxy is available.
+
+    When a command is submitted using ``redis.execute()`` and more that one Redis server is available, the destination server is selected according with the tag specified with `redis.server()`. If not specified, a randomly selected connection will be used (if the worker thread already has any Redis connection established), or a new connection to a randomly selected server will be established.
+
+set_max_connections
+-------------------
+
+Prototype
+        ::
+
+                set_max_connections(INT limit)
+Arguments
+    limit: maximum number of established Redis connections per Varnish worker thread.
+Return value
+    VOID
+Description
+    Sets the maximum number of Redis connections per Varnish worker thread.
+    Must be used during the ``vcl_init`` phase.
+    If not called it defaults to 1.
+
+    This option is only relevant when the VMOD is configured with multiple servers and more than one tag is available (see ``redis.add_server()``). Each Varnish worker thread keeps up to one connection per tag. If more than one tag is available, incrementing this limit allows recycling of Redis connections. Otherwise, sending a command to a server may require closing a previously established connection with a server tagged in a different category.
 
 SIMPLE COMAND EXECUTION FUNCTIONS
 =================================
@@ -139,9 +204,11 @@ Return value
     VOID
 Description
     Executes a simple Redis command.
+
     Reply can be fetched with ``redis.reply_is_.*()`` and ``redis.get_.*()`` functions.
     This function implements an ugly hack based on the VMOD STRING_LIST data type in order to support ``%s`` placeholders.
-    Please, use ``redis.command()`` + ``redis.push()`` + ``redis.execute()`` for extra flexibility and optimistic execution of ``EVALSHA`` commands.
+
+    Please, use ``redis.command()`` + ``redis.server()`` + ``redis.push()`` + ``redis.execute()`` for (1) extra flexibility; (2) optimistic execution of ``EVALSHA`` commands; and (3) support for sever tag selection.
 
 ADVANCED COMAND EXECUTION FUNCTIONS
 ===================================
@@ -160,8 +227,24 @@ Return value
 Description
     Enqueues a Redis command (only the name of the command) for further execution.
     Arguments should be enqueued separately calling one or more times to the ``redis.push()`` function.
+
     On execution time, ``EVAL`` commands are internally replace by ``EVALSHA`` commands, which fallback to the original ``EVAL`` command if the Redis server returns a NOSCRIPT error (see http://redis.io/commands/eval).
 
+server
+------
+
+Prototype
+        ::
+
+                server(STRING tag)
+Arguments
+    tag: tag of the Redis server a previously enqueued Redis command will be delivered to (e.g. ``main``, ``master``, ``slave``, etc.).
+Return value
+    VOID
+Description
+    Selects the type of Redis server a previously enqueued Redis command will be delivered to.
+
+    If not specified, a randomly selected connection / server will be used (see ``redis.add_server()`` for extra information).
 
 push
 ----

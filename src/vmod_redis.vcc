@@ -5,8 +5,9 @@ $Init init_function
 ## Configuration.
 ###############################################################################
 
-$Function VOID init(PRIV_VCL, STRING, INT, INT, INT)
-$Function VOID add_server(PRIV_VCL, STRING, INT)
+$Function VOID init(PRIV_VCL, STRING, STRING, INT, INT, INT)
+$Function VOID add_server(PRIV_VCL, STRING, STRING, INT, INT, INT)
+$Function VOID set_max_connections(PRIV_VCL, INT)
 
 ###############################################################################
 ## Simple command execution.
@@ -18,33 +19,34 @@ $Function VOID call(PRIV_VCL, STRING_LIST)
 ## Advanced command execution.
 ###############################################################################
 
-$Function VOID command(PRIV_VCL, STRING)
-$Function VOID push(PRIV_VCL, STRING)
+$Function VOID command(STRING)
+$Function VOID server(STRING)
+$Function VOID push(STRING)
 $Function VOID execute(PRIV_VCL)
 
 ###############################################################################
 ## Access to replies.
 ###############################################################################
 
-$Function BOOL reply_is_error(PRIV_VCL)
-$Function BOOL reply_is_nil(PRIV_VCL)
-$Function BOOL reply_is_status(PRIV_VCL)
-$Function BOOL reply_is_integer(PRIV_VCL)
-$Function BOOL reply_is_string(PRIV_VCL)
-$Function BOOL reply_is_array(PRIV_VCL)
+$Function BOOL reply_is_error()
+$Function BOOL reply_is_nil()
+$Function BOOL reply_is_status()
+$Function BOOL reply_is_integer()
+$Function BOOL reply_is_string()
+$Function BOOL reply_is_array()
 
-$Function STRING get_reply(PRIV_VCL)
+$Function STRING get_reply()
 
-$Function STRING get_error_reply(PRIV_VCL)
-$Function STRING get_status_reply(PRIV_VCL)
-$Function INT get_integer_reply(PRIV_VCL)
-$Function STRING get_string_reply(PRIV_VCL)
+$Function STRING get_error_reply()
+$Function STRING get_status_reply()
+$Function INT get_integer_reply()
+$Function STRING get_string_reply()
 
-$Function INT get_array_reply_length(PRIV_VCL)
-$Function STRING get_array_reply_value(PRIV_VCL, INT)
+$Function INT get_array_reply_length()
+$Function STRING get_array_reply_value(INT)
 
 ###############################################################################
 ## Other.
 ###############################################################################
 
-$Function VOID free(PRIV_VCL)
+$Function VOID free()
