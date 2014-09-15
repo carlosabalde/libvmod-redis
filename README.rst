@@ -420,6 +420,78 @@ Return value
 Description
     If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns the number of elements in that reply.
 
+array_reply_is_error
+--------------------
+
+Prototype
+        ::
+
+                array_reply_is_error(INT index)
+Return value
+    BOOL
+Description
+    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns TRUE if the nth element in that reply is an error reply (nested arrays are not supported).
+
+array_reply_is_nil
+------------------
+
+Prototype
+        ::
+
+                array_reply_is_nil(INT index)
+Return value
+    BOOL
+Description
+    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns TRUE if the nth element in that reply is a nil reply (nested arrays are not supported).
+
+array_reply_is_status
+---------------------
+
+Prototype
+        ::
+
+                array_reply_is_status(INT index)
+Return value
+    BOOL
+Description
+    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns TRUE if the nth element in that reply is a status reply (nested arrays are not supported).
+
+array_reply_is_integer
+----------------------
+
+Prototype
+        ::
+
+                array_reply_is_integer(INT index)
+Return value
+    BOOL
+Description
+    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns TRUE if the nth element in that reply is an integer reply (nested arrays are not supported).
+
+array_reply_is_string
+---------------------
+
+Prototype
+        ::
+
+                array_reply_is_string(INT index)
+Return value
+    BOOL
+Description
+    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns TRUE if the nth element in that reply is a string reply (nested arrays are not supported).
+
+array_reply_is_array
+--------------------
+
+Prototype
+        ::
+
+                array_reply_is_array(INT index)
+Return value
+    BOOL
+Description
+    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns TRUE if the nth element in that reply is an array reply (nested arrays are not supported).
+
 get_array_reply_value
 ---------------------
 

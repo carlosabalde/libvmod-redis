@@ -512,6 +512,34 @@ vmod_get_array_reply_length(const struct vrt_ctx *ctx)
 }
 
 /******************************************************************************
+ * redis.array_reply_is_error();
+ * redis.array_reply_is_nil();
+ * redis.array_reply_is_status();
+ * redis.array_reply_is_integer();
+ * redis.array_reply_is_string();
+ * redis.array_reply_is_array();
+ *****************************************************************************/
+
+#define VMOD_ARRAY_REPLY_IS_FOO(lower, upper) \
+VCL_BOOL \
+vmod_array_reply_is_ ## lower(const struct vrt_ctx *ctx, VCL_INT index) \
+{ \
+    thread_state_t *state = get_thread_state(sp, 0); \
+    return \
+        (state->reply != NULL) && \
+        (state->reply->type == REDIS_REPLY_ARRAY) && \
+        (index < state->reply->elements) && \
+        (state->reply->element[index]->type == REDIS_REPLY_ ## upper); \
+}
+
+VMOD_ARRAY_REPLY_IS_FOO(error, ERROR)
+VMOD_ARRAY_REPLY_IS_FOO(nil, NIL)
+VMOD_ARRAY_REPLY_IS_FOO(status, STATUS)
+VMOD_ARRAY_REPLY_IS_FOO(integer, INTEGER)
+VMOD_ARRAY_REPLY_IS_FOO(string, STRING)
+VMOD_ARRAY_REPLY_IS_FOO(array, ARRAY)
+
+/******************************************************************************
  * redis.get_array_reply_value();
  *****************************************************************************/
 
