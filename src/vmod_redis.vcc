@@ -43,6 +43,12 @@ Function INT get_integer_reply()
 Function STRING get_string_reply()
 
 Function INT get_array_reply_length()
+Function BOOL array_reply_is_error(INT)
+Function BOOL array_reply_is_nil(INT)
+Function BOOL array_reply_is_status(INT)
+Function BOOL array_reply_is_integer(INT)
+Function BOOL array_reply_is_string(INT)
+Function BOOL array_reply_is_array(INT)
 Function STRING get_array_reply_value(INT)
 
 ###############################################################################
