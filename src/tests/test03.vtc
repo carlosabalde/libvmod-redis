@@ -1,0 +1,69 @@
+varnishtest "Tests multiples servers"
+
+server s1 {
+   rxreq
+   txresp
+} -repeat 1 -start
+
+varnish v1 -vcl+backend {
+    import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
+
+    sub vcl_init {
+        redis.init("s1", "127.0.0.1", ${redis1_port}, 500, 0);
+        redis.add_server("s2", "127.0.0.1", ${redis2_port}, 500, 0);
+        redis.set_max_connections(2);
+    }
+
+    sub vcl_deliver {
+        # SET (s1) -> GET (s1) -> GET (s2).
+        redis.command("SET");
+        redis.server("s1");
+        redis.push("foo");
+        redis.push("Hello world!");
+        redis.execute();
+
+        redis.command("GET");
+        redis.server("s1");
+        redis.push("foo");
+        redis.execute();
+        set resp.http.Reply-1 = redis.get_reply();
+
+        redis.command("GET");
+        redis.server("s2");
+        redis.push("foo");
+        redis.execute();
+        set resp.http.Reply-2 = redis.get_reply();
+
+        # SET (s2) -> GET (s2) -> GET (s1).
+        redis.command("SET");
+        redis.server("s2");
+        redis.push("bar");
+        redis.push("Hello world!");
+        redis.execute();
+
+        redis.command("GET");
+        redis.server("s2");
+        redis.push("bar");
+        redis.execute();
+        set resp.http.Reply-3 = redis.get_reply();
+
+        redis.command("GET");
+        redis.server("s1");
+        redis.push("bar");
+        redis.execute();
+        set resp.http.Reply-4 = redis.get_reply();
+    }
+} -start
+
+client c1 {
+    txreq
+    rxresp
+
+    expect resp.http.Reply-1 == "Hello world!"
+    expect resp.http.Reply-2 == ""
+
+    expect resp.http.Reply-3 == "Hello world!"
+    expect resp.http.Reply-4 == ""
+} -run
+
+varnish v1 -expect client_req == 1
