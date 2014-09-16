@@ -2,6 +2,7 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <pthread.h>
 #include <hiredis/hiredis.h>
 
@@ -12,20 +13,30 @@
 #include "sha1.h"
 
 #define DEFAULT_TAG "main"
-#define DEFAULT_HOST "127.0.0.1"
-#define DEFAULT_PORT 6379
+#define DEFAULT_SERVER "127.0.0.1:6379"
 #define DEFAULT_TIMEOUT 500
 #define DEFAULT_TTL 0
 
 static unsigned version = 0;
 
+enum REDIS_SERVER_TYPE {
+    REDIS_SERVER_HOST_TYPE,
+    REDIS_SERVER_SOCKET_TYPE
+};
+
 typedef struct redis_server {
     // Tag (i.e. 'main', 'master', 'slave', etc.).
     const char *tag;
 
-    // Host & port.
-    const char *host;
-    unsigned port;
+    // Type & location.
+    enum REDIS_SERVER_TYPE type;
+    union {
+        struct address {
+            const char *host;
+            unsigned port;
+        } address;
+        const char *path;
+    } location;
 
     // Context timeout & TTL.
     struct timeval timeout;
@@ -93,7 +104,7 @@ static redisContext *get_context(const struct vrt_ctx *ctx, struct vmod_priv *vc
 
 static const char *get_reply(const struct vrt_ctx *ctx, redisReply *reply);
 
-static void set_redis_server(redis_server_t *server, const char *tag, const char *host, int port, int timeout, int ttl);
+static void set_redis_server(redis_server_t *server, const char *tag, const char *location, int timeout, int ttl);
 static void free_redis_server(redis_server_t *server);
 
 static void free_redis_context(redis_context_t *context);
@@ -122,8 +133,7 @@ init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
     // not required* to be thread safe.
     if (vcl_priv->priv == NULL) {
         vcl_priv->priv = new_vcl_priv(
-            DEFAULT_TAG,
-            DEFAULT_HOST, DEFAULT_PORT, DEFAULT_TIMEOUT, DEFAULT_TTL);
+            DEFAULT_TAG, DEFAULT_SERVER, DEFAULT_TIMEOUT, DEFAULT_TTL);
         vcl_priv->free = (vmod_priv_free_f *)free_vcl_priv;
     }
 
@@ -138,14 +148,14 @@ init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
 void
 vmod_init(
     const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv,
-    VCL_STRING tag, VCL_STRING host, VCL_INT port, VCL_INT timeout, VCL_INT ttl)
+    VCL_STRING tag, VCL_STRING location, VCL_INT timeout, VCL_INT ttl)
 {
     // Check input.
     if ((tag != NULL) && (strlen(tag) > 0) &&
-        (host != NULL) && (strlen(host) > 0)) {
+        (location != NULL) && (strlen(location) > 0)) {
         // Set new configuration.
         vcl_priv_t *old = vcl_priv->priv;
-        vcl_priv->priv = new_vcl_priv(tag, host, port, timeout, ttl);
+        vcl_priv->priv = new_vcl_priv(tag, location, timeout, ttl);
 
         // Release previous configuration.
         if (old != NULL) {
@@ -161,11 +171,11 @@ vmod_init(
 void
 vmod_add_server(
     const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv,
-    VCL_STRING tag, VCL_STRING host, VCL_INT port, VCL_INT timeout, VCL_INT ttl)
+    VCL_STRING tag, VCL_STRING location, VCL_INT timeout, VCL_INT ttl)
 {
     // Check input.
     if ((tag != NULL) && (strlen(tag) > 0) &&
-        (host != NULL) && (strlen(host) > 0)) {
+        (location != NULL) && (strlen(location) > 0)) {
         // Initializations.
         vcl_priv_t *config = vcl_priv->priv;
 
@@ -174,7 +184,7 @@ vmod_add_server(
             AZ(pthread_mutex_lock(&mutex));
             set_redis_server(
                 &(config->servers[config->nservers]),
-                tag, host, port, timeout, ttl);
+                tag, location, timeout, ttl);
             config->nservers++;
             AZ(pthread_mutex_unlock(&mutex));
         } else {
@@ -567,17 +577,13 @@ vmod_free(const struct vrt_ctx *ctx)
  *****************************************************************************/
 
 static vcl_priv_t *
-new_vcl_priv(
-    const char *tag,
-    const char *host, unsigned port, unsigned timeout, unsigned ttl)
+new_vcl_priv(const char *tag, const char *location, unsigned timeout, unsigned ttl)
 {
     vcl_priv_t *result;
     ALLOC_OBJ(result, VCL_PRIV_MAGIC);
     AN(result);
 
-    set_redis_server(
-        &(result->servers[0]),
-        tag, host, port, timeout, ttl);
+    set_redis_server(&(result->servers[0]), tag, location, timeout, ttl);
 
     result->nservers = 1;
 
@@ -732,10 +738,23 @@ get_context(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, thread_state_
 
             // Create new context using the previously selected server. If any
             // error arises discard the context and continue.
-            context->context = redisConnectWithTimeout(
-                server->host,
-                server->port,
-                server->timeout);
+            switch (server->type) {
+                case REDIS_SERVER_HOST_TYPE:
+                    context->context = redisConnectWithTimeout(
+                        server->location.address.host,
+                        server->location.address.port,
+                        server->timeout);
+                    break;
+
+                case REDIS_SERVER_SOCKET_TYPE:
+                    context->context = redisConnectUnixWithTimeout(
+                        server->location.path,
+                        server->timeout);
+                    break;
+
+                default:
+                    context->context = NULL;
+            }
             AN(context->context);
             if (context->context->err) {
                 REDIS_LOG(ctx,
@@ -801,13 +820,24 @@ get_reply(const struct vrt_ctx *ctx, redisReply *reply)
 static void
 set_redis_server(
     redis_server_t *server,
-    const char *tag, const char *host, int port, int timeout, int ttl)
+    const char *tag, const char *location, int timeout, int ttl)
 {
+    // Parse connection string.
+    char *ptr = strrchr(location, ':');
+    if (ptr != NULL) {
+        server->type = REDIS_SERVER_HOST_TYPE;
+        server->location.address.host = strndup(location, ptr - location);
+        AN(server->location.address.host);
+        server->location.address.port = atoi(ptr + 1);
+    } else {
+        server->type = REDIS_SERVER_SOCKET_TYPE;
+        server->location.path = strdup(location);
+        AN(server->location.path);
+    }
+
+    // Complete server definition.
     server->tag = strdup(tag);
     AN(server->tag);
-    server->host = strdup(host);
-    AN(server->host);
-    server->port = port;
     server->timeout.tv_sec = timeout / 1000;
     server->timeout.tv_usec = (timeout % 1000) * 1000;
     server->ttl = ttl;
@@ -818,8 +848,17 @@ free_redis_server(redis_server_t *server)
 {
     free((void *) server->tag);
     server->tag = NULL;
-    free((void *) server->host);
-    server->host = NULL;
+    switch (server->type) {
+        case REDIS_SERVER_HOST_TYPE:
+            free((void *) server->location.address.host);
+            server->location.address.host = NULL;
+            break;
+
+        case REDIS_SERVER_SOCKET_TYPE:
+            free((void *) server->location.path);
+            server->location.path = NULL;
+            break;
+    }
 }
 
 static void

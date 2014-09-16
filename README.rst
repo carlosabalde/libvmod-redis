@@ -19,8 +19,8 @@ import redis;
 ::
 
     # Configuration.
-    Function VOID init(TAG, HOST, PORT, TIMEOUT, TTL)
-    Function VOID add_server(TAG, HOST, PORT, TIMEOUT, TTL)
+    Function VOID init(TAG, LOCATION, TIMEOUT, TTL)
+    Function VOID add_server(TAG, LOCATION, TIMEOUT, TTL)
     Function VOID set_max_connections(LIMIT)
 
     # Simple command execution.
@@ -85,7 +85,7 @@ Single server
     sub vcl_init {
         # VMOD configuration: simple case, keeping up to one Redis connection
         # per Varnish worker thread.
-        redis.init("main", "192.168.1.100", 6379, 500, 0);
+        redis.init("main", "192.168.1.100:6379", 500, 0);
     }
 
     sub vcl_deliver {
@@ -137,10 +137,10 @@ Multiple servers
         # VMOD configuration: master-slave replication, keeping up to two
         # Redis connections per Varnish worker thread (up to one to the master
         # server & up to one to a randomly selected slave server).
-        redis.init("master", "192.168.1.100", 6379, 500, 0);
-        redis.add_server("slave", "192.168.1.101", 6379, 500, 0);
-        redis.add_server("slave", "192.168.1.102", 6379, 500, 0);
-        redis.add_server("slave", "192.168.1.103", 6379, 500, 0);
+        redis.init("master", "192.168.1.100:6379", 500, 0);
+        redis.add_server("slave", "192.168.1.101:6379", 500, 0);
+        redis.add_server("slave", "192.168.1.102:6379", 500, 0);
+        redis.add_server("slave", "192.168.1.103:6379", 500, 0);
         redis.set_max_connections(2);
     }
 
@@ -169,13 +169,11 @@ init
 Prototype
         ::
 
-                init(STRING tag, STRING host, INT port, INT timeout, INT ttl)
+                init(STRING tag, STRING location, INT timeout, INT ttl)
 Arguments
     tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.).
 
-    host: host where the Redis server is running.
-
-    port: port where the Redis server is running.
+    location: Redis connection string. Both host + port and UNIX sockets are supported.
 
     timeout: connection timeout (milliseconds) to the Redis server.
 
@@ -193,13 +191,11 @@ add_server
 Prototype
         ::
 
-                add_server(STRING tag, STRING host, INT port, INT timeout, INT ttl)
+                add_server(STRING tag, STRING location, INT timeout, INT ttl)
 Arguments
     tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.).
 
-    host: host where the Redis server is running.
-
-    port: port where the Redis server is running.
+    location: Redis connection string. Both host + port and UNIX sockets are supported.
 
     timeout: connection timeout (milliseconds) to the Redis server.
 
