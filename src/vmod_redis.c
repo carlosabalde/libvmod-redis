@@ -93,6 +93,11 @@ static redisContext *get_context(const struct vrt_ctx *ctx, struct vmod_priv *vc
 
 static const char *get_reply(const struct vrt_ctx *ctx, redisReply *reply);
 
+static void set_redis_server(redis_server_t *server, const char *tag, const char *host, int port, int timeout, int ttl);
+static void free_redis_server(redis_server_t *server);
+
+static void free_redis_context(redis_context_t *context);
+
 static const char *sha1(const struct vrt_ctx *ctx, const char *script);
 
 /******************************************************************************
@@ -167,19 +172,10 @@ vmod_add_server(
         // Update configuration.
         if (config->nservers < MAX_REDIS_SERVERS) {
             AZ(pthread_mutex_lock(&mutex));
-
-            redis_server_t *server = &(config->servers[config->nservers]);
-            server->tag = strdup(tag);
-            AN(server->tag);
-            server->host = strdup(host);
-            AN(server->host);
-            server->port = port;
-            server->timeout.tv_sec = timeout / 1000;
-            server->timeout.tv_usec = (timeout % 1000) * 1000;
-            server->ttl = ttl;
-
+            set_redis_server(
+                &(config->servers[config->nservers]),
+                tag, host, port, timeout, ttl);
             config->nservers++;
-
             AZ(pthread_mutex_unlock(&mutex));
         } else {
             REDIS_LOG(ctx,
@@ -579,15 +575,9 @@ new_vcl_priv(
     ALLOC_OBJ(result, VCL_PRIV_MAGIC);
     AN(result);
 
-    redis_server_t *server = &(result->servers[0]);
-    server->tag = strdup(tag);
-    AN(server->tag);
-    server->host = strdup(host);
-    AN(server->host);
-    server->port = port;
-    server->timeout.tv_sec = timeout / 1000;
-    server->timeout.tv_usec = (timeout % 1000) * 1000;
-    server->ttl = ttl;
+    set_redis_server(
+        &(result->servers[0]),
+        tag, host, port, timeout, ttl);
 
     result->nservers = 1;
 
@@ -601,8 +591,7 @@ free_vcl_priv(vcl_priv_t *priv)
 {
     while (priv->nservers > 0) {
         priv->nservers--;
-        free((void *) priv->servers[priv->nservers].tag);
-        free((void *) priv->servers[priv->nservers].host);
+        free_redis_server(&(priv->servers[priv->nservers]));
     }
 
     FREE_OBJ(priv);
@@ -703,11 +692,7 @@ get_context(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, thread_state_
          (context->version != version) ||
          (context->server->ttl > 0) && (now - context->tst > context->server->ttl))) {
         // Release context.
-        context->server = NULL;
-        redisFree(context->context);
-        context->context = NULL;
-        context->version = 0;
-        context->tst = 0;
+        free_redis_context(context);
 
         // A new context needs to be created.
         context = NULL;
@@ -742,11 +727,7 @@ get_context(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, thread_state_
             // context and release it.
             if (context == NULL) {
                 context = &(state->contexts[rand() % config->max_contexts]);
-                context->server = NULL;
-                redisFree(context->context);
-                context->context = NULL;
-                context->version = 0;
-                context->tst = 0;
+                free_redis_context(context);
             }
 
             // Create new context using the previously selected server. If any
@@ -761,7 +742,7 @@ get_context(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, thread_state_
                     "Failed to establish Redis connection (%d): %s",
                     context->context->err,
                     context->context->errstr);
-                redisFree(context->context);
+                free_redis_context(context);
                 context->context = NULL;
             } else {
                 context->server = server;
@@ -815,6 +796,42 @@ get_reply(const struct vrt_ctx *ctx, redisReply *reply)
 
     // Done!
     return result;
+}
+
+static void
+set_redis_server(
+    redis_server_t *server,
+    const char *tag, const char *host, int port, int timeout, int ttl)
+{
+    server->tag = strdup(tag);
+    AN(server->tag);
+    server->host = strdup(host);
+    AN(server->host);
+    server->port = port;
+    server->timeout.tv_sec = timeout / 1000;
+    server->timeout.tv_usec = (timeout % 1000) * 1000;
+    server->ttl = ttl;
+}
+
+static void
+free_redis_server(redis_server_t *server)
+{
+    free((void *) server->tag);
+    server->tag = NULL;
+    free((void *) server->host);
+    server->host = NULL;
+}
+
+static void
+free_redis_context(redis_context_t *context)
+{
+    context->server = NULL;
+    if (context->context != NULL) {
+        redisFree(context->context);
+        context->context = NULL;
+    }
+    context->version = 0;
+    context->tst = 0;
 }
 
 static const char *
