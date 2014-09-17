@@ -312,7 +312,8 @@ vmod_server(const struct vrt_ctx *ctx, const char *tag)
         // Do not continue if the initial call to redis.command() was not
         // executed.
         if (state->argc >= 1) {
-            state->tag = tag;
+            state->tag = WS_Copy(ctx->ws, tag, -1);
+            AN(state->tag);
         }
     }
 }
@@ -332,11 +333,11 @@ vmod_push(const struct vrt_ctx *ctx, VCL_STRING arg)
     if ((state->argc >= 1) && (state->argc < MAX_REDIS_COMMAND_ARGS)) {
         // Handle NULL arguments as empty strings.
         if (arg != NULL) {
-            state->argv[state->argc++] = arg;
+            state->argv[state->argc++] = WS_Copy(ctx->ws, arg, -1);;
         } else {
             state->argv[state->argc++] = WS_Copy(ctx->ws, "", -1);
-            AN(state->argv[state->argc - 1]);
         }
+        AN(state->argv[state->argc - 1]);
     } else {
         REDIS_LOG(ctx,
             "Failed to push Redis argument (limit is %d)",
