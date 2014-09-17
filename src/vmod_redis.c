@@ -314,6 +314,7 @@ vmod_server(struct sess *sp, const char *tag)
         // executed.
         if (state->argc >= 1) {
             state->tag = WS_Dup(sp->ws, tag);
+            AN(state->tag);
         }
     }
 }
@@ -336,8 +337,8 @@ vmod_push(struct sess *sp, const char *arg)
             state->argv[state->argc++] = WS_Dup(sp->ws, arg);
         } else {
             state->argv[state->argc++] = WS_Dup(sp->ws, "");
-            AN(state->argv[state->argc - 1]);
         }
+        AN(state->argv[state->argc - 1]);
     } else {
         REDIS_LOG(sp,
             "Failed to push Redis argument (limit is %d)",
