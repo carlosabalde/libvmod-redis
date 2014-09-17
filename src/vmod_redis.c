@@ -313,7 +313,7 @@ vmod_server(struct sess *sp, const char *tag)
         // Do not continue if the initial call to redis.command() was not
         // executed.
         if (state->argc >= 1) {
-            state->tag = tag;
+            state->tag = WS_Dup(sp->ws, tag);
         }
     }
 }
@@ -333,7 +333,7 @@ vmod_push(struct sess *sp, const char *arg)
     if ((state->argc >= 1) && (state->argc < MAX_REDIS_COMMAND_ARGS)) {
         // Handle NULL arguments as empty strings.
         if (arg != NULL) {
-            state->argv[state->argc++] = arg;
+            state->argv[state->argc++] = WS_Dup(sp->ws, arg);
         } else {
             state->argv[state->argc++] = WS_Dup(sp->ws, "");
             AN(state->argv[state->argc - 1]);
