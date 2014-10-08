@@ -531,7 +531,7 @@ vmod_get_array_reply_length(const struct vrt_ctx *ctx)
 VCL_BOOL \
 vmod_array_reply_is_ ## lower(const struct vrt_ctx *ctx, VCL_INT index) \
 { \
-    thread_state_t *state = get_thread_state(sp, 0); \
+    thread_state_t *state = get_thread_state(ctx, 0); \
     return \
         (state->reply != NULL) && \
         (state->reply->type == REDIS_REPLY_ARRAY) && \
