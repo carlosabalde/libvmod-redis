@@ -13,6 +13,7 @@ before_install:
   - cd redis-*
   - make
   - sudo make PREFIX="/usr/local" install
+  - cd ..
 
 before_script:
   - apt-get source -q varnish
