@@ -32,6 +32,8 @@ before_script:
   - make
 
 script:
+  - pwd
+  - find .
   - make check
 
 compiler:
