@@ -1,0 +1,32 @@
+language: c
+
+before_install:
+  - sudo apt-get update -q
+  - sudo apt-get install -qq apt-transport-https python-docutils
+  - curl https://repo.varnish-cache.org/debian/GPG-key.txt | sudo apt-key add -
+  - echo "deb https://repo.varnish-cache.org/ubuntu/ precise varnish-3.0" | sudo tee /etc/apt/sources.list.d/varnish-cache.list
+  - echo "deb-src https://repo.varnish-cache.org/ubuntu/ precise varnish-3.0" | sudo tee -a /etc/apt/sources.list.d/varnish-cache.list
+  - sudo apt-get update -q
+  - sudo apt-get install varnish libvarnishapi-dev
+  - wget http://download.redis.io/releases/redis-2.8.17.tar.gz
+  - tar zxvf redis-*.tar.gz
+  - cd redis-*
+  - make
+  - make PREFIX="/usr/local" install
+
+before_script:
+  - apt-get source -q varnish
+  - cd varnish*
+  - ./configure
+  - make
+  - cd ..
+  - ./autogen.sh
+  - ./configure VARNISHSRC=varnish* VMODDIR=`pwd`
+  - make
+
+script:
+  - make check
+
+compiler:
+  - clang
+  - gcc
