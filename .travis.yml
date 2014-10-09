@@ -19,6 +19,7 @@ before_install:
   - cd hiredis-*
   - make
   - sudo make PREFIX="/usr/local" install
+  - sudo ldconfig
   - cd ..
 
 before_script:
@@ -32,8 +33,6 @@ before_script:
   - make
 
 script:
-  - pwd
-  - find .
   - make check
 
 compiler:
