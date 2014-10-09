@@ -1,0 +1,34 @@
+language: c
+
+before_install:
+  - sudo apt-get update -q
+  - sudo apt-get install -qq apt-transport-https python-docutils
+  - curl https://repo.varnish-cache.org/debian/GPG-key.txt | sudo apt-key add -
+  - echo "deb https://repo.varnish-cache.org/ubuntu/ precise varnish-4.0" | sudo tee /etc/apt/sources.list.d/varnish-cache.list
+  - sudo apt-get update -q
+  - sudo apt-get install varnish libvarnishapi-dev
+  - wget http://download.redis.io/releases/redis-2.8.17.tar.gz
+  - tar zxvf redis-*.tar.gz
+  - cd redis-*
+  - make
+  - sudo make PREFIX="/usr/local" install
+  - cd ..
+  - wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.11.0.zip -O hiredis-0.11.0.zip
+  - unzip hiredis-*.zip
+  - cd hiredis-*
+  - make
+  - sudo make PREFIX="/usr/local" install
+  - sudo ldconfig
+  - cd ..
+
+before_script:
+  - ./autogen.sh
+  - ./configure VARNISHSRC=varnish* VMODDIR=`pwd`
+  - make -j4
+
+script:
+  - make check -j4
+
+compiler:
+  - clang
+  - gcc
