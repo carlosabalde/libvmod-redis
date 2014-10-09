@@ -12,7 +12,7 @@ before_install:
   - tar zxvf redis-*.tar.gz
   - cd redis-*
   - make
-  - make PREFIX="/usr/local" install
+  - sudo make PREFIX="/usr/local" install
 
 before_script:
   - apt-get source -q varnish
