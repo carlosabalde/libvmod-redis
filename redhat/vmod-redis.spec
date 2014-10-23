@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 0.1.1
+Version: 0.1.2
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -34,6 +34,8 @@ rm -rf %{buildroot}
 %{_mandir}/man?/*
 
 %changelog
+* Thu Oct 23 2014 Carlos Abalde <carlos.abalde@gmail.com> - 0.1.2-0.20141023
+- Discard Redis contexts when connections are hung up by the server.
 * Wed Sep 17 2014 Carlos Abalde <carlos.abalde@gmail.com> - 0.1.1-0.20140917
 - Added missing WS_Dup()'s / WS_Copy()'s.
 * Sun Aug 22 2014 Carlos Abalde <carlos.abalde@gmail.com> - 0.1-0.20140822
