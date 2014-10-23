@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <pthread.h>
+#include <poll.h>
 #include <hiredis/hiredis.h>
 
 #include "vrt.h"
@@ -692,17 +693,34 @@ get_context(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, thread_state_
         i = (i + 1) % config->max_contexts;
     }
 
-    // Discard previously selected context if it's in an error state or it's
-    // too old.
-    if ((context != NULL) &&
-        ((context->context->err) ||
-         (context->version != version) ||
-         (context->server->ttl > 0) && (now - context->tst > context->server->ttl))) {
-        // Release context.
-        free_redis_context(context);
+    // Is the previously selected context valid?
+    if (context != NULL) {
+        // Discard context if it's in an error state or if it's too old.
+        if ((context->context->err) ||
+            (context->version != version) ||
+            ((context->server->ttl > 0) &&
+             (now - context->tst > context->server->ttl))) {
+            // Release context.
+            free_redis_context(context);
 
-        // A new context needs to be created.
-        context = NULL;
+            // A new context needs to be created.
+            context = NULL;
+
+        // Also discard context if connection has been hung up by the server.
+        } else {
+            struct pollfd fds;
+
+            fds.fd = context->context->fd;
+            fds.events = POLLOUT;
+
+            if ((poll(&fds, 1, 0) != 1) || (fds.revents & POLLHUP)) {
+                // Release context.
+                free_redis_context(context);
+
+                // A new context needs to be created.
+                context = NULL;
+            }
+        }
     }
 
     // If required, create new context using a randomly selected server matching
