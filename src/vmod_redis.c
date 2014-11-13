@@ -493,7 +493,9 @@ vmod_get_ ## lower ## _reply(struct sess *sp) \
     thread_state_t *state = get_thread_state(sp, 0); \
     if ((state->reply != NULL) && \
         (state->reply->type == REDIS_REPLY_ ## upper)) { \
-        return WS_Dup(sp->wrk->ws, state->reply->str); \
+        char *result = WS_Dup(sp->wrk->ws, state->reply->str); \
+        AN(result); \
+        return result; \
     } else { \
         return NULL; \
     } \
