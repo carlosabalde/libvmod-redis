@@ -492,7 +492,9 @@ vmod_get_ ## lower ## _reply(const struct vrt_ctx *ctx) \
     thread_state_t *state = get_thread_state(ctx, 0); \
     if ((state->reply != NULL) && \
         (state->reply->type == REDIS_REPLY_ ## upper)) { \
-        return WS_Copy(ctx->ws, state->reply->str, -1); \
+        char *result = WS_Copy(ctx->ws, state->reply->str, -1); \
+        AN(result); \
+        return result; \
     } else { \
         return NULL; \
     } \
