@@ -492,7 +492,7 @@ vmod_get_ ## lower ## _reply(const struct vrt_ctx *ctx) \
     thread_state_t *state = get_thread_state(ctx, 0); \
     if ((state->reply != NULL) && \
         (state->reply->type == REDIS_REPLY_ ## upper)) { \
-        char *result = WS_Copy(ctx->ws, state->reply->str, -1); \
+        char *result = WS_Copy(ctx->ws, state->reply->str, state->reply->len + 1); \
         AN(result); \
         return result; \
     } else { \
@@ -814,13 +814,12 @@ get_reply(const struct vrt_ctx *ctx, redisReply *reply)
         case REDIS_REPLY_ERROR:
         case REDIS_REPLY_STATUS:
         case REDIS_REPLY_STRING:
-            result = WS_Copy(ctx->ws, reply->str, -1);
+            result = WS_Copy(ctx->ws, reply->str, reply->len);
             AN(result);
             break;
 
         case REDIS_REPLY_INTEGER:
-            sprintf(buffer, "%lld", reply->integer);
-            result = WS_Copy(ctx->ws, buffer, -1);
+            result = WS_Printf(ctx->ws, "%lld", reply->integer);
             AN(result);
             break;
 
