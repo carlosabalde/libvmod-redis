@@ -814,7 +814,7 @@ get_reply(const struct vrt_ctx *ctx, redisReply *reply)
         case REDIS_REPLY_ERROR:
         case REDIS_REPLY_STATUS:
         case REDIS_REPLY_STRING:
-            result = WS_Copy(ctx->ws, reply->str, reply->len);
+            result = WS_Copy(ctx->ws, reply->str, reply->len + 1);
             AN(result);
             break;
 
