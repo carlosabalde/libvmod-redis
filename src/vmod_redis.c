@@ -16,8 +16,8 @@
 #define DEFAULT_SERVER "127.0.0.1:6379"
 #define DEFAULT_TIMEOUT 500
 #define DEFAULT_TTL 0
-#define DEFAULT_SHARED_POOL 0
-#define DEFAULT_MAX_POOL_SIZE 1
+#define DEFAULT_SHARED_CONTEXTS 0
+#define DEFAULT_CONTEXTS 1
 
 static unsigned version = 0;
 
@@ -56,7 +56,7 @@ init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
     if (vcl_priv->priv == NULL) {
         vcl_priv->priv = new_vcl_priv(
             DEFAULT_TAG, DEFAULT_SERVER, DEFAULT_TIMEOUT, DEFAULT_TTL,
-            DEFAULT_SHARED_POOL, DEFAULT_MAX_POOL_SIZE);
+            DEFAULT_SHARED_CONTEXTS, DEFAULT_CONTEXTS);
         vcl_priv->free = (vmod_priv_free_f *)free_vcl_priv;
     }
 
@@ -72,17 +72,17 @@ void
 vmod_init(
     struct sess *sp, struct vmod_priv *vcl_priv,
     const char *tag, const char *location, int timeout, int ttl,
-    unsigned shared_pool, int max_pool_size)
+    unsigned shared_contexts, int max_contexts)
 {
     // Check input.
     if ((tag != NULL) && (strlen(tag) > 0) &&
         (location != NULL) && (strlen(location) > 0) &&
-        (max_pool_size > 0)) {
+        (max_contexts > 0)) {
         // Set new configuration.
         vcl_priv_t *old = vcl_priv->priv;
         vcl_priv->priv = new_vcl_priv(
             tag, location, timeout, ttl,
-            shared_pool, max_pool_size);
+            shared_contexts, max_contexts);
 
         // Release previous configuration.
         if (old != NULL) {
@@ -106,10 +106,29 @@ vmod_add_server(
         // Initializations.
         vcl_priv_t *config = vcl_priv->priv;
 
-        // Update configuration.
-        redis_server_t *server = new_redis_server(tag, location, timeout, ttl);
+        // Get config lock.
         AZ(pthread_mutex_lock(&config->mutex));
-        VTAILQ_INSERT_HEAD(&config->servers, server, list);
+
+        // Add new server.
+        redis_server_t *server = new_redis_server(tag, location, timeout, ttl);
+        VTAILQ_INSERT_TAIL(&config->servers, server, list);
+
+        // If required, add new pool.
+        redis_context_pool_t *pool = NULL;
+        redis_context_pool_t *ipool;
+        VTAILQ_FOREACH(ipool, &config->pools, list) {
+            if (strcmp(tag, ipool->tag) == 0) {
+                CHECK_OBJ_NOTNULL(ipool, REDIS_CONTEXT_POOL_MAGIC);
+                pool = ipool;
+                break;
+            }
+        }
+        if (pool == NULL) {
+            pool = new_redis_context_pool(tag);
+            VTAILQ_INSERT_TAIL(&config->pools, pool, list);
+        }
+
+        // Release config lock.
         AZ(pthread_mutex_unlock(&config->mutex));
     }
 }

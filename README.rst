@@ -22,7 +22,7 @@ import redis;
 ::
 
     # Configuration.
-    Function VOID init(TAG, LOCATION, TIMEOUT, TTL, SHARED_POOL, MAX_POOL_CONNECTIONS)
+    Function VOID init(TAG, LOCATION, TIMEOUT, TTL, SHARED_CONTEXTS, MAX_CONTEXTS)
     Function VOID add_server(TAG, LOCATION, TIMEOUT, TTL)
 
     # Simple command execution.
@@ -170,7 +170,7 @@ init
 Prototype
         ::
 
-                init(STRING tag, STRING location, INT timeout, INT ttl, BOOL shared_pool, INT max_pool_connections)
+                init(STRING tag, STRING location, INT timeout, INT ttl, BOOL shared_contexts, INT max_contexts)
 Arguments
     tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.).
 
@@ -180,9 +180,9 @@ Arguments
 
     ttl: TTL (seconds) of Redis connections (0 means no TTL). Once the TTL of a connection is consumed, the module transparently reestablishes it. See "Client timeouts" in http://redis.io/topics/clients for extra information.
 
-    shared_pool: if enabled, Redis connections are not local to Varnish worker threads, but shared by all threads using a single pool.
+    shared_contexts: if enabled, Redis connections are not local to Varnish worker threads, but shared by all threads using one or more pools.
 
-    max_pool_connections: when ``shared_pool`` is disabled, this option sets the maximum number of Redis connections per Varnish worker thread. Each thread keeps up to one connection per tag. If more than one tag is available, incrementing this limit allows recycling of Redis connections. When ``shared_pool`` is enabled, this option sets the maximum number of Redis connections in the shared pool.
+    max_contexts: when ``shared_contexts`` is disabled, this option sets the maximum number of Redis connections per Varnish worker thread. Each thread keeps up to one connection per tag. If more than one tag is available, incrementing this limit allows recycling of Redis connections. When ``shared_contexts`` is enabled, this option sets the maximum number of Redis connections per tag.
 
 Return value
     VOID
@@ -213,7 +213,7 @@ Description
 
     Use this feature (1) when using master-slave replication; or (2) when using multiple independent servers; or (3) when using some kind of proxy assisted partitioning (e.g. https://github.com/twitter/twemproxy) and more than one proxy is available.
 
-    When a command is submitted using ``redis.execute()`` and more that one Redis server is available, the destination server is selected according with the tag specified with `redis.server()`. If not specified, a randomly selected connection will be used (if the worker thread / shared pool already has any Redis connection established and available), or a new connection to a randomly selected server will be established.
+    When a command is submitted using ``redis.execute()`` and more that one Redis server is available, the destination server is selected according with the tag specified with `redis.server()`. If not specified, a randomly selected connection will be used (if the worker thread / corresponding pool already has any Redis connection established and available), or a new connection to a randomly selected server will be established.
 
 SIMPLE COMAND EXECUTION FUNCTIONS
 =================================
