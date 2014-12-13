@@ -180,7 +180,7 @@ Arguments
 
     ttl: TTL (seconds) of Redis connections (0 means no TTL). Once the TTL of a connection is consumed, the module transparently reestablishes it. See "Client timeouts" in http://redis.io/topics/clients for extra information.
 
-    shared_pool: if enabled (not yet supported), Redis connections are not local to Varnish worker threads, but shared by all threads using a single pool.
+    shared_pool: if enabled, Redis connections are not local to Varnish worker threads, but shared by all threads using a single pool.
 
     max_pool_connections: when ``shared_pool`` is disabled, this option sets the maximum number of Redis connections per Varnish worker thread. Each thread keeps up to one connection per tag. If more than one tag is available, incrementing this limit allows recycling of Redis connections. When ``shared_pool`` is enabled, this option sets the maximum number of Redis connections in the shared pool.
 
