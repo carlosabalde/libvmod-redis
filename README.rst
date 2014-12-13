@@ -22,9 +22,8 @@ import redis;
 ::
 
     # Configuration.
-    Function VOID init(TAG, LOCATION, TIMEOUT, TTL)
+    Function VOID init(TAG, LOCATION, TIMEOUT, TTL, SHARED_POOL, MAX_POOL_CONNECTIONS)
     Function VOID add_server(TAG, LOCATION, TIMEOUT, TTL)
-    Function VOID set_max_connections(LIMIT)
 
     # Simple command execution.
     Function VOID call(COMMAND + ARGUMENTS)
@@ -88,7 +87,7 @@ Single server
     sub vcl_init {
         # VMOD configuration: simple case, keeping up to one Redis connection
         # per Varnish worker thread.
-        redis.init("main", "192.168.1.100:6379", 500, 0);
+        redis.init("main", "192.168.1.100:6379", 500, 0, false, 1);
     }
 
     sub vcl_deliver {
@@ -140,11 +139,10 @@ Multiple servers
         # VMOD configuration: master-slave replication, keeping up to two
         # Redis connections per Varnish worker thread (up to one to the master
         # server & up to one to a randomly selected slave server).
-        redis.init("master", "192.168.1.100:6379", 500, 0);
+        redis.init("master", "192.168.1.100:6379", 500, 0, false, 2);
         redis.add_server("slave", "192.168.1.101:6379", 500, 0);
         redis.add_server("slave", "192.168.1.102:6379", 500, 0);
         redis.add_server("slave", "192.168.1.103:6379", 500, 0);
-        redis.set_max_connections(2);
     }
 
     sub vcl_deliver {
@@ -172,7 +170,7 @@ init
 Prototype
         ::
 
-                init(STRING tag, STRING location, INT timeout, INT ttl)
+                init(STRING tag, STRING location, INT timeout, INT ttl, BOOL shared_pool, INT max_pool_connections)
 Arguments
     tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.).
 
@@ -181,6 +179,11 @@ Arguments
     timeout: connection timeout (milliseconds) to the Redis server.
 
     ttl: TTL (seconds) of Redis connections (0 means no TTL). Once the TTL of a connection is consumed, the module transparently reestablishes it. See "Client timeouts" in http://redis.io/topics/clients for extra information.
+
+    shared_pool: if enabled (not yet supported), Redis connections are not local to Varnish worker threads, but shared by all threads using a single pool.
+
+    max_pool_connections: when ``shared_pool`` is disabled, this option sets the maximum number of Redis connections per Varnish worker thread. Each thread keeps up to one connection per tag. If more than one tag is available, incrementing this limit allows recycling of Redis connections. When ``shared_pool`` is enabled, this option sets the maximum number of Redis connections in the shared pool.
+
 Return value
     VOID
 Description
@@ -210,25 +213,7 @@ Description
 
     Use this feature (1) when using master-slave replication; or (2) when using multiple independent servers; or (3) when using some kind of proxy assisted partitioning (e.g. https://github.com/twitter/twemproxy) and more than one proxy is available.
 
-    When a command is submitted using ``redis.execute()`` and more that one Redis server is available, the destination server is selected according with the tag specified with `redis.server()`. If not specified, a randomly selected connection will be used (if the worker thread already has any Redis connection established), or a new connection to a randomly selected server will be established.
-
-set_max_connections
--------------------
-
-Prototype
-        ::
-
-                set_max_connections(INT limit)
-Arguments
-    limit: maximum number of established Redis connections per Varnish worker thread.
-Return value
-    VOID
-Description
-    Sets the maximum number of Redis connections per Varnish worker thread.
-    Must be used during the ``vcl_init`` phase.
-    If not called it defaults to 1.
-
-    This option is only relevant when the VMOD is configured with multiple servers and more than one tag is available (see ``redis.add_server()``). Each Varnish worker thread keeps up to one connection per tag. If more than one tag is available, incrementing this limit allows recycling of Redis connections. Otherwise, sending a command to a server may require closing a previously established connection with a server tagged in a different category.
+    When a command is submitted using ``redis.execute()`` and more that one Redis server is available, the destination server is selected according with the tag specified with `redis.server()`. If not specified, a randomly selected connection will be used (if the worker thread / shared pool already has any Redis connection established and available), or a new connection to a randomly selected server will be established.
 
 SIMPLE COMAND EXECUTION FUNCTIONS
 =================================
