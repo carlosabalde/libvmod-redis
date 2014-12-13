@@ -1,4 +1,4 @@
-varnishtest "Tests general execution of commands"
+varnishtest "Tests general execution of commands (private pool)"
 
 server s1 {
    rxreq

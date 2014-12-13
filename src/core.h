@@ -57,8 +57,9 @@ typedef struct vcl_priv {
 #define VCL_PRIV_MAGIC 0x77feec11
     unsigned magic;
 
-    // Mutex.
+    // Mutex & condition variable.
     pthread_mutex_t mutex;
+    pthread_cond_t cond;
 
     // Redis servers (allocated in the heap).
     VTAILQ_HEAD(,redis_server) servers;
@@ -123,6 +124,8 @@ void free_thread_state(thread_state_t *state);
 redis_context_t *get_context(
     struct sess *sp, struct vmod_priv *vcl_priv, thread_state_t *state,
     unsigned int version);
-void free_context(redis_context_t * context);
+void free_context(
+    struct sess *sp, struct vmod_priv *vcl_priv, thread_state_t *state,
+    redis_context_t * context);
 
 #endif
