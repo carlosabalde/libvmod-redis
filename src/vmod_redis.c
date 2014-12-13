@@ -161,7 +161,7 @@ vmod_call(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, VCL_STRING comm
             }
 
             // Release context.
-            free_context(context);
+            free_context(ctx, vcl_priv, state, context);
         }
     }
 }
@@ -321,7 +321,7 @@ vmod_execute(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
         }
 
         // Release context.
-        free_context(context);
+        free_context(ctx, vcl_priv, state, context);
     }
 }
 
