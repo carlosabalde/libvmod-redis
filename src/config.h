@@ -48,6 +48,7 @@
 #define HAVE_PROC_STAT 1
 #define HAVE_PROC_MAPS 1
 #define HAVE_PROC_SMAPS 1
+#define HAVE_PROC_SOMAXCONN 1
 #endif
 
 /* Test for task_info() */
@@ -129,9 +130,9 @@ void setproctitle(const char *fmt, ...);
 #if defined(linux) || defined(__linux__)
 # include <endian.h>
 #else
-#define LITTLE_ENDIAN   1234    /* least-significant byte first (vax, pc) */
-#define BIG_ENDIAN  4321    /* most-significant byte first (IBM, net) */
-#define PDP_ENDIAN  3412    /* LSB first in word, MSW first in long (pdp)*/
+#define	LITTLE_ENDIAN	1234	/* least-significant byte first (vax, pc) */
+#define	BIG_ENDIAN	4321	/* most-significant byte first (IBM, net) */
+#define	PDP_ENDIAN	3412	/* LSB first in word, MSW first in long (pdp)*/
 
 #if defined(__i386__) || defined(__x86_64__) || defined(__amd64__) || \
    defined(vax) || defined(ns32000) || defined(sun386) || \
@@ -147,7 +148,7 @@ void setproctitle(const char *fmt, ...);
     defined(__hppa) || defined(__hp9000) || \
     defined(__hp9000s300) || defined(__hp9000s700) || \
     defined (BIT_ZERO_ON_LEFT) || defined(m68k) || defined(__sparc)
-#define BYTE_ORDER  BIG_ENDIAN
+#define BYTE_ORDER	BIG_ENDIAN
 #endif
 #endif /* linux */
 #endif /* BSD */
@@ -177,18 +178,23 @@ void setproctitle(const char *fmt, ...);
 
 #if !defined(BYTE_ORDER) || \
     (BYTE_ORDER != BIG_ENDIAN && BYTE_ORDER != LITTLE_ENDIAN)
-    /* you must determine what the correct bit order is for
-     * your compiler - the next line is an intentional error
-     * which will force your compiles to bomb until you fix
-     * the above macros.
-     */
+	/* you must determine what the correct bit order is for
+	 * your compiler - the next line is an intentional error
+	 * which will force your compiles to bomb until you fix
+	 * the above macros.
+	 */
 #error "Undefined or invalid BYTE_ORDER"
 #endif
 
 #if (__i386 || __amd64 || __powerpc__) && __GNUC__
 #define GNUC_VERSION (__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__)
-#if (GNUC_VERSION >= 40100) || defined(__clang__)
+#if defined(__clang__)
 #define HAVE_ATOMIC
+#endif
+#if (defined(__GLIBC__) && defined(__GLIBC_PREREQ))
+#if (GNUC_VERSION >= 40100 && __GLIBC_PREREQ(2, 6))
+#define HAVE_ATOMIC
+#endif
 #endif
 #endif
 
