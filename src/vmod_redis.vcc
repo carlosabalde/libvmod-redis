@@ -5,9 +5,8 @@ $Init init_function
 ## Configuration.
 ###############################################################################
 
-$Function VOID init(PRIV_VCL, STRING, STRING, INT, INT)
+$Function VOID init(PRIV_VCL, STRING, STRING, INT, INT, BOOL, INT)
 $Function VOID add_server(PRIV_VCL, STRING, STRING, INT, INT)
-$Function VOID set_max_connections(PRIV_VCL, INT)
 
 ###############################################################################
 ## Simple command execution.

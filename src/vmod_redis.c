@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <pthread.h>
-#include <poll.h>
 #include <hiredis/hiredis.h>
 
 #include "vrt.h"
@@ -11,103 +10,26 @@
 #include "vcc_if.h"
 
 #include "sha1.h"
+#include "core.h"
 
 #define DEFAULT_TAG "main"
 #define DEFAULT_SERVER "127.0.0.1:6379"
 #define DEFAULT_TIMEOUT 500
 #define DEFAULT_TTL 0
+#define DEFAULT_SHARED_POOL 0
+#define DEFAULT_MAX_POOL_SIZE 1
 
 static unsigned version = 0;
-
-enum REDIS_SERVER_TYPE {
-    REDIS_SERVER_HOST_TYPE,
-    REDIS_SERVER_SOCKET_TYPE
-};
-
-typedef struct redis_server {
-    // Tag (i.e. 'main', 'master', 'slave', etc.).
-    const char *tag;
-
-    // Type & location.
-    enum REDIS_SERVER_TYPE type;
-    union {
-        struct address {
-            const char *host;
-            unsigned port;
-        } address;
-        const char *path;
-    } location;
-
-    // Context timeout & TTL.
-    struct timeval timeout;
-    unsigned ttl;
-} redis_server_t;
-
-typedef struct vcl_priv {
-#define VCL_PRIV_MAGIC 0x77feec11
-    unsigned magic;
-    // Redis servers.
-#define MAX_REDIS_SERVERS 32
-    unsigned nservers;
-    redis_server_t servers[MAX_REDIS_SERVERS];
-
-    // Max Redis contexts (i.e. redis_context_t) to be created.
-    unsigned max_contexts;
-} vcl_priv_t;
-
-typedef struct redis_context {
-    redis_server_t *server;
-    redisContext *context;
-    unsigned version;
-    time_t tst;
-} redis_context_t;
-
-typedef struct thread_state {
-#define THREAD_STATE_MAGIC 0xa6bc103e
-    unsigned magic;
-    // Redis contexts.
-#define MAX_REDIS_CONTEXTS 8
-    redis_context_t contexts[MAX_REDIS_CONTEXTS];
-
-    // Redis command:
-    //   - Tag (allocated in the session workspace).
-    //   - Arguments (allocated in the session workspace).
-    //   - Reply (allocated in the heap).
-#define MAX_REDIS_COMMAND_ARGS 128
-    const char *tag;
-    unsigned argc;
-    const char *argv[MAX_REDIS_COMMAND_ARGS];
-    redisReply *reply;
-} thread_state_t;
-
-#define REDIS_LOG(ctx, message, ...) \
-    do { \
-        char _buffer[512]; \
-        snprintf( \
-            _buffer, sizeof(_buffer), \
-            "[REDIS][%s] %s", __func__, message); \
-        VSLb(ctx->vsl, SLT_Error, _buffer, ##__VA_ARGS__); \
-    } while (0)
 
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static pthread_once_t thread_once = PTHREAD_ONCE_INIT;
 static pthread_key_t thread_key;
 
-static vcl_priv_t * new_vcl_priv();
-static void free_vcl_priv(vcl_priv_t *priv);
-
 static thread_state_t *get_thread_state(const struct vrt_ctx *ctx, unsigned drop_reply);
 static void make_thread_key();
 
-static redisContext *get_context(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, thread_state_t *state);
-
 static const char *get_reply(const struct vrt_ctx *ctx, redisReply *reply);
-
-static void set_redis_server(redis_server_t *server, const char *tag, const char *location, int timeout, int ttl);
-static void free_redis_server(redis_server_t *server);
-
-static void free_redis_context(redis_context_t *context);
 
 static const char *sha1(const struct vrt_ctx *ctx, const char *script);
 
@@ -133,7 +55,8 @@ init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
     // not required* to be thread safe.
     if (vcl_priv->priv == NULL) {
         vcl_priv->priv = new_vcl_priv(
-            DEFAULT_TAG, DEFAULT_SERVER, DEFAULT_TIMEOUT, DEFAULT_TTL);
+            DEFAULT_TAG, DEFAULT_SERVER, DEFAULT_TIMEOUT, DEFAULT_TTL,
+            DEFAULT_SHARED_POOL, DEFAULT_MAX_POOL_SIZE);
         vcl_priv->free = (vmod_priv_free_f *)free_vcl_priv;
     }
 
@@ -148,14 +71,18 @@ init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
 void
 vmod_init(
     const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv,
-    VCL_STRING tag, VCL_STRING location, VCL_INT timeout, VCL_INT ttl)
+    VCL_STRING tag, VCL_STRING location, VCL_INT timeout, VCL_INT ttl,
+    VCL_BOOL shared_pool, VCL_INT max_pool_size)
 {
     // Check input.
     if ((tag != NULL) && (strlen(tag) > 0) &&
-        (location != NULL) && (strlen(location) > 0)) {
+        (location != NULL) && (strlen(location) > 0) &&
+        (max_pool_size > 0)) {
         // Set new configuration.
         vcl_priv_t *old = vcl_priv->priv;
-        vcl_priv->priv = new_vcl_priv(tag, location, timeout, ttl);
+        vcl_priv->priv = new_vcl_priv(
+            tag, location, timeout, ttl,
+            shared_pool, max_pool_size);
 
         // Release previous configuration.
         if (old != NULL) {
@@ -180,46 +107,13 @@ vmod_add_server(
         vcl_priv_t *config = vcl_priv->priv;
 
         // Update configuration.
-        if (config->nservers < MAX_REDIS_SERVERS) {
-            AZ(pthread_mutex_lock(&mutex));
-            set_redis_server(
-                &(config->servers[config->nservers]),
-                tag, location, timeout, ttl);
-            config->nservers++;
-            AZ(pthread_mutex_unlock(&mutex));
-        } else {
-            REDIS_LOG(ctx,
-                "Failed to add new server (limit is %d)",
-                MAX_REDIS_SERVERS);
-        }
+        redis_server_t *server = new_redis_server(tag, location, timeout, ttl);
+        AZ(pthread_mutex_lock(&config->mutex));
+        VTAILQ_INSERT_HEAD(&config->servers, server, list);
+        AZ(pthread_mutex_unlock(&config->mutex));
     }
 }
 
-/******************************************************************************
- * redis.set_max_connections();
- *****************************************************************************/
-
-void
-vmod_set_max_connections(
-    const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, VCL_INT limit)
-{
-    // Check input.
-    if (limit > 0) {
-        // Initializations.
-        vcl_priv_t *config = vcl_priv->priv;
-
-        // Update configuration.
-        if (limit <= MAX_REDIS_CONTEXTS) {
-            AZ(pthread_mutex_lock(&mutex));
-            config->max_contexts = limit;
-            AZ(pthread_mutex_unlock(&mutex));
-        } else {
-            REDIS_LOG(ctx,
-                "Failed to set the maximum number of connections per worker thread (limit is %d)",
-                MAX_REDIS_CONTEXTS);
-        }
-    }
-}
 /******************************************************************************
  * redis.call();
  *****************************************************************************/
@@ -232,9 +126,9 @@ vmod_call(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, VCL_STRING comm
         // Fetch local thread state & flush previous command.
         thread_state_t *state = get_thread_state(ctx, 1);
 
-        // Fetch Redis context.
+        // Fetch context.
         // XXX: redis.call() does not allow selecting the destination sever.
-        redisContext *context = get_context(ctx, vcl_priv, state);
+        redis_context_t *context = get_context(ctx, vcl_priv, state, version);
 
         // Do not continue if a Redis context is not available.
         if (context != NULL) {
@@ -245,16 +139,16 @@ vmod_call(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, VCL_STRING comm
            // commands.
             va_list args;
             va_start(args, command);
-            state->reply = redisvCommand(context, command, args);
+            state->reply = redisvCommand(context->rcontext, command, args);
             va_end(args);
 
             // Check reply.
-            if (context->err) {
+            if (context->rcontext->err) {
                 REDIS_LOG(ctx,
                     "Failed to execute Redis command (%s): [%d] %s",
                     command,
-                    context->err,
-                    context->errstr);
+                    context->rcontext->err,
+                    context->rcontext->errstr);
             } else if (state->reply == NULL) {
                 REDIS_LOG(ctx,
                     "Failed to execute Redis command (%s)",
@@ -265,6 +159,9 @@ vmod_call(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, VCL_STRING comm
                     command,
                     state->reply->str);
             }
+
+            // Release context.
+            free_context(context);
         }
     }
 }
@@ -355,8 +252,8 @@ vmod_execute(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
     // Fetch local thread state.
     thread_state_t *state = get_thread_state(ctx, 0);
 
-    // Fetch Redis context.
-    redisContext *context = get_context(ctx, vcl_priv, state);
+    // Fetch context.
+    redis_context_t *context = get_context(ctx, vcl_priv, state, version);
 
     // Do not continue if a Redis context is not available or if the initial
     // call to redis.command() was not executed.
@@ -372,7 +269,7 @@ vmod_execute(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
 
             // Execute the EVALSHA command.
             state->reply = redisCommandArgv(
-                context,
+                context->rcontext,
                 state->argc,
                 state->argv,
                 NULL);
@@ -380,7 +277,7 @@ vmod_execute(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
             // Check reply. If Redis replies with a NOSCRIPT, the original
             // EVAL command should be executed to register the script for
             // the first time in the Redis server.
-            if (!context->err &&
+            if (!context->rcontext->err &&
                 (state->reply != NULL) &&
                 (state->reply->type == REDIS_REPLY_ERROR) &&
                 (strncmp(state->reply->str, "NOSCRIPT", 8) == 0)) {
@@ -399,19 +296,19 @@ vmod_execute(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
         // was already executed using EVALSHA.
         if (!done) {
             state->reply = redisCommandArgv(
-                context,
+                context->rcontext,
                 state->argc,
                 state->argv,
                 NULL);
         }
 
         // Check reply.
-        if (context->err) {
+        if (context->rcontext->err) {
             REDIS_LOG(ctx,
                 "Failed to execute Redis command (%s): [%d] %s",
                 state->argv[0],
-                context->err,
-                context->errstr);
+                context->rcontext->err,
+                context->rcontext->errstr);
         } else if (state->reply == NULL) {
             REDIS_LOG(ctx,
                 "Failed to execute Redis command (%s)",
@@ -422,6 +319,9 @@ vmod_execute(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
                 state->argv[0],
                 state->reply->str);
         }
+
+        // Release context.
+        free_context(context);
     }
 }
 
@@ -579,55 +479,15 @@ vmod_free(const struct vrt_ctx *ctx)
  * UTILITIES.
  *****************************************************************************/
 
-static vcl_priv_t *
-new_vcl_priv(const char *tag, const char *location, unsigned timeout, unsigned ttl)
-{
-    vcl_priv_t *result;
-    ALLOC_OBJ(result, VCL_PRIV_MAGIC);
-    AN(result);
-
-    set_redis_server(&(result->servers[0]), tag, location, timeout, ttl);
-
-    result->nservers = 1;
-
-    result->max_contexts = 1;
-
-    return result;
-}
-
-static void
-free_vcl_priv(vcl_priv_t *priv)
-{
-    while (priv->nservers > 0) {
-        priv->nservers--;
-        free_redis_server(&(priv->servers[priv->nservers]));
-    }
-
-    FREE_OBJ(priv);
-}
-
 static thread_state_t *
 get_thread_state(const struct vrt_ctx *ctx, unsigned flush)
 {
     // Initializations.
     thread_state_t *result = pthread_getspecific(thread_key);
-    time_t now = time(NULL);
 
     // Create thread state if not created yet.
     if (result == NULL) {
-        ALLOC_OBJ(result, THREAD_STATE_MAGIC);
-        AN(result);
-
-        for (int i = 0; i < MAX_REDIS_CONTEXTS; i++) {
-            result->contexts[i].server = NULL;
-            result->contexts[i].context = NULL;
-            result->contexts[i].version = 0;
-            result->contexts[i].tst = 0;
-        }
-        result->tag = NULL;
-        result->argc = 0;
-        result->reply = NULL;
-
+        result = new_thread_state();
         pthread_setspecific(thread_key, result);
     } else {
         CHECK_OBJ(result, THREAD_STATE_MAGIC);
@@ -648,157 +508,9 @@ get_thread_state(const struct vrt_ctx *ctx, unsigned flush)
 }
 
 static void
-free_thread_state(thread_state_t *state)
-{
-    for (int i = 0; i < MAX_REDIS_CONTEXTS; i++) {
-        if ((state->contexts[i].server != NULL) &&
-            (state->contexts[i].context != NULL)) {
-            redisFree(state->contexts[i].context);
-        }
-    }
-
-    if (state->reply != NULL) {
-        freeReplyObject(state->reply);
-    }
-
-    FREE_OBJ(state);
-}
-
-static void
 make_thread_key()
 {
     AZ(pthread_key_create(&thread_key, (void *) free_thread_state));
-}
-
-static redisContext *
-get_context(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, thread_state_t *state)
-{
-    int i, j;
-
-    // Initializations.
-    vcl_priv_t *config = vcl_priv->priv;
-    time_t now = time(NULL);
-
-    // Randomly select an existing context matching the requested tag.
-    redis_context_t *context = NULL;
-    i = rand() % config->max_contexts;
-    for (j = 0; j < config->max_contexts; j++) {
-        if ((state->contexts[i].server != NULL) &&
-            (state->contexts[i].context != NULL)) {
-            if ((state->tag == NULL) ||
-                (strcmp(state->tag, state->contexts[i].server->tag) == 0)) {
-                context = &(state->contexts[i]);
-                break;
-            }
-        }
-        i = (i + 1) % config->max_contexts;
-    }
-
-    // Is the previously selected context valid?
-    if (context != NULL) {
-        // Discard context if it's in an error state or if it's too old.
-        if ((context->context->err) ||
-            (context->version != version) ||
-            ((context->server->ttl > 0) &&
-             (now - context->tst > context->server->ttl))) {
-            // Release context.
-            free_redis_context(context);
-
-            // A new context needs to be created.
-            context = NULL;
-
-        // Also discard context if connection has been hung up by the server.
-        } else {
-            struct pollfd fds;
-
-            fds.fd = context->context->fd;
-            fds.events = POLLOUT;
-
-            if ((poll(&fds, 1, 0) != 1) || (fds.revents & POLLHUP)) {
-                // Release context.
-                free_redis_context(context);
-
-                // A new context needs to be created.
-                context = NULL;
-            }
-        }
-    }
-
-    // If required, create new context using a randomly selected server matching
-    // the requested tag. If any error arises discard the context and continue.
-    if (context == NULL) {
-        // Select random server matching the requested tag.
-        redis_server_t *server = NULL;
-        i = rand() % config->nservers;
-        for (j = 0; j < config->nservers; j++) {
-            if ((state->tag == NULL) ||
-                (strcmp(state->tag, config->servers[i].tag) == 0)) {
-                server = &(config->servers[i]);
-            }
-            i = (i + 1) % config->max_contexts;
-        }
-
-        // Do not continue if a server was not found.
-        if (server != NULL) {
-            // Fetch an empty context slot.
-            for (i = 0; i < config->max_contexts; i++) {
-                if ((state->contexts[i].server == NULL) &&
-                    (state->contexts[i].context == NULL)) {
-                    context = &(state->contexts[i]);
-                    break;
-                }
-            }
-
-            // If an empty slot was not available, randomly select an existing
-            // context and release it.
-            if (context == NULL) {
-                context = &(state->contexts[rand() % config->max_contexts]);
-                free_redis_context(context);
-            }
-
-            // Create new context using the previously selected server. If any
-            // error arises discard the context and continue.
-            switch (server->type) {
-                case REDIS_SERVER_HOST_TYPE:
-                    context->context = redisConnectWithTimeout(
-                        server->location.address.host,
-                        server->location.address.port,
-                        server->timeout);
-                    break;
-
-                case REDIS_SERVER_SOCKET_TYPE:
-                    context->context = redisConnectUnixWithTimeout(
-                        server->location.path,
-                        server->timeout);
-                    break;
-
-                default:
-                    context->context = NULL;
-            }
-            AN(context->context);
-            if (context->context->err) {
-                REDIS_LOG(ctx,
-                    "Failed to establish Redis connection (%d): %s",
-                    context->context->err,
-                    context->context->errstr);
-                free_redis_context(context);
-                context->context = NULL;
-            } else {
-                context->server = server;
-                context->version = version;
-                context->tst = now;
-            }
-        } else {
-            REDIS_LOG(ctx, "The requested server does not exist: %s", state->tag);
-        }
-    }
-
-    // Done!
-    if (context != NULL)
-        return context->context;
-    else {
-        return NULL;
-    }
 }
 
 static const char *
@@ -834,62 +546,6 @@ get_reply(const struct vrt_ctx *ctx, redisReply *reply)
 
     // Done!
     return result;
-}
-
-static void
-set_redis_server(
-    redis_server_t *server,
-    const char *tag, const char *location, int timeout, int ttl)
-{
-    // Parse connection string.
-    char *ptr = strrchr(location, ':');
-    if (ptr != NULL) {
-        server->type = REDIS_SERVER_HOST_TYPE;
-        server->location.address.host = strndup(location, ptr - location);
-        AN(server->location.address.host);
-        server->location.address.port = atoi(ptr + 1);
-    } else {
-        server->type = REDIS_SERVER_SOCKET_TYPE;
-        server->location.path = strdup(location);
-        AN(server->location.path);
-    }
-
-    // Complete server definition.
-    server->tag = strdup(tag);
-    AN(server->tag);
-    server->timeout.tv_sec = timeout / 1000;
-    server->timeout.tv_usec = (timeout % 1000) * 1000;
-    server->ttl = ttl;
-}
-
-static void
-free_redis_server(redis_server_t *server)
-{
-    free((void *) server->tag);
-    server->tag = NULL;
-    switch (server->type) {
-        case REDIS_SERVER_HOST_TYPE:
-            free((void *) server->location.address.host);
-            server->location.address.host = NULL;
-            break;
-
-        case REDIS_SERVER_SOCKET_TYPE:
-            free((void *) server->location.path);
-            server->location.path = NULL;
-            break;
-    }
-}
-
-static void
-free_redis_context(redis_context_t *context)
-{
-    context->server = NULL;
-    if (context->context != NULL) {
-        redisFree(context->context);
-        context->context = NULL;
-    }
-    context->version = 0;
-    context->tst = 0;
 }
 
 static const char *

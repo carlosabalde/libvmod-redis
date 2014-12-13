@@ -10,7 +10,8 @@ libvmod_redis_la_SOURCES = \
     vcc_if.c vcc_if.h \
     config.h \
     sha1.c sha1.h \
-    vmod_redis.c vmod_redis.h
+    core.c core.h \
+    vmod_redis.c
 
 vcc_if.c vcc_if.h: @VMODTOOL@ $(top_srcdir)/src/vmod_redis.vcc
 	@VMODTOOL@ $(top_srcdir)/src/vmod_redis.vcc
