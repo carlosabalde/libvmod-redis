@@ -161,7 +161,7 @@ vmod_call(struct sess *sp, struct vmod_priv *vcl_priv, const char *command, ...)
             }
 
             // Release context.
-            free_context(ctx, vcl_priv, state, context);
+            free_context(sp, vcl_priv, state, context);
         }
     }
 }
@@ -321,7 +321,7 @@ vmod_execute(struct sess *sp, struct vmod_priv *vcl_priv)
         }
 
         // Release context.
-        free_context(ctx, vcl_priv, state, context);
+        free_context(sp, vcl_priv, state, context);
     }
 }
 
