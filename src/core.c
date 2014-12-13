@@ -508,6 +508,6 @@ free_shared_context(
     AZ(pthread_mutex_lock(&config->mutex));
     VTAILQ_REMOVE(&config->busy_contexts, context, list);
     VTAILQ_INSERT_TAIL(&config->free_contexts, context, list);
-    AZ(pthread_cond_broadcast(&config->cond));
+    AZ(pthread_cond_signal(&config->cond));
     AZ(pthread_mutex_unlock(&config->mutex));
 }
