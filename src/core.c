@@ -246,6 +246,7 @@ get_context(
     if (result == NULL) {
         // Select server matching the requested tag.
         redis_server_t *server = NULL;
+        AZ(pthread_mutex_lock(&config->mutex));
         VTAILQ_FOREACH(iserver, &config->servers, list) {
             if ((state->tag == NULL) ||
                 (strcmp(state->tag, iserver->tag) == 0)) {
@@ -258,11 +259,10 @@ get_context(
         // If an server was found, move it to the end of the list (this
         // ensures a nice distribution of load between all available servers).
         if (server != NULL) {
-            AZ(pthread_mutex_lock(&config->mutex));
             VTAILQ_REMOVE(&config->servers, server, list);
             VTAILQ_INSERT_TAIL(&config->servers, server, list);
-            AZ(pthread_mutex_unlock(&config->mutex));
         }
+        AZ(pthread_mutex_unlock(&config->mutex));
 
         // Do not continue if a server was not found.
         if (server != NULL) {
