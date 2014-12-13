@@ -16,7 +16,7 @@ typedef struct redis_server {
 #define REDIS_SERVER_MAGIC 0xac587b11
     unsigned magic;
 
-    // Tag (i.e. 'main', 'master', 'slave', etc.).
+    // Tag (i.e. 'main', 'master', 'slave', 'cluster', etc.).
     const char *tag;
 
     // Type & location.
@@ -52,26 +52,44 @@ typedef struct redis_context {
     VTAILQ_ENTRY(redis_context) list;
 } redis_context_t;
 
-typedef struct vcl_priv {
+typedef struct redis_context_pool {
     // Object marker.
-#define VCL_PRIV_MAGIC 0x77feec11
+#define REDIS_CONTEXT_POOL_MAGIC 0x9700a5ef
     unsigned magic;
+
+    // Tag.
+    const char *tag;
 
     // Mutex & condition variable.
     pthread_mutex_t mutex;
     pthread_cond_t cond;
 
-    // Redis servers (allocated in the heap).
-    VTAILQ_HEAD(,redis_server) servers;
-
-    // Pooling options.
-    unsigned shared_pool;
-    unsigned max_pool_size;
-
-    // Shared pool (allocated in the heap).
+    // Contexts (allocated in the heap).
     unsigned ncontexts;
     VTAILQ_HEAD(,redis_context) free_contexts;
     VTAILQ_HEAD(,redis_context) busy_contexts;
+
+    // Tail queue.
+    VTAILQ_ENTRY(redis_context_pool) list;
+} redis_context_pool_t;
+
+typedef struct vcl_priv {
+    // Object marker.
+#define VCL_PRIV_MAGIC 0x77feec11
+    unsigned magic;
+
+    // Mutex.
+    pthread_mutex_t mutex;
+
+    // Redis servers (allocated in the heap).
+    VTAILQ_HEAD(,redis_server) servers;
+
+    // General options.
+    unsigned shared_contexts;
+    unsigned max_contexts;
+
+    // Shared contexts (allocated in the heap).
+    VTAILQ_HEAD(,redis_context_pool) pools;
 } vcl_priv_t;
 
 typedef struct thread_state {
@@ -79,7 +97,7 @@ typedef struct thread_state {
 #define THREAD_STATE_MAGIC 0xa6bc103e
     unsigned magic;
 
-    // Private pool (allocated in the heap).
+    // Private contexts (allocated in the heap).
     unsigned ncontexts;
     VTAILQ_HEAD(,redis_context) contexts;
 
@@ -103,15 +121,16 @@ typedef struct thread_state {
         VSLb(ctx->vsl, SLT_Error, _buffer, ##__VA_ARGS__); \
     } while (0)
 
-redis_server_t *
-new_redis_server(
+redis_server_t *new_redis_server(
     const char *tag, const char *location, int timeout, int ttl);
 void free_redis_server(redis_server_t *server);
 
-redis_context_t *
-new_redis_context(
+redis_context_t *new_redis_context(
     redis_server_t *server, redisContext *rcontext, unsigned version, time_t tst);
 void free_redis_context(redis_context_t *context);
+
+redis_context_pool_t *new_redis_context_pool(const char *tag);
+void free_redis_context_pool(redis_context_pool_t *pool);
 
 vcl_priv_t *new_vcl_priv(
     const char *tag, const char *location, unsigned timeout, unsigned ttl,
