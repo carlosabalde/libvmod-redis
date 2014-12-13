@@ -540,7 +540,6 @@ get_reply(const struct vrt_ctx *ctx, redisReply *reply)
 
     // Check type of Redis reply.
     // XXX: array replies are *not* supported.
-    char buffer[64];
     switch (reply->type) {
         case REDIS_REPLY_ERROR:
         case REDIS_REPLY_STATUS:
