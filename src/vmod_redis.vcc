@@ -9,13 +9,7 @@ Function VOID init(PRIV_VCL, STRING, STRING, INT, INT, BOOL, INT)
 Function VOID add_server(PRIV_VCL, STRING, STRING, INT, INT)
 
 ###############################################################################
-## Simple command execution.
-###############################################################################
-
-Function VOID call(PRIV_VCL, STRING_LIST)
-
-###############################################################################
-## Advanced command execution.
+## Command execution.
 ###############################################################################
 
 Function VOID command(STRING)

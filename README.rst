@@ -25,10 +25,7 @@ import redis;
     Function VOID init(TAG, LOCATION, TIMEOUT, TTL, SHARED_CONTEXTS, MAX_CONTEXTS)
     Function VOID add_server(TAG, LOCATION, TIMEOUT, TTL)
 
-    # Simple command execution.
-    Function VOID call(COMMAND + ARGUMENTS)
-
-    # Advanced command execution.
+    # Command execution.
     Function VOID command(COMMAND)
     Function VOID server(TAG)
     Function VOID push(ARGUMENT)
@@ -68,7 +65,7 @@ VMOD using the synchronous hiredis library API (https://github.com/redis/hiredis
 
 Highlights:
 
-* **All Redis commands are supported**. Two VMOD APIs are provided: ``redis.call()`` for simple commands, and ``redis.command()`` + ``redis.server()`` + ``redis.push()`` + ``redis.execute()`` for advanced execution.
+* **All Redis commands are supported**.
 * **Full support for execution of LUA scripts** (i.e. ``EVAL`` command), including optimistic automatic execution of ``EVALSHA`` commands.
 * **All Redis reply data types are supported**, including partial support to access to components of simple (i.e. not nested) array replies.
 * **Redis pipelines are not (and won't be) supported**. LUA scripting, which is fully supported by the VMOD, it's a much more flexible alternative to pipelines for atomic execution and minimizing latency. Pipelines are hard to use and error prone, specially when using the ``WATCH`` command.
@@ -93,20 +90,8 @@ Single server
 
     sub vcl_deliver {
         # Simple command execution.
-        redis.call("SET foo hello");
-        redis.call("GET foo");
-        set req.http.X-Foo = redis.get_string_reply();
-
-        # Simple command execution using placeholders.
-        set req.http.X-Key = "foo";
-        set req.http.X-Value = "Hello world!";
-        redis.call("SET %s %s" + req.http.X-Key + req.http.X-Value);
-        redis.call("GET %s" + req.http.X-Key);
-        set req.http.X-Foo = redis.get_string_reply();
-
-        # Advanced command execution.
         redis.command("SET");
-        redis.push("bar");
+        redis.push("foo");
         redis.push("Hello world!");
         redis.execute();
 
@@ -122,8 +107,11 @@ Single server
         redis.push("Atomic hello world!");
         redis.execute();
 
-        # Array replies.
-        redis.call("MGET foo bar");
+        # Array replies, checking & accessing to reply.
+        redis.command("MGET");
+        redis.push("foo");
+        redis.push("bar");
+        redis.execute();
         if ((redis.reply_is_array()) &&
             (redis.get_array_reply_length() == 2)) {
             set resp.http.X-Foo = redis.get_array_reply_value(0);
@@ -220,8 +208,7 @@ Return value
     VOID
 Description
     Initializes the Redis module.
-    Must be used during the ``vcl_init`` phase.
-    If not called some default values will be used.
+    Must be called during the ``vcl_init`` phase.
 
 add_server
 ----------
@@ -248,30 +235,8 @@ Description
 
     When a command is submitted using ``redis.execute()`` and more that one Redis server is available, the destination server is selected according with the tag specified with `redis.server()`. If not specified, a randomly selected connection will be used (if the worker thread / corresponding pool already has any Redis connection established and available), or a new connection to a randomly selected server will be established.
 
-SIMPLE COMAND EXECUTION FUNCTIONS
-=================================
-
-call
-----
-
-Prototype
-        ::
-
-                call(STRING_LIST command)
-Arguments
-    command: full Redis command.
-Return value
-    VOID
-Description
-    Executes a simple Redis command.
-
-    Reply can be fetched with ``redis.reply_is_.*()`` and ``redis.get_.*()`` functions.
-    This function implements an ugly hack based on the VMOD STRING_LIST data type in order to support ``%s`` placeholders.
-
-    Please, use ``redis.command()`` + ``redis.server()`` + ``redis.push()`` + ``redis.execute()`` for (1) extra flexibility; (2) optimistic execution of ``EVALSHA`` commands; and (3) support for sever tag selection.
-
-ADVANCED COMAND EXECUTION FUNCTIONS
-===================================
+COMAND EXECUTION FUNCTIONS
+==========================
 
 command
 -------
@@ -345,7 +310,7 @@ Prototype
 Return value
     BOOL
 Description
-    Returns TRUE if a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an error reply.
+    Returns TRUE if a previously executed Redis command using ``redis.execute()`` returned an error reply.
 
 reply_is_nil
 ------------
@@ -357,7 +322,7 @@ Prototype
 Return value
     BOOL
 Description
-    Returns TRUE if a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned a nil reply.
+    Returns TRUE if a previously executed Redis command using ``redis.execute()`` returned a nil reply.
 
 reply_is_status
 ---------------
@@ -369,7 +334,7 @@ Prototype
 Return value
     BOOL
 Description
-    Returns TRUE if a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned a status reply.
+    Returns TRUE if a previously executed Redis command using ``redis.execute()`` returned a status reply.
 
 reply_is_integer
 ----------------
@@ -381,7 +346,7 @@ Prototype
 Return value
     BOOL
 Description
-    Returns TRUE if a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an integer reply.
+    Returns TRUE if a previously executed Redis command ``redis.execute()`` returned an integer reply.
 
 reply_is_string
 ---------------
@@ -393,7 +358,7 @@ Prototype
 Return value
     BOOL
 Description
-    Returns TRUE if a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned a string reply.
+    Returns TRUE if a previously executed Redis command ``redis.execute()`` returned a string reply.
 
 reply_is_array
 --------------
@@ -405,7 +370,7 @@ Prototype
 Return value
     BOOL
 Description
-    Returns TRUE if a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply.
+    Returns TRUE if a previously executed Redis command using ``redis.execute()`` returned an array reply.
 
 get_reply
 ---------
@@ -417,7 +382,7 @@ Prototype
 Return value
     STRING
 Description
-    Returns a string representation of the reply of a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``).
+    Returns a string representation of the reply of a previously executed Redis command using ``redis.execute()``.
     Do not use this function to access to array replies.
 
 get_error_reply
@@ -430,7 +395,7 @@ Prototype
 Return value
     STRING
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an error reply, this function returns a string representation of that reply.
+    If a previously executed Redis command using ``redis.execute()`` returned an error reply, this function returns a string representation of that reply.
 
 get_status_reply
 ----------------
@@ -442,7 +407,7 @@ Prototype
 Return value
     STRING
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned a status reply, this function returns a string representation of that reply.
+    If a previously executed Redis command using ``redis.execute()`` returned a status reply, this function returns a string representation of that reply.
 
 get_integer_reply
 -----------------
@@ -454,7 +419,7 @@ Prototype
 Return value
     INT
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an integer reply, this function returns an integer representation of that reply.
+    If a previously executed Redis command using ``redis.execute()`` returned an integer reply, this function returns an integer representation of that reply.
 
 get_string_reply
 ----------------
@@ -466,7 +431,7 @@ Prototype
 Return value
     STRING
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned string reply, this function returns a string representation of that reply.
+    If a previously executed Redis command using ``redis.execute()`` returned string reply, this function returns a string representation of that reply.
 
 get_array_reply_length
 ----------------------
@@ -478,7 +443,7 @@ Prototype
 Return value
     INT
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns the number of elements in that reply.
+    If a previously executed Redis command using ``redis.execute()`` returned an array reply, this function returns the number of elements in that reply.
 
 array_reply_is_error
 --------------------
@@ -490,7 +455,7 @@ Prototype
 Return value
     BOOL
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns TRUE if the nth element in that reply is an error reply (nested arrays are not supported).
+    If a previously executed Redis command using ``redis.execute()`` returned an array reply, this function returns TRUE if the nth element in that reply is an error reply (nested arrays are not supported).
 
 array_reply_is_nil
 ------------------
@@ -502,7 +467,7 @@ Prototype
 Return value
     BOOL
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns TRUE if the nth element in that reply is a nil reply (nested arrays are not supported).
+    If a previously executed Redis command using ``redis.execute()`` returned an array reply, this function returns TRUE if the nth element in that reply is a nil reply (nested arrays are not supported).
 
 array_reply_is_status
 ---------------------
@@ -514,7 +479,7 @@ Prototype
 Return value
     BOOL
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns TRUE if the nth element in that reply is a status reply (nested arrays are not supported).
+    If a previously executed Redis command using ``redis.execute()`` returned an array reply, this function returns TRUE if the nth element in that reply is a status reply (nested arrays are not supported).
 
 array_reply_is_integer
 ----------------------
@@ -526,7 +491,7 @@ Prototype
 Return value
     BOOL
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns TRUE if the nth element in that reply is an integer reply (nested arrays are not supported).
+    If a previously executed Redis command using ``redis.execute()`` returned an array reply, this function returns TRUE if the nth element in that reply is an integer reply (nested arrays are not supported).
 
 array_reply_is_string
 ---------------------
@@ -538,7 +503,7 @@ Prototype
 Return value
     BOOL
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns TRUE if the nth element in that reply is a string reply (nested arrays are not supported).
+    If a previously executed Redis command using ``redis.execute()`` returned an array reply, this function returns TRUE if the nth element in that reply is a string reply (nested arrays are not supported).
 
 array_reply_is_array
 --------------------
@@ -550,7 +515,7 @@ Prototype
 Return value
     BOOL
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns TRUE if the nth element in that reply is an array reply (nested arrays are not supported).
+    If a previously executed Redis command using ``redis.execute()`` returned an array reply, this function returns TRUE if the nth element in that reply is an array reply (nested arrays are not supported).
 
 get_array_reply_value
 ---------------------
@@ -562,7 +527,7 @@ Prototype
 Return value
     STRING
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns a string representation of the nth element in that reply (nested arrays are not supported).
+    If a previously executed Redis command using ``redis.execute()`` returned an array reply, this function returns a string representation of the nth element in that reply (nested arrays are not supported).
 
 OTHER FUNCTIONS
 ===============
@@ -578,7 +543,7 @@ Return value
     VOID
 Description
     Frees memory internally used by Redis commands an replies.
-    It's recommended to use this function, but if not called this will be handled automatically during the next call to ``redis.call()`` or ``redis.command()``.
+    It's recommended to use this function, but if not called this will be handled automatically during the next call to ``redis.command()``.
 
 INSTALLATION
 ============

@@ -14,7 +14,10 @@ varnish v1 -vcl+backend {
 
     sub vcl_deliver {
         # SET.
-        redis.call("SET foo hello");
+        redis.command("SET");
+        redis.push("foo");
+        redis.push("hello");
+        redis.execute();
         if (redis.reply_is_status()) {
             set resp.http.Reply-1 = redis.get_status_reply();
         }
@@ -30,19 +33,26 @@ varnish v1 -vcl+backend {
         }
 
         # GET.
-        redis.call("GET bar");
+        redis.command("GET");
+        redis.push("bar");
+        redis.execute();
         if (redis.reply_is_string()) {
             set resp.http.Reply-3 = redis.get_string_reply();
         }
 
         # DEL.
-        redis.call("DEL bar");
+        redis.command("DEL");
+        redis.push("bar");
+        redis.execute();
         if (redis.reply_is_integer()) {
             set resp.http.Reply-4 = redis.get_integer_reply();
         }
 
         # MGET.
-        redis.call("MGET foo bar");
+        redis.command("MGET");
+        redis.push("foo");
+        redis.push("bar");
+        redis.execute();
         if (redis.reply_is_array()) {
             set resp.http.Reply-5-Length = redis.get_array_reply_length();
             set resp.http.Reply-5-Value-1 = redis.get_array_reply_value(0);
@@ -62,13 +72,18 @@ varnish v1 -vcl+backend {
         }
 
         # HMGET.
-        redis.call("HGET bar field1");
+        redis.command("HGET");
+        redis.push("bar");
+        redis.push("field1");
+        redis.execute();
         if (redis.reply_is_string()) {
             set resp.http.Reply-7 = redis.get_string_reply();
         }
 
         # INCR.
-        redis.call("INCR foo");
+        redis.command("INCR");
+        redis.push("foo");
+        redis.execute();
         if (redis.reply_is_error()) {
             set resp.http.Reply-8 = redis.get_error_reply();
         }
@@ -102,20 +117,11 @@ varnish v1 -vcl+backend {
         }
 
         # GET.
-        redis.call("GET foo");
+        redis.command("GET");
+        redis.push("foo");
+        redis.execute();
         if (redis.reply_is_string()) {
             set resp.http.Reply-11 = redis.get_string_reply();
-        }
-
-        # SETEX.
-        set req.http.Key = "foo";
-        set req.http.Value = "Hello world!";
-        redis.call(
-            "SETEX %s 3600 %s" +
-            req.http.Key +
-            req.http.Value);
-        if (redis.reply_is_status()) {
-            set resp.http.Reply-12 = redis.get_status_reply();
         }
     }
 } -start
@@ -147,8 +153,6 @@ client c1 {
     expect resp.http.Reply-10 == "o/"
 
     expect resp.http.Reply-11 == "Atomic x 2!"
-
-    expect resp.http.Reply-12 == "OK"
 } -run
 
 varnish v1 -expect client_req == 1

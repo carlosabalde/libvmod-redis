@@ -12,12 +12,8 @@
 #include "sha1.h"
 #include "core.h"
 
-#define DEFAULT_TAG "main"
-#define DEFAULT_SERVER "127.0.0.1:6379"
-#define DEFAULT_TIMEOUT 500
-#define DEFAULT_TTL 0
 #define DEFAULT_SHARED_CONTEXTS 0
-#define DEFAULT_CONTEXTS 1
+#define DEFAULT_MAX_CONTEXTS 1
 
 static unsigned version = 0;
 
@@ -28,6 +24,9 @@ static pthread_key_t thread_key;
 
 static thread_state_t *get_thread_state(struct sess *sp, unsigned drop_reply);
 static void make_thread_key();
+
+static unsigned unsafe_server_exists(vcl_priv_t *config, const char *tag);
+static unsigned unsafe_pool_exists(vcl_priv_t *config, const char *tag);
 
 static const char *get_reply(struct sess *sp, redisReply *reply);
 
@@ -54,9 +53,7 @@ init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
     // Code initializing / freeing the VCL private data structure *is
     // not required* to be thread safe.
     if (vcl_priv->priv == NULL) {
-        vcl_priv->priv = new_vcl_priv(
-            DEFAULT_TAG, DEFAULT_SERVER, DEFAULT_TIMEOUT, DEFAULT_TTL,
-            DEFAULT_SHARED_CONTEXTS, DEFAULT_CONTEXTS);
+        vcl_priv->priv = new_vcl_priv(DEFAULT_SHARED_CONTEXTS, DEFAULT_MAX_CONTEXTS);
         vcl_priv->free = (vmod_priv_free_f *)free_vcl_priv;
     }
 
@@ -78,15 +75,38 @@ vmod_init(
     if ((tag != NULL) && (strlen(tag) > 0) &&
         (location != NULL) && (strlen(location) > 0) &&
         (max_contexts > 0)) {
-        // Set new configuration.
-        vcl_priv_t *old = vcl_priv->priv;
-        vcl_priv->priv = new_vcl_priv(
-            tag, location, timeout, ttl,
-            shared_contexts, max_contexts);
+        // Do not continue if 'tag' starts with the reserved prefix internally
+        // used for clustered servers.
+        if (strncmp(tag, CLUSTERED_REDIS_SERVER_TAG_PREFIX,
+                    strlen(CLUSTERED_REDIS_SERVER_TAG_PREFIX)) != 0) {
+            // Initializations.
+            redis_server_t *server = new_redis_server(tag, location, timeout, ttl);
 
-        // Release previous configuration.
-        if (old != NULL) {
-            free_vcl_priv(old);
+            // Do not continue if we failed to create the server instance.
+            if (server != NULL) {
+                // Create new configuration.
+                vcl_priv_t *new = new_vcl_priv(shared_contexts, max_contexts);
+                VTAILQ_INSERT_TAIL(&new->servers, server, list);
+                redis_context_pool_t *pool = new_redis_context_pool(server->tag);
+                VTAILQ_INSERT_TAIL(&new->pools, pool, list);
+
+                // Set new configuration & release previous one.
+                vcl_priv_t *old = vcl_priv->priv;
+                vcl_priv->priv = new;
+                free_vcl_priv(old);
+
+            // Failed to create the server instance.
+            } else {
+                REDIS_LOG(sp,
+                    "Failed to add server '%s' tagged as '%s'",
+                    location, tag);
+            }
+
+        // Invalid tag prefix.
+        } else {
+            REDIS_LOG(sp,
+                "Tags prefixed with the '%s' string are not allowed",
+                CLUSTERED_REDIS_SERVER_TAG_PREFIX);
         }
     }
 }
@@ -103,84 +123,50 @@ vmod_add_server(
     // Check input.
     if ((tag != NULL) && (strlen(tag) > 0) &&
         (location != NULL) && (strlen(location) > 0)) {
-        // Initializations.
-        vcl_priv_t *config = vcl_priv->priv;
+        // Do not continue if 'tag' starts with the reserved prefix internally
+        // used for clustered servers.
+        if (strncmp(tag, CLUSTERED_REDIS_SERVER_TAG_PREFIX,
+                    strlen(CLUSTERED_REDIS_SERVER_TAG_PREFIX)) != 0) {
+            // Initializations.
+            vcl_priv_t *config = vcl_priv->priv;
+            redis_server_t *server = new_redis_server(tag, location, timeout, ttl);
 
-        // Get config lock.
-        AZ(pthread_mutex_lock(&config->mutex));
+            // Do not continue if we failed to create the server instance.
+            if (server != NULL) {
+                // Get config lock.
+                AZ(pthread_mutex_lock(&config->mutex));
 
-        // Add new server.
-        redis_server_t *server = new_redis_server(tag, location, timeout, ttl);
-        VTAILQ_INSERT_TAIL(&config->servers, server, list);
+                // Clustered server shouldn't be duplicated.
+                if (!server->clustered || !unsafe_server_exists(config, server->tag)) {
+                    // Add new server.
+                    VTAILQ_INSERT_TAIL(&config->servers, server, list);
 
-        // If required, add new pool.
-        redis_context_pool_t *pool = NULL;
-        redis_context_pool_t *ipool;
-        VTAILQ_FOREACH(ipool, &config->pools, list) {
-            if (strcmp(tag, ipool->tag) == 0) {
-                CHECK_OBJ_NOTNULL(ipool, REDIS_CONTEXT_POOL_MAGIC);
-                pool = ipool;
-                break;
-            }
-        }
-        if (pool == NULL) {
-            pool = new_redis_context_pool(tag);
-            VTAILQ_INSERT_TAIL(&config->pools, pool, list);
-        }
+                    // If required, add new pool.
+                    if (!unsafe_pool_exists(config, server->tag)) {
+                        redis_context_pool_t *pool = new_redis_context_pool(server->tag);
+                        VTAILQ_INSERT_TAIL(&config->pools, pool, list);
+                    }
 
-        // Release config lock.
-        AZ(pthread_mutex_unlock(&config->mutex));
-    }
-}
+                // Duplicated clustered server.
+                } else {
+                    free_redis_server(server);
+                }
 
-/******************************************************************************
- * redis.call();
- *****************************************************************************/
+                // Release config lock.
+                AZ(pthread_mutex_unlock(&config->mutex));
 
-void
-vmod_call(struct sess *sp, struct vmod_priv *vcl_priv, const char *command, ...)
-{
-    // Check input.
-    if (command != NULL) {
-        // Fetch local thread state & flush previous command.
-        thread_state_t *state = get_thread_state(sp, 1);
-
-        // Fetch context.
-        // XXX: redis.call() does not allow selecting the destination sever.
-        redis_context_t *context = get_context(sp, vcl_priv, state, version);
-
-        // Do not continue if a Redis context is not available.
-        if (context != NULL) {
-            // Send command.
-            // XXX: beware of the ugly hack to support usage of '%s'
-            // placeholders in VCL.
-            // XXX: redis.call() does not allow optimistic execution of EVALSHA
-            // commands.
-            va_list args;
-            va_start(args, command);
-            state->reply = redisvCommand(context->rcontext, command, args);
-            va_end(args);
-
-            // Check reply.
-            if (context->rcontext->err) {
+            // Failed to create the server instance.
+            } else {
                 REDIS_LOG(sp,
-                    "Failed to execute Redis command (%s): [%d] %s",
-                    command,
-                    context->rcontext->err,
-                    context->rcontext->errstr);
-            } else if (state->reply == NULL) {
-                REDIS_LOG(sp,
-                    "Failed to execute Redis command (%s)",
-                    command);
-            } else if (state->reply->type == REDIS_REPLY_ERROR) {
-                REDIS_LOG(sp,
-                    "Got error reply while executing Redis command (%s): %s",
-                    command,
-                    state->reply->str);
+                    "Failed to add server '%s' tagged as '%s'",
+                    location, tag);
             }
 
-            // Release context.
-            free_context(sp, vcl_priv, state, context);
+        // Invalid tag prefix.
+        } else {
+            REDIS_LOG(sp,
+                "Tags prefixed with the '%s' string are not allowed",
+                CLUSTERED_REDIS_SERVER_TAG_PREFIX);
         }
     }
 }
@@ -530,6 +516,48 @@ static void
 make_thread_key()
 {
     AZ(pthread_key_create(&thread_key, (void *) free_thread_state));
+}
+
+static unsigned
+unsafe_server_exists(vcl_priv_t *config, const char *tag)
+{
+    // Initializations.
+    unsigned result = 0;
+
+    // Look for a server matching the tag.
+    // Caller should own config->mutex!
+    redis_server_t *iserver;
+    VTAILQ_FOREACH(iserver, &config->servers, list) {
+        if (strcmp(tag, iserver->tag) == 0) {
+            CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
+            result = 1;
+            break;
+        }
+    }
+
+    // Done!
+    return result;
+}
+
+static unsigned
+unsafe_pool_exists(vcl_priv_t *config, const char *tag)
+{
+    // Initializations.
+    unsigned result = 0;
+
+    // Look for a pool matching the tag.
+    // Caller should own config->mutex!
+    redis_context_pool_t *ipool;
+    VTAILQ_FOREACH(ipool, &config->pools, list) {
+        if (strcmp(tag, ipool->tag) == 0) {
+            CHECK_OBJ_NOTNULL(ipool, REDIS_CONTEXT_POOL_MAGIC);
+            result = 1;
+            break;
+        }
+    }
+
+    // Done!
+    return result;
 }
 
 static const char *

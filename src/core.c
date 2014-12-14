@@ -27,28 +27,46 @@ redis_server_t *
 new_redis_server(
     const char *tag, const char *location, int timeout, int ttl)
 {
-    redis_server_t *result;
-    ALLOC_OBJ(result, REDIS_SERVER_MAGIC);
-    AN(result);
-
+    // Initializations.
+    redis_server_t *result = NULL;
+    unsigned clustered = (strcmp(tag, CLUSTERED_REDIS_SERVER_TAG) == 0);
     char *ptr = strrchr(location, ':');
-    if (ptr != NULL) {
-        result->type = REDIS_SERVER_HOST_TYPE;
-        result->location.address.host = strndup(location, ptr - location);
-        AN(result->location.address.host);
-        result->location.address.port = atoi(ptr + 1);
-    } else {
-        result->type = REDIS_SERVER_SOCKET_TYPE;
-        result->location.path = strdup(location);
-        AN(result->location.path);
+
+    // Do not continue if this is a clustered server but its location is not
+    // provided using the host + port format.
+    if (!clustered || (ptr != NULL)) {
+        ALLOC_OBJ(result, REDIS_SERVER_MAGIC);
+        AN(result);
+
+        if (ptr != NULL) {
+            result->type = REDIS_SERVER_HOST_TYPE;
+            result->location.address.host = strndup(location, ptr - location);
+            AN(result->location.address.host);
+            result->location.address.port = atoi(ptr + 1);
+        } else {
+            result->type = REDIS_SERVER_SOCKET_TYPE;
+            result->location.path = strdup(location);
+            AN(result->location.path);
+        }
+
+        if (clustered) {
+            char buffer[256];
+            snprintf(buffer, sizeof(buffer), CLUSTERED_REDIS_SERVER_TAG_FORMAT,
+                CLUSTERED_REDIS_SERVER_TAG_PREFIX,
+                result->location.address.host,
+                result->location.address.port);
+            result->tag = strdup(buffer);
+        } else {
+            result->tag = strdup(tag);
+        }
+        AN(result->tag);
+        result->clustered = clustered;
+        result->timeout.tv_sec = timeout / 1000;
+        result->timeout.tv_usec = (timeout % 1000) * 1000;
+        result->ttl = ttl;
     }
 
-    result->tag = strdup(tag);
-    AN(result->tag);
-    result->timeout.tv_sec = timeout / 1000;
-    result->timeout.tv_usec = (timeout % 1000) * 1000;
-    result->ttl = ttl;
-
+    // Done!
     return result;
 }
 
@@ -57,6 +75,7 @@ free_redis_server(redis_server_t *server)
 {
     free((void *) server->tag);
     server->tag = NULL;
+    server->clustered = 0;
 
     switch (server->type) {
         case REDIS_SERVER_HOST_TYPE:
@@ -154,9 +173,7 @@ free_redis_context_pool(redis_context_pool_t *pool)
 }
 
 vcl_priv_t *
-new_vcl_priv(
-    const char *tag, const char *location, unsigned timeout, unsigned ttl,
-    unsigned shared_contexts, unsigned max_contexts)
+new_vcl_priv(unsigned shared_contexts, unsigned max_contexts)
 {
     vcl_priv_t *result;
     ALLOC_OBJ(result, VCL_PRIV_MAGIC);
@@ -165,15 +182,11 @@ new_vcl_priv(
     AZ(pthread_mutex_init(&result->mutex, NULL));
 
     VTAILQ_INIT(&result->servers);
-    redis_server_t *server = new_redis_server(tag, location, timeout, ttl);
-    VTAILQ_INSERT_TAIL(&result->servers, server, list);
 
     result->shared_contexts = shared_contexts;
     result->max_contexts = max_contexts;
 
     VTAILQ_INIT(&result->pools);
-    redis_context_pool_t *pool = new_redis_context_pool(tag);
-    VTAILQ_INSERT_TAIL(&result->pools, pool, list);
 
     return result;
 }

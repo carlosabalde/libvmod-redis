@@ -6,6 +6,10 @@
 
 #include "vqueue.h"
 
+#define CLUSTERED_REDIS_SERVER_TAG "cluster"
+#define CLUSTERED_REDIS_SERVER_TAG_PREFIX "cluster:"
+#define CLUSTERED_REDIS_SERVER_TAG_FORMAT "%s%s:%u"
+
 enum REDIS_SERVER_TYPE {
     REDIS_SERVER_HOST_TYPE,
     REDIS_SERVER_SOCKET_TYPE
@@ -16,8 +20,9 @@ typedef struct redis_server {
 #define REDIS_SERVER_MAGIC 0xac587b11
     unsigned magic;
 
-    // Tag (i.e. 'main', 'master', 'slave', 'cluster', etc.).
+    // Tag (i.e. 'main', 'master', 'slave', etc.).
     const char *tag;
+    unsigned clustered;
 
     // Type & location.
     enum REDIS_SERVER_TYPE type;
@@ -132,9 +137,7 @@ void free_redis_context(redis_context_t *context);
 redis_context_pool_t *new_redis_context_pool(const char *tag);
 void free_redis_context_pool(redis_context_pool_t *pool);
 
-vcl_priv_t *new_vcl_priv(
-    const char *tag, const char *location, unsigned timeout, unsigned ttl,
-    unsigned shared_pool, unsigned max_pool_size);
+vcl_priv_t *new_vcl_priv(unsigned shared_pool, unsigned max_pool_size);
 void free_vcl_priv(vcl_priv_t *priv);
 
 thread_state_t *new_thread_state();
