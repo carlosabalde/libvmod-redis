@@ -149,7 +149,7 @@ void free_thread_state(thread_state_t *state);
 
 redis_context_t *get_context(
     struct sess *sp, struct vmod_priv *vcl_priv, thread_state_t *state,
-    unsigned int version);
+    const char *tag, unsigned int version);
 void free_context(
     struct sess *sp, struct vmod_priv *vcl_priv, thread_state_t *state,
     redis_context_t * context);

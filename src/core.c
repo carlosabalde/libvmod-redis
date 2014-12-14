@@ -14,11 +14,11 @@
 
 static redis_context_t *get_private_context(
     struct sess *sp, vcl_priv_t *config, thread_state_t *state,
-    unsigned int version);
+    const char *tag, unsigned int version);
 
 static redis_context_t *get_shared_context(
     struct sess *sp, vcl_priv_t *config, thread_state_t *state,
-    unsigned int version);
+    const char *tag, unsigned int version);
 
 static void free_shared_context(
     struct sess *sp, vcl_priv_t *config, redis_context_t *context);
@@ -255,13 +255,13 @@ free_thread_state(thread_state_t *state)
 redis_context_t *
 get_context(
     struct sess *sp, struct vmod_priv *vcl_priv, thread_state_t *state,
-    unsigned int version)
+    const char *tag, unsigned int version)
 {
     vcl_priv_t *config = vcl_priv->priv;
     if (config->shared_contexts) {
-        return get_shared_context(sp, config, state, version);
+        return get_shared_context(sp, config, state, tag, version);
     } else {
-        return get_private_context(sp, config, state, version);
+        return get_private_context(sp, config, state, tag, version);
     }
 }
 
@@ -406,7 +406,7 @@ new_rcontext(
 static redis_context_t *
 get_private_context(
     struct sess *sp, vcl_priv_t *config, thread_state_t *state,
-    unsigned int version)
+    const char *tag, unsigned int version)
 {
     redis_context_t *icontext;
     redis_server_t *iserver;
@@ -418,8 +418,7 @@ get_private_context(
     // Select an existing context matching the requested tag (it may exist or
     // not, but no more that one instance is possible).
     VTAILQ_FOREACH(icontext, &state->contexts, list) {
-        if ((state->tag == NULL) ||
-            (strcmp(state->tag, icontext->server->tag) == 0)) {
+        if ((tag == NULL) || (strcmp(tag, icontext->server->tag) == 0)) {
             // Found!
             CHECK_OBJ_NOTNULL(icontext, REDIS_CONTEXT_MAGIC);
             result = icontext;
@@ -450,7 +449,7 @@ get_private_context(
     if (result == NULL) {
         // Select server matching the requested tag.
         AZ(pthread_mutex_lock(&config->mutex));
-        redis_server_t *server = unsafe_get_server(config, state->tag);
+        redis_server_t *server = unsafe_get_server(config, tag);
         AZ(pthread_mutex_unlock(&config->mutex));
 
         // Do not continue if a server was not found.
@@ -473,7 +472,7 @@ get_private_context(
                 state->ncontexts++;
             }
         } else {
-            REDIS_LOG(sp, "The requested server does not exist: %s", state->tag);
+            REDIS_LOG(sp, "The requested server does not exist: %s", tag);
         }
     }
 
@@ -484,7 +483,7 @@ get_private_context(
 static redis_context_t *
 get_shared_context(
     struct sess *sp, vcl_priv_t *config, thread_state_t *state,
-    unsigned int version)
+    const char *tag, unsigned int version)
 {
     redis_context_t *icontext;
     redis_server_t *iserver;
@@ -495,7 +494,7 @@ get_shared_context(
 
     // Fetch pool instance.
     AZ(pthread_mutex_lock(&config->mutex));
-    redis_context_pool_t *pool = unsafe_get_pool(config, state->tag);
+    redis_context_pool_t *pool = unsafe_get_pool(config, tag);
     AZ(pthread_mutex_unlock(&config->mutex));
 
     // Do not continue if a pool was not found.
@@ -537,7 +536,7 @@ retry:
         if (result == NULL) {
             // Select server matching the requested tag.
             AZ(pthread_mutex_lock(&config->mutex));
-            redis_server_t *server = unsafe_get_server(config, state->tag);
+            redis_server_t *server = unsafe_get_server(config, tag);
             AZ(pthread_mutex_unlock(&config->mutex));
 
             // Do not continue if a server was not found.
@@ -566,7 +565,7 @@ retry:
                     pool->ncontexts++;
                 }
             } else {
-                REDIS_LOG(sp, "The requested server does not exist: %s", state->tag);
+                REDIS_LOG(sp, "The requested server does not exist: %s", tag);
             }
         }
 
@@ -575,7 +574,7 @@ retry:
 
     // The poll was not found.
     } else {
-        REDIS_LOG(sp, "The requested server does not exist: %s", state->tag);
+        REDIS_LOG(sp, "The requested server does not exist: %s", tag);
     }
 
     // Done!
