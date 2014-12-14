@@ -1,6 +1,7 @@
 #ifndef CORE_H_INCLUDED
 #define CORE_H_INCLUDED
 
+#include <syslog.h>
 #include <pthread.h>
 #include <hiredis/hiredis.h>
 
@@ -123,7 +124,10 @@ typedef struct thread_state {
         snprintf( \
             _buffer, sizeof(_buffer), \
             "[REDIS][%s] %s", __func__, message); \
-        WSP(sp, SLT_Error, _buffer, ##__VA_ARGS__); \
+        syslog(LOG_ERR, _buffer, ##__VA_ARGS__); \
+        if (sp != NULL) { \
+            WSP(sp, SLT_Error, _buffer, ##__VA_ARGS__); \
+        } \
     } while (0)
 
 redis_server_t *new_redis_server(
