@@ -72,7 +72,8 @@ Highlights:
 * **Full support for execution of LUA scripts** (i.e. ``EVAL`` command), including optimistic automatic execution of ``EVALSHA`` commands.
 * **All Redis reply data types are supported**, including partial support to access to components of simple (i.e. not nested) array replies.
 * **Redis pipelines are not (and won't be) supported**. LUA scripting, which is fully supported by the VMOD, it's a much more flexible alternative to pipelines for atomic execution and minimizing latency. Pipelines are hard to use and error prone, specially when using the ``WATCH`` command.
-* **Support for multiple Redis servers and multiple Redis connections per worker thread**.
+* **Support for classic Redis deployments** using multiple Redis servers (replicated or standalone) **and for clustered deployments based on Redis Cluster**.
+* **Support both for multiple Redis connections**, local to each Varnish worker thread, or shared using one or more pools.
 
 Looking for official support for this VMOD? Please, contact Allenta Consulting (http://www.allenta.com), the Varnish Software integration partner for Spain and Portugal (https://www.varnish-software.com/partner/allenta-consulting).
 
@@ -161,6 +162,36 @@ Multiple servers
         set req.http.X-Foo = redis.get_string_reply();
     }
 
+Clustered setup
+---------------
+
+::
+
+    sub vcl_init {
+        # VMOD configuration: clustered setup, keeping up to 256 Redis
+        # connections shared between all Varnish worker threads. Two
+        # initial cluster nodes provided; remaining nodes will be
+        # automatically discovered on demand.
+        redis.init("cluster", "192.168.1.100:6379", 500, 0, true, 256);
+        redis.add_server("cluster", "192.168.1.101:6379", 500, 0);
+    }
+
+    sub vcl_deliver {
+        # SET internally routed to the destination node.
+        redis.command("SET");
+        redis.push("foo");
+        redis.push("Hello world!");
+        redis.execute();
+
+        # GET internally routed to the destination node.
+        redis.command("GET");
+        redis.push("foo");
+        redis.execute();
+        set req.http.X-Foo = redis.get_string_reply();
+    }
+
+
+
 CONFIGURATION FUNCTIONS
 =======================
 
@@ -172,9 +203,10 @@ Prototype
 
                 init(STRING tag, STRING location, INT timeout, INT ttl, BOOL shared_contexts, INT max_contexts)
 Arguments
-    tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.).
+    tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.). When using the reserved tag ``cluster`` the VMOD internally enables the
+    Redis Cluster support for the server.
 
-    location: Redis connection string. Both host + port and UNIX sockets are supported.
+    location: Redis connection string. Both host + port and UNIX sockets are supported. If this is a Redis Cluster node only host + port format is allowed.
 
     timeout: connection timeout (milliseconds) to the Redis server.
 
@@ -199,9 +231,10 @@ Prototype
 
                 add_server(STRING tag, STRING location, INT timeout, INT ttl)
 Arguments
-    tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.).
+    tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.). When using the reserved tag ``cluster`` the VMOD internally enables the
+    Redis Cluster support for the server.
 
-    location: Redis connection string. Both host + port and UNIX sockets are supported.
+    location: Redis connection string. Both host + port and UNIX sockets are supported. If this is a Redis Cluster node only host + port format is allowed.
 
     timeout: connection timeout (milliseconds) to the Redis server.
 
@@ -211,7 +244,7 @@ Description
     Adds an extra Redis server.
     Must be used during the ``vcl_init`` phase.
 
-    Use this feature (1) when using master-slave replication; or (2) when using multiple independent servers; or (3) when using some kind of proxy assisted partitioning (e.g. https://github.com/twitter/twemproxy) and more than one proxy is available.
+    Use this feature (1) when using master-slave replication; or (2) when using multiple independent servers; or (3) when using some kind of proxy assisted partitioning (e.g. https://github.com/twitter/twemproxy) and more than one proxy is available; or (4) when adding extra nodes composing a Redis Cluster setup.
 
     When a command is submitted using ``redis.execute()`` and more that one Redis server is available, the destination server is selected according with the tag specified with `redis.server()`. If not specified, a randomly selected connection will be used (if the worker thread / corresponding pool already has any Redis connection established and available), or a new connection to a randomly selected server will be established.
 
@@ -575,10 +608,11 @@ COPYRIGHT
 
 This document is licensed under the same license as the libvmod-redis project. See LICENSE for details.
 
-Implementation of the SHA-1 cryptographic hash function embedded in this VMOD (required to the optimistic execution of ``EVALSHA`` commands) is borrowed from the Redis server implementation:
+Implementation of the SHA-1 and CRC-16 cryptographic hash functions embedded in this VMOD (required to the optimistic execution of ``EVALSHA`` commands and to the Redis Cluster slot calculation respectively) are borrowed from the Redis server implementation:
 
 * http://download.redis.io/redis-stable/src/sha1.c
 * http://download.redis.io/redis-stable/src/sha1.h
 * http://download.redis.io/redis-stable/src/config.h
+* https://github.com/antirez/redis/blob/unstable/src/crc16.c
 
 Copyright (c) 2014 Carlos Abalde <carlos.abalde@gmail.com>
