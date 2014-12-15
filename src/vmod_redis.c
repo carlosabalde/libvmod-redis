@@ -121,8 +121,9 @@ vmod_add_server(
         vcl_priv_t *config = vcl_priv->priv;
 
         // Do not allow tags internally reserved for clustering.
-        if ((strcmp(tag, CLUSTERED_REDIS_SERVER_TAG) != 0) &&
-            ((!config->clustered) ||
+        if (((!config->clustered) &&
+             (strcmp(tag, CLUSTERED_REDIS_SERVER_TAG) != 0)) ||
+            ((config->clustered) &&
              (strncmp(tag, CLUSTERED_REDIS_SERVER_TAG_PREFIX,
                       strlen(CLUSTERED_REDIS_SERVER_TAG_PREFIX)) != 0))) {
             // Initializations.

@@ -157,9 +157,10 @@ Clustered setup
     sub vcl_init {
         # VMOD configuration: clustered setup, keeping up to 100 Redis
         # connections per server, all shared between all Varnish worker threads.
-        # One initial cluster server is provided; remaining servers are
+        # Two initial cluster server are provided; remaining servers are
         # automatically discovered.
         redis.init("cluster", "192.168.1.100:6379", 500, 0, true, 100);
+        redis.add_server("cluster", "192.168.1.101:6379", 500, 0);
     }
 
     sub vcl_deliver {
@@ -216,13 +217,15 @@ Prototype
 
                 add_server(STRING tag, STRING location, INT timeout, INT ttl)
 Arguments
-    tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.). Using the reserved tag ``cluster`` is not allowed.
+    tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.). Using the reserved tag ``cluster`` is only allowed if Redis Cluster support was enabled when calling ``redis.init()``.
 
-    location: Redis connection string. Both host + port and UNIX sockets are supported.
+    location: Redis connection string. Both host + port and UNIX sockets are supported. If this is a Redis Cluster server only host + port format is allowed.
 
-    timeout: connection timeout (milliseconds) to the Redis server.
+    timeout: connection timeout (milliseconds) to the Redis server. If this is a Redis Cluster server the recommendation is using the same timeout used when calling ``redis.init()`` to enabled Redis Cluster support.
 
-    ttl: TTL (seconds) of Redis connections (0 means no TTL). Once the TTL of a connection is consumed, the module transparently reestablishes it. See "Client timeouts" in http://redis.io/topics/clients for extra information.Return value
+    ttl: TTL (seconds) of Redis connections (0 means no TTL). Once the TTL of a connection is consumed, the module transparently reestablishes it. See "Client timeouts" in http://redis.io/topics/clients for extra information. If this is a Redis Cluster server the recommendation is using the same TTL used when calling ``redis.init()`` to enabled Redis Cluster support.
+
+Return value
     VOID
 Description
     Adds an extra Redis server.
