@@ -254,10 +254,9 @@ free_thread_state(thread_state_t *state)
 
 redis_context_t *
 get_context(
-    struct sess *sp, struct vmod_priv *vcl_priv, thread_state_t *state,
+    struct sess *sp, vcl_priv_t *config, thread_state_t *state,
     const char *tag, unsigned int version)
 {
-    vcl_priv_t *config = vcl_priv->priv;
     if (config->shared_contexts) {
         return get_shared_context(sp, config, state, tag, version);
     } else {
@@ -267,10 +266,9 @@ get_context(
 
 void
 free_context(
-    struct sess *sp, struct vmod_priv *vcl_priv, thread_state_t *state,
+    struct sess *sp, vcl_priv_t *config, thread_state_t *state,
     redis_context_t *context)
 {
-    vcl_priv_t *config = vcl_priv->priv;
     if (config->shared_contexts) {
         return free_shared_context(sp, config, context);
     }

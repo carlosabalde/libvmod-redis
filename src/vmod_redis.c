@@ -254,11 +254,12 @@ vmod_push(struct sess *sp, const char *arg)
 void
 vmod_execute(struct sess *sp, struct vmod_priv *vcl_priv)
 {
-    // Fetch local thread state.
+    // Initializations.
+    vcl_priv_t *config = vcl_priv->priv;
     thread_state_t *state = get_thread_state(sp, 0);
 
     // Fetch context.
-    redis_context_t *context = get_context(sp, vcl_priv, state, state->tag, version);
+    redis_context_t *context = get_context(sp, config, state, state->tag, version);
 
     // Do not continue if a Redis context is not available or if the initial
     // call to redis.command() was not executed.
@@ -326,7 +327,7 @@ vmod_execute(struct sess *sp, struct vmod_priv *vcl_priv)
         }
 
         // Release context.
-        free_context(sp, vcl_priv, state, context);
+        free_context(sp, config, state, context);
     }
 }
 
