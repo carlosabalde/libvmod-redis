@@ -173,19 +173,10 @@ vmod_command(struct sess *sp, const char *name)
         // Fetch local thread state & flush previous command.
         thread_state_t *state = get_thread_state(sp, 1);
 
-        // Convert command name to uppercase (for later comparison with the
-        // 'EVAL' string).
-        char *command = WS_Dup(sp->ws, name);
-        AN(command);
-        char *ptr = command;
-        while (*ptr) {
-            *ptr = toupper(*ptr);
-            ptr++;
-        }
-
         // Initialize.
         state->argc = 1;
-        state->argv[0] = command;
+        state->argv[0] = WS_Dup(sp->ws, name);
+        AN(state->argv[0]);
     }
 }
 
@@ -262,7 +253,7 @@ vmod_execute(struct sess *sp, struct vmod_priv *vcl_priv)
     if ((state->argc >= 1) && (context != NULL)) {
         // When executing EVAL commands, first try with EVALSHA.
         unsigned done = 0;
-        if ((strcmp(state->argv[0], "EVAL") == 0) && (state->argc >= 2)) {
+        if ((strcasecmp(state->argv[0], "EVAL") == 0) && (state->argc >= 2)) {
             // Replace EVAL with EVALSHA.
             state->argv[0] = WS_Dup(sp->ws, "EVALSHA");
             AN(state->argv[0]);
