@@ -8,8 +8,10 @@
 #include "vqueue.h"
 
 #define CLUSTERED_REDIS_SERVER_TAG "cluster"
-#define CLUSTERED_REDIS_SERVER_TAG_PREFIX "cluster:"
+#define CLUSTERED_REDIS_SERVER_TAG_PREFIX ":"
 #define CLUSTERED_REDIS_SERVER_TAG_FORMAT "%s%s:%u"
+
+#define MAX_REDIS_CLUSTER_SLOTS 16384
 
 enum REDIS_SERVER_TYPE {
     REDIS_SERVER_HOST_TYPE,
@@ -90,7 +92,11 @@ typedef struct vcl_priv {
     // Redis servers (allocated in the heap).
     VTAILQ_HEAD(,redis_server) servers;
 
+    // Redis Cluster slots (allocated in the heap).
+    const char *slots[MAX_REDIS_CLUSTER_SLOTS];
+
     // General options.
+    unsigned clustered;
     unsigned shared_contexts;
     unsigned max_contexts;
 
@@ -146,6 +152,9 @@ void free_vcl_priv(vcl_priv_t *priv);
 
 thread_state_t *new_thread_state();
 void free_thread_state(thread_state_t *state);
+
+unsigned unsafe_server_exists(vcl_priv_t *config, const char *tag);
+unsigned unsafe_pool_exists(vcl_priv_t *config, const char *tag);
 
 redis_context_t *get_context(
     struct sess *sp, vcl_priv_t *config, thread_state_t *state,

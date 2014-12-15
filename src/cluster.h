@@ -3,6 +3,6 @@
 
 #include "core.h"
 
-void fetch_cluster_slots(struct sess *sp, vcl_priv_t *config);
+void discover_cluster_slots(struct sess *sp, vcl_priv_t *config);
 
 #endif

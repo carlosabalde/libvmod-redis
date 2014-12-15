@@ -26,9 +26,6 @@ static pthread_key_t thread_key;
 static thread_state_t *get_thread_state(struct sess *sp, unsigned drop_reply);
 static void make_thread_key();
 
-static unsigned unsafe_server_exists(vcl_priv_t *config, const char *tag);
-static unsigned unsafe_pool_exists(vcl_priv_t *config, const char *tag);
-
 static const char *get_reply(struct sess *sp, redisReply *reply);
 
 static const char *sha1(struct sess *sp, const char *script);
@@ -76,43 +73,34 @@ vmod_init(
     if ((tag != NULL) && (strlen(tag) > 0) &&
         (location != NULL) && (strlen(location) > 0) &&
         (max_contexts > 0)) {
-        // Do not continue if 'tag' starts with the reserved prefix internally
-        // used for clustered servers.
-        if (strncmp(tag, CLUSTERED_REDIS_SERVER_TAG_PREFIX,
-                    strlen(CLUSTERED_REDIS_SERVER_TAG_PREFIX)) != 0) {
-            // Initializations.
-            redis_server_t *server = new_redis_server(tag, location, timeout, ttl);
+        // Initializations.
+        redis_server_t *server = new_redis_server(tag, location, timeout, ttl);
 
-            // Do not continue if we failed to create the server instance.
-            if (server != NULL) {
-                // Create new configuration.
-                vcl_priv_t *config = new_vcl_priv(shared_contexts, max_contexts);
-                VTAILQ_INSERT_TAIL(&config->servers, server, list);
-                redis_context_pool_t *pool = new_redis_context_pool(server->tag);
-                VTAILQ_INSERT_TAIL(&config->pools, pool, list);
+        // Do not continue if we failed to create the server instance.
+        if (server != NULL) {
+            // Create new configuration.
+            vcl_priv_t *config = new_vcl_priv(shared_contexts, max_contexts);
+            VTAILQ_INSERT_TAIL(&config->servers, server, list);
+            redis_context_pool_t *pool = new_redis_context_pool(server->tag);
+            VTAILQ_INSERT_TAIL(&config->pools, pool, list);
 
-                // If a clustered server was added, populate the list of slots.
-                if (server->clustered) {
-                    fetch_cluster_slots(sp, config);
-                }
-
-                // Set new configuration & release previous one.
-                vcl_priv_t *old_config = vcl_priv->priv;
-                vcl_priv->priv = config;
-                free_vcl_priv(old_config);
-
-            // Failed to create the server instance.
-            } else {
-                REDIS_LOG(sp,
-                    "Failed to add server '%s' tagged as '%s'",
-                    location, tag);
+            // If a clustered server was added, enable clustering and populate
+            // the list of slots.
+            if (server->clustered) {
+                config->clustered = 1;
+                discover_cluster_slots(sp, config);
             }
 
-        // Invalid tag prefix.
+            // Set new configuration & release previous one.
+            vcl_priv_t *old_config = vcl_priv->priv;
+            vcl_priv->priv = config;
+            free_vcl_priv(old_config);
+
+        // Failed to create the server instance.
         } else {
             REDIS_LOG(sp,
-                "Tags prefixed with the '%s' string are not allowed",
-                CLUSTERED_REDIS_SERVER_TAG_PREFIX);
+                "Failed to add server '%s' tagged as '%s'",
+                location, tag);
         }
     }
 }
@@ -129,12 +117,15 @@ vmod_add_server(
     // Check input.
     if ((tag != NULL) && (strlen(tag) > 0) &&
         (location != NULL) && (strlen(location) > 0)) {
-        // Do not continue if 'tag' starts with the reserved prefix internally
-        // used for clustered servers.
-        if (strncmp(tag, CLUSTERED_REDIS_SERVER_TAG_PREFIX,
-                    strlen(CLUSTERED_REDIS_SERVER_TAG_PREFIX)) != 0) {
+        // Initializations.
+        vcl_priv_t *config = vcl_priv->priv;
+
+        // Do not allow tags internally reserved for clustering.
+        if ((strcmp(tag, CLUSTERED_REDIS_SERVER_TAG) != 0) &&
+            ((!config->clustered) ||
+             (strncmp(tag, CLUSTERED_REDIS_SERVER_TAG_PREFIX,
+                      strlen(CLUSTERED_REDIS_SERVER_TAG_PREFIX)) != 0))) {
             // Initializations.
-            vcl_priv_t *config = vcl_priv->priv;
             redis_server_t *server = new_redis_server(tag, location, timeout, ttl);
 
             // Do not continue if we failed to create the server instance.
@@ -142,20 +133,13 @@ vmod_add_server(
                 // Get config lock.
                 AZ(pthread_mutex_lock(&config->mutex));
 
-                // Clustered server shouldn't be duplicated.
-                if (!server->clustered || !unsafe_server_exists(config, server->tag)) {
-                    // Add new server.
-                    VTAILQ_INSERT_TAIL(&config->servers, server, list);
+                // Add new server.
+                VTAILQ_INSERT_TAIL(&config->servers, server, list);
 
-                    // If required, add new pool.
-                    if (!unsafe_pool_exists(config, server->tag)) {
-                        redis_context_pool_t *pool = new_redis_context_pool(server->tag);
-                        VTAILQ_INSERT_TAIL(&config->pools, pool, list);
-                    }
-
-                // Duplicated clustered server.
-                } else {
-                    free_redis_server(server);
+                // If required, add new pool.
+                if (!unsafe_pool_exists(config, server->tag)) {
+                    redis_context_pool_t *pool = new_redis_context_pool(server->tag);
+                    VTAILQ_INSERT_TAIL(&config->pools, pool, list);
                 }
 
                 // Release config lock.
@@ -168,11 +152,11 @@ vmod_add_server(
                     location, tag);
             }
 
-        // Invalid tag prefix.
+        // Reserved tag.
         } else {
             REDIS_LOG(sp,
-                "Tags prefixed with the '%s' string are not allowed",
-                CLUSTERED_REDIS_SERVER_TAG_PREFIX);
+                "Failed to add server '%s' using reserved tag '%s'",
+                location, tag);
         }
     }
 }
@@ -263,6 +247,12 @@ vmod_execute(struct sess *sp, struct vmod_priv *vcl_priv)
     // Initializations.
     vcl_priv_t *config = vcl_priv->priv;
     thread_state_t *state = get_thread_state(sp, 0);
+
+    // Force an explicit if none was provided and clustering is enabled.
+    if (config->clustered && (state->tag == NULL)) {
+        state->tag = WS_Dup(sp->ws, CLUSTERED_REDIS_SERVER_TAG);
+        AN(state->tag);
+    }
 
     // Fetch context.
     redis_context_t *context = get_context(sp, config, state, state->tag, version);
@@ -523,48 +513,6 @@ static void
 make_thread_key()
 {
     AZ(pthread_key_create(&thread_key, (void *) free_thread_state));
-}
-
-static unsigned
-unsafe_server_exists(vcl_priv_t *config, const char *tag)
-{
-    // Initializations.
-    unsigned result = 0;
-
-    // Look for a server matching the tag.
-    // Caller should own config->mutex!
-    redis_server_t *iserver;
-    VTAILQ_FOREACH(iserver, &config->servers, list) {
-        if (strcmp(tag, iserver->tag) == 0) {
-            CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
-            result = 1;
-            break;
-        }
-    }
-
-    // Done!
-    return result;
-}
-
-static unsigned
-unsafe_pool_exists(vcl_priv_t *config, const char *tag)
-{
-    // Initializations.
-    unsigned result = 0;
-
-    // Look for a pool matching the tag.
-    // Caller should own config->mutex!
-    redis_context_pool_t *ipool;
-    VTAILQ_FOREACH(ipool, &config->pools, list) {
-        if (strcmp(tag, ipool->tag) == 0) {
-            CHECK_OBJ_NOTNULL(ipool, REDIS_CONTEXT_POOL_MAGIC);
-            result = 1;
-            break;
-        }
-    }
-
-    // Done!
-    return result;
 }
 
 static const char *

@@ -183,6 +183,11 @@ new_vcl_priv(unsigned shared_contexts, unsigned max_contexts)
 
     VTAILQ_INIT(&result->servers);
 
+    for (int i = 0; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
+        result->slots[i] = NULL;
+    }
+
+    result->clustered = 0;
     result->shared_contexts = shared_contexts;
     result->max_contexts = max_contexts;
 
@@ -203,6 +208,14 @@ free_vcl_priv(vcl_priv_t *priv)
         free_redis_server(iserver);
     }
 
+    for (int i = 0; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
+        if (priv->slots[i] != NULL) {
+            free((void *) (priv->slots[i]));
+            priv->slots[i] = NULL;
+        }
+    }
+
+    priv->clustered = 0;
     priv->shared_contexts = 0;
     priv->max_contexts = 0;
 
@@ -250,6 +263,48 @@ free_thread_state(thread_state_t *state)
     }
 
     FREE_OBJ(state);
+}
+
+unsigned
+unsafe_server_exists(vcl_priv_t *config, const char *tag)
+{
+    // Initializations.
+    unsigned result = 0;
+
+    // Look for a server matching the tag.
+    // Caller should own config->mutex!
+    redis_server_t *iserver;
+    VTAILQ_FOREACH(iserver, &config->servers, list) {
+        if (strcmp(tag, iserver->tag) == 0) {
+            CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
+            result = 1;
+            break;
+        }
+    }
+
+    // Done!
+    return result;
+}
+
+unsigned
+unsafe_pool_exists(vcl_priv_t *config, const char *tag)
+{
+    // Initializations.
+    unsigned result = 0;
+
+    // Look for a pool matching the tag.
+    // Caller should own config->mutex!
+    redis_context_pool_t *ipool;
+    VTAILQ_FOREACH(ipool, &config->pools, list) {
+        if (strcmp(tag, ipool->tag) == 0) {
+            CHECK_OBJ_NOTNULL(ipool, REDIS_CONTEXT_POOL_MAGIC);
+            result = 1;
+            break;
+        }
+    }
+
+    // Done!
+    return result;
 }
 
 redis_context_t *

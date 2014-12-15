@@ -65,12 +65,11 @@ VMOD using the synchronous hiredis library API (https://github.com/redis/hiredis
 
 Highlights:
 
-* **All Redis commands are supported**.
 * **Full support for execution of LUA scripts** (i.e. ``EVAL`` command), including optimistic automatic execution of ``EVALSHA`` commands.
 * **All Redis reply data types are supported**, including partial support to access to components of simple (i.e. not nested) array replies.
 * **Redis pipelines are not (and won't be) supported**. LUA scripting, which is fully supported by the VMOD, it's a much more flexible alternative to pipelines for atomic execution and minimizing latency. Pipelines are hard to use and error prone, specially when using the ``WATCH`` command.
 * **Support for classic Redis deployments** using multiple Redis servers (replicated or standalone) **and for clustered deployments based on Redis Cluster**.
-* **Support both for multiple Redis connections**, local to each Varnish worker thread, or shared using one or more pools.
+* **Support for multiple Redis connections**, local to each Varnish worker thread, or shared using one or more pools.
 
 Looking for official support for this VMOD? Please, contact Allenta Consulting (http://www.allenta.com), the Varnish Software integration partner for Spain and Portugal (https://www.varnish-software.com/partner/allenta-consulting).
 
@@ -156,22 +155,21 @@ Clustered setup
 ::
 
     sub vcl_init {
-        # VMOD configuration: clustered setup, keeping up to 256 Redis
-        # connections shared between all Varnish worker threads. Two
-        # initial cluster nodes provided; remaining nodes will be
-        # automatically discovered on demand.
-        redis.init("cluster", "192.168.1.100:6379", 500, 0, true, 256);
-        redis.add_server("cluster", "192.168.1.101:6379", 500, 0);
+        # VMOD configuration: clustered setup, keeping up to 100 Redis
+        # connections per server, all shared between all Varnish worker threads.
+        # One initial cluster server is provided; remaining servers are
+        # automatically discovered.
+        redis.init("cluster", "192.168.1.100:6379", 500, 0, true, 100);
     }
 
     sub vcl_deliver {
-        # SET internally routed to the destination node.
+        # SET internally routed to the destination server.
         redis.command("SET");
         redis.push("foo");
         redis.push("Hello world!");
         redis.execute();
 
-        # GET internally routed to the destination node.
+        # GET internally routed to the destination server.
         redis.command("GET");
         redis.push("foo");
         redis.execute();
@@ -192,9 +190,9 @@ Prototype
                 init(STRING tag, STRING location, INT timeout, INT ttl, BOOL shared_contexts, INT max_contexts)
 Arguments
     tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.). When using the reserved tag ``cluster`` the VMOD internally enables the
-    Redis Cluster support for the server.
+    Redis Cluster support, automatically discovering other servers in the cluster using the command ``CLUSTER SLOTS``.
 
-    location: Redis connection string. Both host + port and UNIX sockets are supported. If this is a Redis Cluster node only host + port format is allowed.
+    location: Redis connection string. Both host + port and UNIX sockets are supported. If this is a Redis Cluster server only host + port format is allowed.
 
     timeout: connection timeout (milliseconds) to the Redis server.
 
@@ -202,7 +200,7 @@ Arguments
 
     shared_contexts: if enabled, Redis connections are not local to Varnish worker threads, but shared by all threads using one or more pools.
 
-    max_contexts: when ``shared_contexts`` is disabled, this option sets the maximum number of Redis connections per Varnish worker thread. Each thread keeps up to one connection per tag. If more than one tag is available, incrementing this limit allows recycling of Redis connections. When ``shared_contexts`` is enabled, this option sets the maximum number of Redis connections per tag.
+    max_contexts: when ``shared_contexts`` is disabled, this option sets the maximum number of Redis connections per Varnish worker thread. Each thread keeps up to one connection per tag. If more than one tag is available, incrementing this limit allows recycling of Redis connections. When ``shared_contexts`` is enabled, this option sets the maximum number of Redis connections per tag. Note that when Redis Cluster support is enabled, each server is the cluster is internally labeled with a different tag.
 
 Return value
     VOID
@@ -218,10 +216,9 @@ Prototype
 
                 add_server(STRING tag, STRING location, INT timeout, INT ttl)
 Arguments
-    tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.). When using the reserved tag ``cluster`` the VMOD internally enables the
-    Redis Cluster support for the server.
+    tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.). Using the reserved tag ``cluster`` is not allowed.
 
-    location: Redis connection string. Both host + port and UNIX sockets are supported. If this is a Redis Cluster node only host + port format is allowed.
+    location: Redis connection string. Both host + port and UNIX sockets are supported.
 
     timeout: connection timeout (milliseconds) to the Redis server.
 
@@ -231,9 +228,9 @@ Description
     Adds an extra Redis server.
     Must be used during the ``vcl_init`` phase.
 
-    Use this feature (1) when using master-slave replication; or (2) when using multiple independent servers; or (3) when using some kind of proxy assisted partitioning (e.g. https://github.com/twitter/twemproxy) and more than one proxy is available; or (4) when adding extra nodes composing a Redis Cluster setup.
+    Use this feature (1) when using master-slave replication; or (2) when using multiple independent servers; or (3) when using some kind of proxy assisted partitioning (e.g. https://github.com/twitter/twemproxy) and more than one proxy is available.
 
-    When a command is submitted using ``redis.execute()`` and more that one Redis server is available, the destination server is selected according with the tag specified with `redis.server()`. If not specified, a randomly selected connection will be used (if the worker thread / corresponding pool already has any Redis connection established and available), or a new connection to a randomly selected server will be established.
+    When a command is submitted using ``redis.execute()`` and more that one Redis server is available, the destination server is selected according with the tag specified with `redis.server()`. If not specified and Redis Cluster support hasn't been enabled, a randomly selected connection will be used (if the worker thread / corresponding pool already has any Redis connection established and available), or a new connection to a randomly selected server will be established.
 
 COMAND EXECUTION FUNCTIONS
 ==========================
@@ -263,13 +260,13 @@ Prototype
 
                 server(STRING tag)
 Arguments
-    tag: tag of the Redis server a previously enqueued Redis command will be delivered to (e.g. ``main``, ``master``, ``slave``, etc.).
+    tag: tag of the Redis server a previously enqueued Redis command will be delivered to (e.g. ``main``, ``master``, ``slave``, ``cluster``, etc.).
 Return value
     VOID
 Description
     Selects the type of Redis server a previously enqueued Redis command will be delivered to.
 
-    If not specified, a randomly selected connection / server will be used (see ``redis.add_server()`` for extra information).
+    If not specified and Redis Cluster support hasn't been enabled, a randomly selected connection / server will be used (see ``redis.add_server()`` for extra information).
 
 push
 ----
@@ -573,7 +570,7 @@ COPYRIGHT
 
 This document is licensed under the same license as the libvmod-redis project. See LICENSE for details.
 
-Implementation of the SHA-1 and CRC-16 cryptographic hash functions embedded in this VMOD (required to the optimistic execution of ``EVALSHA`` commands and to the Redis Cluster slot calculation respectively) are borrowed from the Redis server implementation:
+Implementation of the SHA-1 and CRC-16 cryptographic hash functions embedded in this VMOD (required to the optimistic execution of ``EVALSHA`` commands, and to the Redis Cluster slot calculation, respectively) are borrowed from the Redis implementation:
 
 * http://download.redis.io/redis-stable/src/sha1.c
 * http://download.redis.io/redis-stable/src/sha1.h

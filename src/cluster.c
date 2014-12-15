@@ -13,14 +13,26 @@
 #include "core.h"
 #include "cluster.h"
 
+#define DISCOVERY_COMMAND "CLUSTER SLOTS"
+
+static void unsafe_add_slot(
+    vcl_priv_t *config, redis_server_t *iserver,
+    unsigned start, unsigned stop, const char *host, unsigned port);
+
 void
-fetch_cluster_slots(struct sess *sp, vcl_priv_t *config)
+discover_cluster_slots(struct sess *sp, vcl_priv_t *config)
 {
     // Initializations.
+    int i;
     unsigned stop = 0;
 
     // Get config lock.
     AZ(pthread_mutex_lock(&config->mutex));
+
+    // Reset previous slots.
+    for (i = 0; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
+        config->slots[i] = NULL;
+    }
 
     // Look for clustered servers.
     redis_server_t *iserver;
@@ -40,33 +52,38 @@ fetch_cluster_slots(struct sess *sp, vcl_priv_t *config)
             // Check context.
             if (!rcontext->err) {
                 // Send command.
-                redisReply *reply = redisCommand(rcontext, "CLUSTER SLOTS");
+                redisReply *reply = redisCommand(rcontext, DISCOVERY_COMMAND);
 
                 // Check reply.
                 if ((!rcontext->err) &&
                     (reply != NULL) &&
                     (reply->type == REDIS_REPLY_ARRAY)) {
                     // Extract slots.
-                    for (int i = 0; i < reply->elements; i++) {
+                    for (i = 0; i < reply->elements; i++) {
                         if ((reply->element[i]->type == REDIS_REPLY_ARRAY) &&
                             (reply->element[i]->elements >= 3) &&
                             (reply->element[i]->element[2]->type == REDIS_REPLY_ARRAY) &&
                             (reply->element[i]->element[2]->elements == 2)) {
+                            // Extract slot data.
+                            int start = reply->element[i]->element[0]->integer;
+                            int end = reply->element[i]->element[1]->integer;
+                            char *host = reply->element[i]->element[2]->element[0]->str;
+                            int port = reply->element[i]->element[2]->element[1]->integer;
 
-                            // TODO: add to the list of slots.
-                            // REDIS_LOG(sp, "====> %d - %d (%s:%d)",
-                            //     reply->element[i]->element[0]->integer,
-                            //     reply->element[i]->element[1]->integer,
-                            //     reply->element[i]->element[2]->element[0]->str,
-                            //     reply->element[i]->element[2]->element[1]->integer);
-
+                            // Check slot data.
+                            if ((start >= 0) && (start < MAX_REDIS_CLUSTER_SLOTS) &&
+                                (end >= 0) && (end < MAX_REDIS_CLUSTER_SLOTS)) {
+                                unsafe_add_slot(config, iserver, start, end, host, port);
+                            }
                         }
                     }
 
                     // Stop execution.
                     stop = 1;
                 } else {
-                    REDIS_LOG(sp, "Failed to execute Redis command CLUSTER SLOTS");
+                    REDIS_LOG(sp,
+                        "Failed to execute Redis command (%s)",
+                        DISCOVERY_COMMAND);
                 }
 
                 // Release reply.
@@ -92,4 +109,42 @@ fetch_cluster_slots(struct sess *sp, vcl_priv_t *config)
 
     // Release config lock.
     AZ(pthread_mutex_unlock(&config->mutex));
+}
+
+/******************************************************************************
+ * UTILITIES.
+ *****************************************************************************/
+
+static void
+unsafe_add_slot(
+    vcl_priv_t *config, redis_server_t *iserver,
+    unsigned start, unsigned stop, const char *host, unsigned port)
+{
+    // Create new server instance (timeout & TTL are copied from the server used
+    // to discover this new server).
+    char location[256];
+    snprintf(location, sizeof(location), "%s:%d", host, port);
+    redis_server_t *server = new_redis_server(
+        CLUSTERED_REDIS_SERVER_TAG,
+        location,
+        iserver->timeout.tv_sec * 1000 + iserver->timeout.tv_usec / 1000,
+        iserver->ttl);
+
+    // Add new slot (and release previous one, if required).
+    if (config->slots[stop] != NULL) {
+        free((void *)(config->slots[stop]));
+    }
+    config->slots[stop] = strdup(server->tag);
+    AN(config->slots[stop]);
+
+    // If required, register new server & pool
+    if (!unsafe_server_exists(config, server->tag)) {
+        VTAILQ_INSERT_TAIL(&config->servers, server, list);
+        if (!unsafe_pool_exists(config, server->tag)) {
+            redis_context_pool_t *pool = new_redis_context_pool(server->tag);
+            VTAILQ_INSERT_TAIL(&config->pools, pool, list);
+        }
+    } else {
+        free_redis_server(server);
+    }
 }

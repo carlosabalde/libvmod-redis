@@ -92,7 +92,7 @@ $script = <<SCRIPT
   sudo -u vagrant bash -c '\
     cd /vagrant; \
     ./autogen.sh; \
-    ./configure VARNISHSRC=/home/vagrant/varnish* VMODDIR=`/usr/lib/varnish/vmods/`; \
+    ./configure VARNISHSRC=/home/vagrant/varnish* VMODDIR="/usr/lib/varnish/vmods/"; \
     make'
 SCRIPT
 
