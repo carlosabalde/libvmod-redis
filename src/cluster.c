@@ -19,6 +19,8 @@ static void unsafe_add_slot(
     vcl_priv_t *config, redis_server_t *iserver,
     unsigned start, unsigned stop, const char *host, unsigned port);
 
+static unsigned key2slot(const char *key);
+
 void
 discover_cluster_slots(struct sess *sp, vcl_priv_t *config)
 {
@@ -34,7 +36,8 @@ discover_cluster_slots(struct sess *sp, vcl_priv_t *config)
         config->slots[i] = NULL;
     }
 
-    // Look for clustered servers.
+    // Contact already known clustered servers and try to fetch the
+    // slots-servers mapping.
     redis_server_t *iserver;
     VTAILQ_FOREACH(iserver, &config->servers, list) {
         if (iserver->clustered) {
@@ -100,7 +103,7 @@ discover_cluster_slots(struct sess *sp, vcl_priv_t *config)
             // Release context.
             redisFree(rcontext);
 
-            // Slots already fetched?
+            // Slots-severs mapping already discovered?
             if (stop) {
                 break;
             }
@@ -109,6 +112,49 @@ discover_cluster_slots(struct sess *sp, vcl_priv_t *config)
 
     // Release config lock.
     AZ(pthread_mutex_unlock(&config->mutex));
+}
+
+const char *
+get_cluster_tag(struct sess *sp, vcl_priv_t *config, const char *key)
+{
+    // Initializations.
+    const char *result = NULL;
+    unsigned slot = key2slot(key);
+
+    // Get config lock.
+    AZ(pthread_mutex_lock(&config->mutex));
+
+    // Select a tag according with the current slot-tag mapping.
+    for (int i = slot; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
+        if (config->slots[i] != NULL) {
+            result = config->slots[i];
+            break;
+        }
+    }
+
+    // If failed to find the tag (this is possible e.g. if the discovery
+    // function failed to fetch the slots-servers mapping), user the tag of
+    // any known server running in clustered mode (servers are never deleted;
+    // at least one clustered server must exist).
+    if (result == NULL) {
+        redis_server_t *iserver;
+        VTAILQ_FOREACH(iserver, &config->servers, list) {
+            if (iserver->clustered) {
+                // Check server.
+                CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
+
+                // Fetch tag.
+                result = iserver->tag;
+            }
+        }
+    }
+    AN(result);
+
+    // Release config lock.
+    AZ(pthread_mutex_unlock(&config->mutex));
+
+    // Done!
+    return result;
 }
 
 /******************************************************************************
@@ -147,4 +193,31 @@ unsafe_add_slot(
     } else {
         free_redis_server(server);
     }
+}
+
+static unsigned
+key2slot(const char *key)
+{
+    // Extract data to be hashed. Only hash what is inside {...} if there is
+    // such a pattern in 'key'. Note that the specification requires the
+    // content that is between the first { and the first } after the first {.
+    // If {} is found without nothing in the middle, the whole key should
+    // be hashed.
+    const char *ptr = NULL;
+    unsigned len;
+    const char *left = strchr(key, '{');
+    if (left != NULL) {
+        const char *right = strchr(left, '}');
+        if ((right != NULL) && (right-left > 1)) {
+            ptr = left + 1;
+            len = right - ptr;
+        }
+    }
+    if (ptr == NULL) {
+        ptr = key;
+        len = strlen(key);
+    }
+
+    // Done!
+    return crc16(ptr, len) % MAX_REDIS_CLUSTER_SLOTS;
 }
