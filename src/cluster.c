@@ -157,6 +157,14 @@ get_cluster_tag(struct sess *sp, vcl_priv_t *config, const char *key)
     return result;
 }
 
+redisReply *
+cluster_execute(
+    struct sess *sp, vcl_priv_t *config, thread_state_t *state,
+    unsigned version, unsigned argc, const char *argv[])
+{
+    return NULL;
+}
+
 /******************************************************************************
  * UTILITIES.
  *****************************************************************************/
@@ -184,9 +192,9 @@ unsafe_add_slot(
     AN(config->slots[stop]);
 
     // If required, register new server & pool
-    if (!unsafe_server_exists(config, server->tag)) {
+    if (!unsafe_redis_server_exists(config, server->tag)) {
         VTAILQ_INSERT_TAIL(&config->servers, server, list);
-        if (!unsafe_pool_exists(config, server->tag)) {
+        if (!unsafe_context_pool_exists(config, server->tag)) {
             redis_context_pool_t *pool = new_redis_context_pool(server->tag);
             VTAILQ_INSERT_TAIL(&config->pools, pool, list);
         }

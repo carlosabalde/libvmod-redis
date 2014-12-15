@@ -153,14 +153,12 @@ void free_vcl_priv(vcl_priv_t *priv);
 thread_state_t *new_thread_state();
 void free_thread_state(thread_state_t *state);
 
-unsigned unsafe_server_exists(vcl_priv_t *config, const char *tag);
-unsigned unsafe_pool_exists(vcl_priv_t *config, const char *tag);
+unsigned unsafe_redis_server_exists(vcl_priv_t *config, const char *tag);
+unsigned unsafe_context_pool_exists(vcl_priv_t *config, const char *tag);
 
-redis_context_t *get_context(
+redisReply *redis_execute(
     struct sess *sp, vcl_priv_t *config, thread_state_t *state,
-    const char *tag, unsigned int version);
-void free_context(
-    struct sess *sp, vcl_priv_t *config, thread_state_t *state,
-    redis_context_t * context);
+    const char *tag, unsigned version, unsigned argc, const char *argv[],
+    unsigned asking);
 
 #endif

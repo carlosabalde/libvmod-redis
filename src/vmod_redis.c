@@ -9,7 +9,6 @@
 #include "bin/varnishd/cache.h"
 #include "vcc_if.h"
 
-#include "sha1.h"
 #include "cluster.h"
 #include "core.h"
 
@@ -27,8 +26,6 @@ static thread_state_t *get_thread_state(struct sess *sp, unsigned drop_reply);
 static void make_thread_key();
 
 static const char *get_reply(struct sess *sp, redisReply *reply);
-
-static const char *sha1(struct sess *sp, const char *script);
 
 /******************************************************************************
  * VMOD INITIALIZATION.
@@ -91,7 +88,7 @@ vmod_init(
                 discover_cluster_slots(sp, config);
             }
 
-            // Set new configuration & release previous one.
+            // Set the new configuration & release the previous one.
             vcl_priv_t *old_config = vcl_priv->priv;
             vcl_priv->priv = config;
             free_vcl_priv(old_config);
@@ -99,7 +96,7 @@ vmod_init(
         // Failed to create the server instance.
         } else {
             REDIS_LOG(sp,
-                "Failed to add server '%s' tagged as '%s'",
+                "Failed to add initial server '%s' tagged as '%s'",
                 location, tag);
         }
     }
@@ -120,7 +117,7 @@ vmod_add_server(
         // Initializations.
         vcl_priv_t *config = vcl_priv->priv;
 
-        // Do not allow tags internally reserved for clustering.
+        // Do not allow usage of tags internally reserved for clustering.
         if (((!config->clustered) &&
              (strcmp(tag, CLUSTERED_REDIS_SERVER_TAG) != 0)) ||
             ((config->clustered) &&
@@ -138,7 +135,7 @@ vmod_add_server(
                 VTAILQ_INSERT_TAIL(&config->servers, server, list);
 
                 // If required, add new pool.
-                if (!unsafe_pool_exists(config, server->tag)) {
+                if (!unsafe_context_pool_exists(config, server->tag)) {
                     redis_context_pool_t *pool = new_redis_context_pool(server->tag);
                     VTAILQ_INSERT_TAIL(&config->pools, pool, list);
                 }
@@ -240,82 +237,21 @@ vmod_execute(struct sess *sp, struct vmod_priv *vcl_priv)
     vcl_priv_t *config = vcl_priv->priv;
     thread_state_t *state = get_thread_state(sp, 0);
 
-    // Force an explicit if none was provided and clustering is enabled.
-    if (config->clustered && (state->tag == NULL)) {
-        state->tag = WS_Dup(sp->ws, CLUSTERED_REDIS_SERVER_TAG);
-        AN(state->tag);
-    }
-
-    // Fetch context.
-    redis_context_t *context = get_context(sp, config, state, state->tag, version);
-
-    // Do not continue if a Redis context is not available or if the initial
-    // call to redis.command() was not executed.
-    if ((state->argc >= 1) && (context != NULL)) {
-        // When executing EVAL commands, first try with EVALSHA.
-        unsigned done = 0;
-        if ((strcasecmp(state->argv[0], "EVAL") == 0) && (state->argc >= 2)) {
-            // Replace EVAL with EVALSHA.
-            state->argv[0] = WS_Dup(sp->ws, "EVALSHA");
-            AN(state->argv[0]);
-            const char *script = state->argv[1];
-            state->argv[1] = sha1(sp, script);
-
-            // Execute the EVALSHA command.
-            state->reply = redisCommandArgv(
-                context->rcontext,
-                state->argc,
-                state->argv,
-                NULL);
-
-            // Check reply. If Redis replies with a NOSCRIPT, the original
-            // EVAL command should be executed to register the script for
-            // the first time in the Redis server.
-            if (!context->rcontext->err &&
-                (state->reply != NULL) &&
-                (state->reply->type == REDIS_REPLY_ERROR) &&
-                (strncmp(state->reply->str, "NOSCRIPT", 8) == 0)) {
-                // Replace EVALSHA with EVAL.
-                state->argv[0] = WS_Dup(sp->ws, "EVAL");
-                AN(state->argv[0]);
-                state->argv[1] = script;
-
-            // The command execution is completed.
-            } else {
-                done = 1;
-            }
+    // Do not continue if the initial call to redis.command() was not
+    // executed.
+    if (state->argc >= 1) {
+        // Clustered vs. classic execution.
+        if ((config->clustered) &&
+            ((state->tag == NULL) ||
+             (strcmp(state->tag, CLUSTERED_REDIS_SERVER_TAG) == 0))) {
+            state->reply = cluster_execute(
+                sp, config, state,
+                version, state->argc, state->argv);
+        } else {
+            state->reply = redis_execute(
+                sp, config, state,
+                state->tag, version, state->argc, state->argv, 0);
         }
-
-        // Send command, unless it was originally an EVAL command and it
-        // was already executed using EVALSHA.
-        if (!done) {
-            state->reply = redisCommandArgv(
-                context->rcontext,
-                state->argc,
-                state->argv,
-                NULL);
-        }
-
-        // Check reply.
-        if (context->rcontext->err) {
-            REDIS_LOG(sp,
-                "Failed to execute Redis command (%s): [%d] %s",
-                state->argv[0],
-                context->rcontext->err,
-                context->rcontext->errstr);
-        } else if (state->reply == NULL) {
-            REDIS_LOG(sp,
-                "Failed to execute Redis command (%s)",
-                state->argv[0]);
-        } else if (state->reply->type == REDIS_REPLY_ERROR) {
-            REDIS_LOG(sp,
-                "Got error reply while executing Redis command (%s): %s",
-                state->argv[0],
-                state->reply->str);
-        }
-
-        // Release context.
-        free_context(sp, config, state, context);
     }
 }
 
@@ -537,29 +473,6 @@ get_reply(struct sess *sp, redisReply *reply)
 
         default:
             result = NULL;
-    }
-
-    // Done!
-    return result;
-}
-
-static const char *
-sha1(struct sess *sp, const char *script)
-{
-    // Hash.
-    unsigned char buffer[20];
-    SHA1_CTX ctx;
-    SHA1Init(&ctx);
-    SHA1Update(&ctx, script, strlen(script));
-    SHA1Final(buffer, &ctx);
-
-    // Encode.
-    char *result = WS_Alloc(sp->wrk->ws, 41);
-    AN(result);
-    char *ptr = result;
-    for (int i = 0; i < 20; i++) {
-        sprintf(ptr, "%02x", buffer[i]);
-        ptr += 2;
     }
 
     // Done!
