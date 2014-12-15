@@ -10,6 +10,7 @@
 #include "vcc_if.h"
 
 #include "sha1.h"
+#include "cluster.h"
 #include "core.h"
 
 #define DEFAULT_SHARED_CONTEXTS 0
@@ -85,15 +86,20 @@ vmod_init(
             // Do not continue if we failed to create the server instance.
             if (server != NULL) {
                 // Create new configuration.
-                vcl_priv_t *new = new_vcl_priv(shared_contexts, max_contexts);
-                VTAILQ_INSERT_TAIL(&new->servers, server, list);
+                vcl_priv_t *config = new_vcl_priv(shared_contexts, max_contexts);
+                VTAILQ_INSERT_TAIL(&config->servers, server, list);
                 redis_context_pool_t *pool = new_redis_context_pool(server->tag);
-                VTAILQ_INSERT_TAIL(&new->pools, pool, list);
+                VTAILQ_INSERT_TAIL(&config->pools, pool, list);
+
+                // If a clustered server was added, populate the list of slots.
+                if (server->clustered) {
+                    fetch_cluster_slots(sp, config);
+                }
 
                 // Set new configuration & release previous one.
-                vcl_priv_t *old = vcl_priv->priv;
-                vcl_priv->priv = new;
-                free_vcl_priv(old);
+                vcl_priv_t *old_config = vcl_priv->priv;
+                vcl_priv->priv = config;
+                free_vcl_priv(old_config);
 
             // Failed to create the server instance.
             } else {
