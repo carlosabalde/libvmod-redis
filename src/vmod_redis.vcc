@@ -7,15 +7,10 @@ $Init init_function
 
 $Function VOID init(PRIV_VCL, STRING, STRING, INT, INT, BOOL, INT)
 $Function VOID add_server(PRIV_VCL, STRING, STRING, INT, INT)
+$Function VOID add_cserver(PRIV_VCL, STRING)
 
 ###############################################################################
-## Simple command execution.
-###############################################################################
-
-$Function VOID call(PRIV_VCL, STRING_LIST)
-
-###############################################################################
-## Advanced command execution.
+## Command execution.
 ###############################################################################
 
 $Function VOID command(STRING)
@@ -55,3 +50,4 @@ $Function STRING get_array_reply_value(INT)
 ###############################################################################
 
 $Function VOID free()
+$Function VOID fini(PRIV_VCL)

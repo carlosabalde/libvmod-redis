@@ -10,8 +10,8 @@ Varnish Redis Module
 --------------------
 
 :Author: Carlos Abalde
-:Date: 2014-12-14
-:Version: 0.1.3
+:Date: 2014-12-16
+:Version: 0.2.0
 :Manual section: 3
 
 SYNOPSIS
@@ -24,11 +24,9 @@ import redis;
     # Configuration.
     Function VOID init(TAG, LOCATION, TIMEOUT, TTL, SHARED_CONTEXTS, MAX_CONTEXTS)
     Function VOID add_server(TAG, LOCATION, TIMEOUT, TTL)
+    Function VOID add_cserver(LOCATION)
 
-    # Simple command execution.
-    Function VOID call(COMMAND + ARGUMENTS)
-
-    # Advanced command execution.
+    # Command execution.
     Function VOID command(COMMAND)
     Function VOID server(TAG)
     Function VOID push(ARGUMENT)
@@ -60,6 +58,7 @@ import redis;
 
     # Other.
     Function VOID free()
+    Function VOID fini()
 
 DESCRIPTION
 ===========
@@ -68,11 +67,11 @@ VMOD using the synchronous hiredis library API (https://github.com/redis/hiredis
 
 Highlights:
 
-* **All Redis commands are supported**. Two VMOD APIs are provided: ``redis.call()`` for simple commands, and ``redis.command()`` + ``redis.server()`` + ``redis.push()`` + ``redis.execute()`` for advanced execution.
 * **Full support for execution of LUA scripts** (i.e. ``EVAL`` command), including optimistic automatic execution of ``EVALSHA`` commands.
 * **All Redis reply data types are supported**, including partial support to access to components of simple (i.e. not nested) array replies.
 * **Redis pipelines are not (and won't be) supported**. LUA scripting, which is fully supported by the VMOD, it's a much more flexible alternative to pipelines for atomic execution and minimizing latency. Pipelines are hard to use and error prone, specially when using the ``WATCH`` command.
-* **Support for multiple Redis servers and multiple Redis connections per worker thread**.
+* **Support for classic Redis deployments** using multiple Redis servers (replicated or standalone) **and for clustered deployments based on Redis Cluster**.
+* **Support for multiple Redis connections**, local to each Varnish worker thread, or shared using one or more pools.
 
 Looking for official support for this VMOD? Please, contact Allenta Consulting (http://www.allenta.com), the Varnish Software integration partner for Spain and Portugal (https://www.varnish-software.com/partner/allenta-consulting).
 
@@ -92,20 +91,8 @@ Single server
 
     sub vcl_deliver {
         # Simple command execution.
-        redis.call("SET foo hello");
-        redis.call("GET foo");
-        set req.http.X-Foo = redis.get_string_reply();
-
-        # Simple command execution using placeholders.
-        set req.http.X-Key = "foo";
-        set req.http.X-Value = "Hello world!";
-        redis.call("SET %s %s" + req.http.X-Key + req.http.X-Value);
-        redis.call("GET %s" + req.http.X-Key);
-        set req.http.X-Foo = redis.get_string_reply();
-
-        # Advanced command execution.
         redis.command("SET");
-        redis.push("bar");
+        redis.push("foo");
         redis.push("Hello world!");
         redis.execute();
 
@@ -121,8 +108,11 @@ Single server
         redis.push("Atomic hello world!");
         redis.execute();
 
-        # Array replies.
-        redis.call("MGET foo bar");
+        # Array replies, checking & accessing to reply.
+        redis.command("MGET");
+        redis.push("foo");
+        redis.push("bar");
+        redis.execute();
         if ((redis.reply_is_array()) &&
             (redis.get_array_reply_length() == 2)) {
             set resp.http.X-Foo = redis.get_array_reply_value(0);
@@ -161,6 +151,39 @@ Multiple servers
         set req.http.X-Foo = redis.get_string_reply();
     }
 
+Clustered setup
+---------------
+
+::
+
+    sub vcl_init {
+        # VMOD configuration: clustered setup, keeping up to 100 Redis
+        # connections per server, all shared between all Varnish worker threads.
+        # Two initial cluster servers are provided; remaining servers are
+        # automatically discovered.
+        redis.init("cluster", "192.168.1.100:6379", 500, 0, true, 100);
+        redis.add_cserver("192.168.1.101:6379");
+    }
+
+    sub vcl_deliver {
+        # SET internally routed to the destination server.
+        redis.command("SET");
+        redis.push("foo");
+        redis.push("Hello world!");
+        redis.execute();
+
+        # GET internally routed to the destination server.
+        redis.command("GET");
+        redis.push("foo");
+        redis.execute();
+        set req.http.X-Foo = redis.get_string_reply();
+    }
+
+    sub vcl_fini {
+        redis.fini();
+    }
+
+
 CONFIGURATION FUNCTIONS
 =======================
 
@@ -172,24 +195,23 @@ Prototype
 
                 init(STRING tag, STRING location, INT timeout, INT ttl, BOOL shared_contexts, INT max_contexts)
 Arguments
-    tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.).
+    tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.). When using the reserved tag ``cluster`` the VMOD internally enables the
+    Redis Cluster support, automatically discovering other servers in the cluster using the command ``CLUSTER SLOTS``.
 
-    location: Redis connection string. Both host + port and UNIX sockets are supported.
+    location: Redis connection string. Both host + port and UNIX sockets are supported. If this is a Redis Cluster server only host + port format is allowed.
 
-    timeout: connection timeout (milliseconds) to the Redis server.
+    timeout: connection timeout (milliseconds) to the Redis server. If Redis Cluster support has been enabled all servers in the cluster will use this timeout.
 
-    ttl: TTL (seconds) of Redis connections (0 means no TTL). Once the TTL of a connection is consumed, the module transparently reestablishes it. See "Client timeouts" in http://redis.io/topics/clients for extra information.
+    ttl: TTL (seconds) of Redis connections (0 means no TTL). Once the TTL of a connection is consumed, the module transparently reestablishes it. See "Client timeouts" in http://redis.io/topics/clients for extra information. If Redis Cluster support has been enabled all servers in the cluster will use this TTL.
 
     shared_contexts: if enabled, Redis connections are not local to Varnish worker threads, but shared by all threads using one or more pools.
 
-    max_contexts: when ``shared_contexts`` is disabled, this option sets the maximum number of Redis connections per Varnish worker thread. Each thread keeps up to one connection per tag. If more than one tag is available, incrementing this limit allows recycling of Redis connections. When ``shared_contexts`` is enabled, this option sets the maximum number of Redis connections per tag.
-
+    max_contexts: when ``shared_contexts`` is disabled, this option sets the maximum number of Redis connections per Varnish worker thread. Each thread keeps up to one connection per tag. If more than one tag is available, incrementing this limit allows recycling of Redis connections. When ``shared_contexts`` is enabled, the VMOD created one pool per tag; this option sets the maximum number of Redis connections per pool. Note that when Redis Cluster support is enabled, each server is the cluster is internally labeled by the VMOD with a different tag (i.e. each server in the cluster has its own pool of Redis connections).
 Return value
     VOID
 Description
     Initializes the Redis module.
-    Must be used during the ``vcl_init`` phase.
-    If not called some default values will be used.
+    Must be called during the ``vcl_init`` phase.
 
 add_server
 ----------
@@ -199,13 +221,14 @@ Prototype
 
                 add_server(STRING tag, STRING location, INT timeout, INT ttl)
 Arguments
-    tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.).
+    tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.). Using the reserved tag ``cluster`` is not allowed.
 
     location: Redis connection string. Both host + port and UNIX sockets are supported.
 
     timeout: connection timeout (milliseconds) to the Redis server.
 
-    ttl: TTL (seconds) of Redis connections (0 means no TTL). Once the TTL of a connection is consumed, the module transparently reestablishes it. See "Client timeouts" in http://redis.io/topics/clients for extra information.Return value
+    ttl: TTL (seconds) of Redis connections (0 means no TTL). Once the TTL of a connection is consumed, the module transparently reestablishes it. See "Client timeouts" in http://redis.io/topics/clients for extra information.
+Return value
     VOID
 Description
     Adds an extra Redis server.
@@ -213,32 +236,27 @@ Description
 
     Use this feature (1) when using master-slave replication; or (2) when using multiple independent servers; or (3) when using some kind of proxy assisted partitioning (e.g. https://github.com/twitter/twemproxy) and more than one proxy is available.
 
-    When a command is submitted using ``redis.execute()`` and more that one Redis server is available, the destination server is selected according with the tag specified with `redis.server()`. If not specified, a randomly selected connection will be used (if the worker thread / corresponding pool already has any Redis connection established and available), or a new connection to a randomly selected server will be established.
+    When a command is submitted using ``redis.execute()`` and more that one Redis server is available, the destination server is selected according with the tag specified with `redis.server()`. If not specified and Redis Cluster support hasn't been enabled, a randomly selected connection will be used (if the worker thread / corresponding pool already has any Redis connection established and available), or a new connection to a randomly selected server will be established.
 
-SIMPLE COMAND EXECUTION FUNCTIONS
-=================================
-
-call
-----
+add_cserver
+-----------
 
 Prototype
         ::
 
-                call(STRING_LIST command)
+                add_cserver(STRING location)
 Arguments
-    command: full Redis command.
+    location: Redis connection string. Only host + port format is allowed.
 Return value
     VOID
 Description
-    Executes a simple Redis command.
+    Adds an extra Redis Cluster server.
+    Must be used during the ``vcl_init`` phase.
 
-    Reply can be fetched with ``redis.reply_is_.*()`` and ``redis.get_.*()`` functions.
-    This function implements an ugly hack based on the VMOD STRING_LIST data type in order to support ``%s`` placeholders.
+    This feature is only available once Redis Custer support has been enabled when calling ``redis.init()``. Other servers in the cluster are automatically discovered by the VMOD using the ``CLUSTER SLOTS`` commands. Anyway, knowing more cluster servers during startup increases the chances of discover the cluster topology if some server is failing.
 
-    Please, use ``redis.command()`` + ``redis.server()`` + ``redis.push()`` + ``redis.execute()`` for (1) extra flexibility; (2) optimistic execution of ``EVALSHA`` commands; and (3) support for sever tag selection.
-
-ADVANCED COMAND EXECUTION FUNCTIONS
-===================================
+COMAND EXECUTION FUNCTIONS
+==========================
 
 command
 -------
@@ -255,7 +273,7 @@ Description
     Enqueues a Redis command (only the name of the command) for further execution.
     Arguments should be enqueued separately calling one or more times to the ``redis.push()`` function.
 
-    On execution time, ``EVAL`` commands are internally replace by ``EVALSHA`` commands, which fallback to the original ``EVAL`` command if the Redis server returns a NOSCRIPT error (see http://redis.io/commands/eval).
+    On execution time, ``EVAL`` commands are internally replace by ``EVALSHA`` commands, which fallback to the original ``EVAL`` command if the Redis server returns a ``NOSCRIPT`` error (see http://redis.io/commands/eval).
 
 server
 ------
@@ -265,13 +283,13 @@ Prototype
 
                 server(STRING tag)
 Arguments
-    tag: tag of the Redis server a previously enqueued Redis command will be delivered to (e.g. ``main``, ``master``, ``slave``, etc.).
+    tag: tag of the Redis server a previously enqueued Redis command will be delivered to (e.g. ``main``, ``master``, ``slave``, ``cluster``, etc.).
 Return value
     VOID
 Description
     Selects the type of Redis server a previously enqueued Redis command will be delivered to.
 
-    If not specified, a randomly selected connection / server will be used (see ``redis.add_server()`` for extra information).
+    If not specified and Redis Cluster support hasn't been enabled, a randomly selected connection / server will be used (see ``redis.add_server()`` for extra information).
 
 push
 ----
@@ -312,7 +330,7 @@ Prototype
 Return value
     BOOL
 Description
-    Returns TRUE if a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an error reply.
+    Returns TRUE if a previously executed Redis command using ``redis.execute()`` returned an error reply.
 
 reply_is_nil
 ------------
@@ -324,7 +342,7 @@ Prototype
 Return value
     BOOL
 Description
-    Returns TRUE if a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned a nil reply.
+    Returns TRUE if a previously executed Redis command using ``redis.execute()`` returned a nil reply.
 
 reply_is_status
 ---------------
@@ -336,7 +354,7 @@ Prototype
 Return value
     BOOL
 Description
-    Returns TRUE if a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned a status reply.
+    Returns TRUE if a previously executed Redis command using ``redis.execute()`` returned a status reply.
 
 reply_is_integer
 ----------------
@@ -348,7 +366,7 @@ Prototype
 Return value
     BOOL
 Description
-    Returns TRUE if a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an integer reply.
+    Returns TRUE if a previously executed Redis command ``redis.execute()`` returned an integer reply.
 
 reply_is_string
 ---------------
@@ -360,7 +378,7 @@ Prototype
 Return value
     BOOL
 Description
-    Returns TRUE if a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned a string reply.
+    Returns TRUE if a previously executed Redis command ``redis.execute()`` returned a string reply.
 
 reply_is_array
 --------------
@@ -372,7 +390,7 @@ Prototype
 Return value
     BOOL
 Description
-    Returns TRUE if a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply.
+    Returns TRUE if a previously executed Redis command using ``redis.execute()`` returned an array reply.
 
 get_reply
 ---------
@@ -384,7 +402,7 @@ Prototype
 Return value
     STRING
 Description
-    Returns a string representation of the reply of a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``).
+    Returns a string representation of the reply of a previously executed Redis command using ``redis.execute()``.
     Do not use this function to access to array replies.
 
 get_error_reply
@@ -397,7 +415,7 @@ Prototype
 Return value
     STRING
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an error reply, this function returns a string representation of that reply.
+    If a previously executed Redis command using ``redis.execute()`` returned an error reply, this function returns a string representation of that reply.
 
 get_status_reply
 ----------------
@@ -409,7 +427,7 @@ Prototype
 Return value
     STRING
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned a status reply, this function returns a string representation of that reply.
+    If a previously executed Redis command using ``redis.execute()`` returned a status reply, this function returns a string representation of that reply.
 
 get_integer_reply
 -----------------
@@ -421,7 +439,7 @@ Prototype
 Return value
     INT
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an integer reply, this function returns an integer representation of that reply.
+    If a previously executed Redis command using ``redis.execute()`` returned an integer reply, this function returns an integer representation of that reply.
 
 get_string_reply
 ----------------
@@ -433,7 +451,7 @@ Prototype
 Return value
     STRING
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned string reply, this function returns a string representation of that reply.
+    If a previously executed Redis command using ``redis.execute()`` returned string reply, this function returns a string representation of that reply.
 
 get_array_reply_length
 ----------------------
@@ -445,7 +463,7 @@ Prototype
 Return value
     INT
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns the number of elements in that reply.
+    If a previously executed Redis command using ``redis.execute()`` returned an array reply, this function returns the number of elements in that reply.
 
 array_reply_is_error
 --------------------
@@ -457,7 +475,7 @@ Prototype
 Return value
     BOOL
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns TRUE if the nth element in that reply is an error reply (nested arrays are not supported).
+    If a previously executed Redis command using ``redis.execute()`` returned an array reply, this function returns TRUE if the nth element in that reply is an error reply (nested arrays are not supported).
 
 array_reply_is_nil
 ------------------
@@ -469,7 +487,7 @@ Prototype
 Return value
     BOOL
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns TRUE if the nth element in that reply is a nil reply (nested arrays are not supported).
+    If a previously executed Redis command using ``redis.execute()`` returned an array reply, this function returns TRUE if the nth element in that reply is a nil reply (nested arrays are not supported).
 
 array_reply_is_status
 ---------------------
@@ -481,7 +499,7 @@ Prototype
 Return value
     BOOL
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns TRUE if the nth element in that reply is a status reply (nested arrays are not supported).
+    If a previously executed Redis command using ``redis.execute()`` returned an array reply, this function returns TRUE if the nth element in that reply is a status reply (nested arrays are not supported).
 
 array_reply_is_integer
 ----------------------
@@ -493,7 +511,7 @@ Prototype
 Return value
     BOOL
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns TRUE if the nth element in that reply is an integer reply (nested arrays are not supported).
+    If a previously executed Redis command using ``redis.execute()`` returned an array reply, this function returns TRUE if the nth element in that reply is an integer reply (nested arrays are not supported).
 
 array_reply_is_string
 ---------------------
@@ -505,7 +523,7 @@ Prototype
 Return value
     BOOL
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns TRUE if the nth element in that reply is a string reply (nested arrays are not supported).
+    If a previously executed Redis command using ``redis.execute()`` returned an array reply, this function returns TRUE if the nth element in that reply is a string reply (nested arrays are not supported).
 
 array_reply_is_array
 --------------------
@@ -517,7 +535,7 @@ Prototype
 Return value
     BOOL
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns TRUE if the nth element in that reply is an array reply (nested arrays are not supported).
+    If a previously executed Redis command using ``redis.execute()`` returned an array reply, this function returns TRUE if the nth element in that reply is an array reply (nested arrays are not supported).
 
 get_array_reply_value
 ---------------------
@@ -529,7 +547,7 @@ Prototype
 Return value
     STRING
 Description
-    If a previously executed Redis command (using ``redis.call()`` or ``redis.execute()``) returned an array reply, this function returns a string representation of the nth element in that reply (nested arrays are not supported).
+    If a previously executed Redis command using ``redis.execute()`` returned an array reply, this function returns a string representation of the nth element in that reply (nested arrays are not supported).
 
 OTHER FUNCTIONS
 ===============
@@ -545,26 +563,26 @@ Return value
     VOID
 Description
     Frees memory internally used by Redis commands an replies.
-    It's recommended to use this function, but if not called this will be handled automatically during the next call to ``redis.call()`` or ``redis.command()``.
+    It's recommended to use this function, but if not called this will be handled automatically during the next call to ``redis.command()``.
+
+fini
+----
+
+Prototype
+        ::
+
+                fini()
+Return value
+    VOID
+Description
+    Closes all established Redis connections in shared pools.
+    Must be used during the ``vcl_fini`` phase.
+    It's recommended to use this function, but if not called this will be handled automatically during the unload of the VCL using the VMOD.
 
 INSTALLATION
 ============
 
 The source tree is based on autotools to configure the building, and does also have the necessary bits in place to do functional unit tests using the varnishtest tool.
-
-Usage::
-
- ./configure VARNISHSRC=DIR [VMODDIR=DIR]
-
-``VARNISHSRC`` is the directory of the Varnish source tree for which to compile your VMOD. Both the ``VARNISHSRC`` and ``VARNISHSRC/include`` will be added to the include search paths for your module.
-
-Optionally you can also set the VMOD install directory by adding ``VMODDIR=DIR`` (defaults to the pkg-config discovered directory from your Varnish installation).
-
-Make targets:
-
-* make - builds the VMOD
-* make install - installs your VMOD in ``VMODDIR``
-* make check - runs the unit tests in ``src/tests/*.vtc``
 
 Dependencies:
 
@@ -575,10 +593,11 @@ COPYRIGHT
 
 This document is licensed under the same license as the libvmod-redis project. See LICENSE for details.
 
-Implementation of the SHA-1 cryptographic hash function embedded in this VMOD (required to the optimistic execution of ``EVALSHA`` commands) is borrowed from the Redis server implementation:
+Implementation of the SHA-1 and CRC-16 cryptographic hash functions embedded in this VMOD (required to the optimistic execution of ``EVALSHA`` commands, and to the Redis Cluster slot calculation, respectively) are borrowed from the Redis implementation:
 
 * http://download.redis.io/redis-stable/src/sha1.c
 * http://download.redis.io/redis-stable/src/sha1.h
 * http://download.redis.io/redis-stable/src/config.h
+* https://github.com/antirez/redis/blob/unstable/src/crc16.c
 
 Copyright (c) 2014 Carlos Abalde <carlos.abalde@gmail.com>

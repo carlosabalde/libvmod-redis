@@ -1,10 +1,17 @@
 #ifndef CORE_H_INCLUDED
 #define CORE_H_INCLUDED
 
+#include <syslog.h>
 #include <pthread.h>
 #include <hiredis/hiredis.h>
 
 #include "vqueue.h"
+
+#define CLUSTERED_REDIS_SERVER_TAG "cluster"
+#define CLUSTERED_REDIS_SERVER_TAG_PREFIX ":"
+#define CLUSTERED_REDIS_SERVER_TAG_FORMAT "%s%s:%u"
+
+#define MAX_REDIS_CLUSTER_SLOTS 16384
 
 enum REDIS_SERVER_TYPE {
     REDIS_SERVER_HOST_TYPE,
@@ -16,8 +23,9 @@ typedef struct redis_server {
 #define REDIS_SERVER_MAGIC 0xac587b11
     unsigned magic;
 
-    // Tag (i.e. 'main', 'master', 'slave', 'cluster', etc.).
+    // Tag (i.e. 'main', 'master', 'slave', etc.).
     const char *tag;
+    unsigned clustered;
 
     // Type & location.
     enum REDIS_SERVER_TYPE type;
@@ -88,6 +96,12 @@ typedef struct vcl_priv {
     unsigned shared_contexts;
     unsigned max_contexts;
 
+    // Redis Cluster options / state (allocated in the heap).
+    unsigned clustered;
+    unsigned timeout;
+    unsigned ttl;
+    const char *slots[MAX_REDIS_CLUSTER_SLOTS];
+
     // Shared contexts (allocated in the heap).
     VTAILQ_HEAD(,redis_context_pool) pools;
 } vcl_priv_t;
@@ -118,11 +132,14 @@ typedef struct thread_state {
         snprintf( \
             _buffer, sizeof(_buffer), \
             "[REDIS][%s] %s", __func__, message); \
-        VSLb(ctx->vsl, SLT_Error, _buffer, ##__VA_ARGS__); \
+        syslog(LOG_ERR, _buffer, ##__VA_ARGS__); \
+        if ((ctx != NULL) && (ctx->vsl != NULL)) { \
+            VSLb(ctx->vsl, SLT_Error, _buffer, ##__VA_ARGS__); \
+        } \
     } while (0)
 
 redis_server_t *new_redis_server(
-    const char *tag, const char *location, int timeout, int ttl);
+    const char *tag, const char *location, unsigned timeout, unsigned ttl);
 void free_redis_server(redis_server_t *server);
 
 redis_context_t *new_redis_context(
@@ -132,19 +149,18 @@ void free_redis_context(redis_context_t *context);
 redis_context_pool_t *new_redis_context_pool(const char *tag);
 void free_redis_context_pool(redis_context_pool_t *pool);
 
-vcl_priv_t *new_vcl_priv(
-    const char *tag, const char *location, unsigned timeout, unsigned ttl,
-    unsigned shared_pool, unsigned max_pool_size);
+vcl_priv_t *new_vcl_priv(unsigned shared_pool, unsigned max_pool_size);
 void free_vcl_priv(vcl_priv_t *priv);
 
 thread_state_t *new_thread_state();
 void free_thread_state(thread_state_t *state);
 
-redis_context_t *get_context(
-    const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, thread_state_t *state,
-    unsigned int version);
-void free_context(
-    const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, thread_state_t *state,
-    redis_context_t * context);
+redis_server_t *unsafe_get_redis_server(vcl_priv_t *config, const char *tag);
+redis_context_pool_t *unsafe_get_context_pool(vcl_priv_t *config, const char *tag);
+
+redisReply *redis_execute(
+    const struct vrt_ctx *ctx, vcl_priv_t *config, thread_state_t *state,
+    const char *tag, unsigned version, unsigned argc, const char *argv[],
+    unsigned asking);
 
 #endif
