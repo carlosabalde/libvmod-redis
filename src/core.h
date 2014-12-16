@@ -100,7 +100,7 @@ typedef struct vcl_priv {
     unsigned clustered;
     unsigned timeout;
     unsigned ttl;
-    unsigned discovering;
+    unsigned discover;
     const char *slots[MAX_REDIS_CLUSTER_SLOTS];
 
     // Shared contexts (allocated in the heap).

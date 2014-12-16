@@ -192,7 +192,7 @@ new_vcl_priv(unsigned shared_contexts, unsigned max_contexts)
     result->clustered = 0;
     result->timeout = 0;
     result->ttl = 0;
-    result->discovering = 0;
+    result->discover = 0;
     for (int i = 0; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
         result->slots[i] = NULL;
     }
@@ -220,7 +220,7 @@ free_vcl_priv(vcl_priv_t *priv)
     priv->clustered = 0;
     priv->timeout = 0;
     priv->ttl = 0;
-    priv->discovering = 0;
+    priv->discover = 0;
     for (int i = 0; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
         if (priv->slots[i] != NULL) {
             free((void *) (priv->slots[i]));

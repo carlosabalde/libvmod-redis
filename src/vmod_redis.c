@@ -89,6 +89,7 @@ vmod_init(
                 config->clustered = 1;
                 config->timeout = timeout;
                 config->ttl = ttl;
+                config->discover = 1;
                 discover_cluster_slots(sp, config);
             }
 
