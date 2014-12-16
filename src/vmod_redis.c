@@ -9,15 +9,11 @@
 #include "bin/varnishd/cache.h"
 #include "vcc_if.h"
 
-#include "sha1.h"
+#include "cluster.h"
 #include "core.h"
 
-#define DEFAULT_TAG "main"
-#define DEFAULT_SERVER "127.0.0.1:6379"
-#define DEFAULT_TIMEOUT 500
-#define DEFAULT_TTL 0
 #define DEFAULT_SHARED_CONTEXTS 0
-#define DEFAULT_CONTEXTS 1
+#define DEFAULT_MAX_CONTEXTS 1
 
 static unsigned version = 0;
 
@@ -29,9 +25,11 @@ static pthread_key_t thread_key;
 static thread_state_t *get_thread_state(struct sess *sp, unsigned drop_reply);
 static void make_thread_key();
 
-static const char *get_reply(struct sess *sp, redisReply *reply);
+static redis_server_t *unsafe_add_redis_server(
+    struct sess *sp, vcl_priv_t *config,
+    const char *tag, const char *location, unsigned timeout, unsigned ttl);
 
-static const char *sha1(struct sess *sp, const char *script);
+static const char *get_reply(struct sess *sp, redisReply *reply);
 
 /******************************************************************************
  * VMOD INITIALIZATION.
@@ -44,7 +42,10 @@ init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
     // required* to be thread safe.
     //   - Initialize (once) the key required to store thread-specific data.
     //   - Increase (every time the VMOD is initialized) the global version.
-    //     This will be used to reestablish Redis connections on reloads.
+    //     This will be used to reestablish Redis connections binded to
+    //     worker threads during reloads. Pooled connections shared between
+    //     threads are stored in the local VCL data structure, which is
+    //     regenerated every time the VMOD is initialized.
     AZ(pthread_once(&thread_once, make_thread_key));
     AZ(pthread_mutex_lock(&mutex));
     version++;
@@ -54,9 +55,7 @@ init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
     // Code initializing / freeing the VCL private data structure *is
     // not required* to be thread safe.
     if (vcl_priv->priv == NULL) {
-        vcl_priv->priv = new_vcl_priv(
-            DEFAULT_TAG, DEFAULT_SERVER, DEFAULT_TIMEOUT, DEFAULT_TTL,
-            DEFAULT_SHARED_CONTEXTS, DEFAULT_CONTEXTS);
+        vcl_priv->priv = new_vcl_priv(DEFAULT_SHARED_CONTEXTS, DEFAULT_MAX_CONTEXTS);
         vcl_priv->free = (vmod_priv_free_f *)free_vcl_priv;
     }
 
@@ -78,15 +77,32 @@ vmod_init(
     if ((tag != NULL) && (strlen(tag) > 0) &&
         (location != NULL) && (strlen(location) > 0) &&
         (max_contexts > 0)) {
-        // Set new configuration.
-        vcl_priv_t *old = vcl_priv->priv;
-        vcl_priv->priv = new_vcl_priv(
-            tag, location, timeout, ttl,
-            shared_contexts, max_contexts);
+        // Create new configuration.
+        vcl_priv_t *config = new_vcl_priv(shared_contexts, max_contexts);
 
-        // Release previous configuration.
-        if (old != NULL) {
-            free_vcl_priv(old);
+        // Add initial server.
+        redis_server_t *server = unsafe_add_redis_server(
+            sp, config, tag, location, timeout, ttl);
+
+        // Do not continue if we failed to create the server instance.
+        if (server != NULL) {
+            // If a clustered server was added, enable clustering, set clustering
+            // options, and populate the slots-tags mapping.
+            if (server->clustered) {
+                config->clustered = 1;
+                config->timeout = timeout;
+                config->ttl = ttl;
+                discover_cluster_slots(sp, config);
+            }
+
+            // Set the new configuration & release the previous one.
+            vcl_priv_t *old_config = vcl_priv->priv;
+            vcl_priv->priv = config;
+            free_vcl_priv(old_config);
+
+        // Failed to create the server instance.
+        } else {
+            free_vcl_priv(config);
         }
     }
 }
@@ -106,81 +122,59 @@ vmod_add_server(
         // Initializations.
         vcl_priv_t *config = vcl_priv->priv;
 
-        // Get config lock.
-        AZ(pthread_mutex_lock(&config->mutex));
+        // Do not allow usage of tags internally reserved for clustering.
+        if ((strcmp(tag, CLUSTERED_REDIS_SERVER_TAG) != 0) &&
+            (strncmp(tag, CLUSTERED_REDIS_SERVER_TAG_PREFIX,
+                     strlen(CLUSTERED_REDIS_SERVER_TAG_PREFIX)) != 0)) {
+            // Get config lock.
+            AZ(pthread_mutex_lock(&config->mutex));
 
-        // Add new server.
-        redis_server_t *server = new_redis_server(tag, location, timeout, ttl);
-        VTAILQ_INSERT_TAIL(&config->servers, server, list);
+            // Add new server.
+            unsafe_add_redis_server(sp, config, tag, location, timeout, ttl);
 
-        // If required, add new pool.
-        redis_context_pool_t *pool = NULL;
-        redis_context_pool_t *ipool;
-        VTAILQ_FOREACH(ipool, &config->pools, list) {
-            if (strcmp(tag, ipool->tag) == 0) {
-                CHECK_OBJ_NOTNULL(ipool, REDIS_CONTEXT_POOL_MAGIC);
-                pool = ipool;
-                break;
-            }
+            // Release config lock.
+            AZ(pthread_mutex_unlock(&config->mutex));
+
+        // Reserved tag.
+        } else {
+            REDIS_LOG(sp,
+                "Failed to add server '%s' using reserved tag '%s'",
+                location, tag);
         }
-        if (pool == NULL) {
-            pool = new_redis_context_pool(tag);
-            VTAILQ_INSERT_TAIL(&config->pools, pool, list);
-        }
-
-        // Release config lock.
-        AZ(pthread_mutex_unlock(&config->mutex));
     }
 }
 
 /******************************************************************************
- * redis.call();
+ * redis.add_cserver();
  *****************************************************************************/
 
 void
-vmod_call(struct sess *sp, struct vmod_priv *vcl_priv, const char *command, ...)
+vmod_add_cserver(struct sess *sp, struct vmod_priv *vcl_priv, const char *location)
 {
     // Check input.
-    if (command != NULL) {
-        // Fetch local thread state & flush previous command.
-        thread_state_t *state = get_thread_state(sp, 1);
+    if ((location != NULL) && (strlen(location) > 0)) {
+        // Initializations.
+        vcl_priv_t *config = vcl_priv->priv;
 
-        // Fetch context.
-        // XXX: redis.call() does not allow selecting the destination sever.
-        redis_context_t *context = get_context(sp, vcl_priv, state, version);
+        // Do not continue if clustering has not been enabled.
+        if (config->clustered) {
+            // Get config lock.
+            AZ(pthread_mutex_lock(&config->mutex));
 
-        // Do not continue if a Redis context is not available.
-        if (context != NULL) {
-            // Send command.
-            // XXX: beware of the ugly hack to support usage of '%s'
-            // placeholders in VCL.
-            // XXX: redis.call() does not allow optimistic execution of EVALSHA
-            // commands.
-            va_list args;
-            va_start(args, command);
-            state->reply = redisvCommand(context->rcontext, command, args);
-            va_end(args);
+            // Add new server.
+            unsafe_add_redis_server(
+                sp, config,
+                CLUSTERED_REDIS_SERVER_TAG,
+                location, config->timeout, config->ttl);
 
-            // Check reply.
-            if (context->rcontext->err) {
-                REDIS_LOG(sp,
-                    "Failed to execute Redis command (%s): [%d] %s",
-                    command,
-                    context->rcontext->err,
-                    context->rcontext->errstr);
-            } else if (state->reply == NULL) {
-                REDIS_LOG(sp,
-                    "Failed to execute Redis command (%s)",
-                    command);
-            } else if (state->reply->type == REDIS_REPLY_ERROR) {
-                REDIS_LOG(sp,
-                    "Got error reply while executing Redis command (%s): %s",
-                    command,
-                    state->reply->str);
-            }
+            // Release config lock.
+            AZ(pthread_mutex_unlock(&config->mutex));
 
-            // Release context.
-            free_context(sp, vcl_priv, state, context);
+        // Clustering is not enabled
+        } else {
+            REDIS_LOG(sp,
+                "Failed to add cluster server '%s' while clustering is disabled",
+                location);
         }
     }
 }
@@ -197,19 +191,10 @@ vmod_command(struct sess *sp, const char *name)
         // Fetch local thread state & flush previous command.
         thread_state_t *state = get_thread_state(sp, 1);
 
-        // Convert command name to uppercase (for later comparison with the
-        // 'EVAL' string).
-        char *command = WS_Dup(sp->ws, name);
-        AN(command);
-        char *ptr = command;
-        while (*ptr) {
-            *ptr = toupper(*ptr);
-            ptr++;
-        }
-
         // Initialize.
         state->argc = 1;
-        state->argv[0] = command;
+        state->argv[0] = WS_Dup(sp->ws, name);
+        AN(state->argv[0]);
     }
 }
 
@@ -268,79 +253,33 @@ vmod_push(struct sess *sp, const char *arg)
 void
 vmod_execute(struct sess *sp, struct vmod_priv *vcl_priv)
 {
-    // Fetch local thread state.
+    // Initializations.
+    vcl_priv_t *config = vcl_priv->priv;
     thread_state_t *state = get_thread_state(sp, 0);
 
-    // Fetch context.
-    redis_context_t *context = get_context(sp, vcl_priv, state, version);
-
-    // Do not continue if a Redis context is not available or if the initial
-    // call to redis.command() was not executed.
-    if ((state->argc >= 1) && (context != NULL)) {
-        // When executing EVAL commands, first try with EVALSHA.
-        unsigned done = 0;
-        if ((strcmp(state->argv[0], "EVAL") == 0) && (state->argc >= 2)) {
-            // Replace EVAL with EVALSHA.
-            state->argv[0] = WS_Dup(sp->ws, "EVALSHA");
-            AN(state->argv[0]);
-            const char *script = state->argv[1];
-            state->argv[1] = sha1(sp, script);
-
-            // Execute the EVALSHA command.
-            state->reply = redisCommandArgv(
-                context->rcontext,
-                state->argc,
-                state->argv,
-                NULL);
-
-            // Check reply. If Redis replies with a NOSCRIPT, the original
-            // EVAL command should be executed to register the script for
-            // the first time in the Redis server.
-            if (!context->rcontext->err &&
-                (state->reply != NULL) &&
-                (state->reply->type == REDIS_REPLY_ERROR) &&
-                (strncmp(state->reply->str, "NOSCRIPT", 8) == 0)) {
-                // Replace EVALSHA with EVAL.
-                state->argv[0] = WS_Dup(sp->ws, "EVAL");
-                AN(state->argv[0]);
-                state->argv[1] = script;
-
-            // The command execution is completed.
-            } else {
-                done = 1;
-            }
+    // Do not continue if the initial call to redis.command() was not
+    // executed.
+    if (state->argc >= 1) {
+        // Clustered vs. classic execution.
+        if ((config->clustered) &&
+            ((state->tag == NULL) ||
+             (strcmp(state->tag, CLUSTERED_REDIS_SERVER_TAG) == 0))) {
+            state->reply = cluster_execute(
+                sp, config, state,
+                version, state->argc, state->argv);
+        } else {
+            state->reply = redis_execute(
+                sp, config, state,
+                state->tag, version, state->argc, state->argv, 0);
         }
 
-        // Send command, unless it was originally an EVAL command and it
-        // was already executed using EVALSHA.
-        if (!done) {
-            state->reply = redisCommandArgv(
-                context->rcontext,
-                state->argc,
-                state->argv,
-                NULL);
-        }
-
-        // Check reply.
-        if (context->rcontext->err) {
-            REDIS_LOG(sp,
-                "Failed to execute Redis command (%s): [%d] %s",
-                state->argv[0],
-                context->rcontext->err,
-                context->rcontext->errstr);
-        } else if (state->reply == NULL) {
-            REDIS_LOG(sp,
-                "Failed to execute Redis command (%s)",
-                state->argv[0]);
-        } else if (state->reply->type == REDIS_REPLY_ERROR) {
+        // Log error replies.
+        if ((state->reply != NULL) && (state->reply->type == REDIS_REPLY_ERROR)) {
             REDIS_LOG(sp,
                 "Got error reply while executing Redis command (%s): %s",
                 state->argv[0],
                 state->reply->str);
         }
-
-        // Release context.
-        free_context(sp, vcl_priv, state, context);
     }
 }
 
@@ -495,6 +434,51 @@ vmod_free(struct sess *sp)
 }
 
 /******************************************************************************
+ * redis.fini();
+ *****************************************************************************/
+
+void
+vmod_fini(struct sess *sp, struct vmod_priv *vcl_priv)
+{
+    // Initializations.
+    vcl_priv_t *config = vcl_priv->priv;
+
+    // Get config lock.
+    AZ(pthread_mutex_lock(&config->mutex));
+
+    redis_context_pool_t *ipool;
+    VTAILQ_FOREACH(ipool, &config->pools, list) {
+        // Check object.
+        CHECK_OBJ_NOTNULL(ipool, REDIS_CONTEXT_POOL_MAGIC);
+
+        // Get pool lock.
+        AZ(pthread_mutex_lock(&ipool->mutex));
+
+        // Release all connections.
+        ipool->ncontexts = 0;
+        while (!VTAILQ_EMPTY(&ipool->free_contexts)) {
+            redis_context_t *icontext;
+            while (!VTAILQ_EMPTY(&ipool->free_contexts)) {
+                icontext = VTAILQ_FIRST(&ipool->free_contexts);
+                VTAILQ_REMOVE(&ipool->free_contexts, icontext, list);
+                free_redis_context(icontext);
+            }
+            while (!VTAILQ_EMPTY(&ipool->busy_contexts)) {
+                icontext = VTAILQ_FIRST(&ipool->busy_contexts);
+                VTAILQ_REMOVE(&ipool->busy_contexts, icontext, list);
+                free_redis_context(icontext);
+            }
+        }
+
+        // Release pool lock.
+        AZ(pthread_mutex_lock(&ipool->mutex));
+    }
+
+    // Release config lock.
+    AZ(pthread_mutex_unlock(&config->mutex));
+}
+
+/******************************************************************************
  * UTILITIES.
  *****************************************************************************/
 
@@ -532,6 +516,37 @@ make_thread_key()
     AZ(pthread_key_create(&thread_key, (void *) free_thread_state));
 }
 
+static redis_server_t *
+unsafe_add_redis_server(
+    struct sess *sp, vcl_priv_t *config,
+    const char *tag, const char *location, unsigned timeout, unsigned ttl)
+{
+    // Initializations.
+    redis_server_t *result = new_redis_server(tag, location, timeout, ttl);
+
+    // Do not continue if we failed to create the server instance.
+    // Caller should own config->mutex!
+    if (result != NULL) {
+        // Add new server.
+        VTAILQ_INSERT_TAIL(&config->servers, result, list);
+
+        // If required, add new pool.
+        if (unsafe_get_context_pool(config, result->tag) == NULL) {
+            redis_context_pool_t *pool = new_redis_context_pool(result->tag);
+            VTAILQ_INSERT_TAIL(&config->pools, pool, list);
+        }
+
+    // Failed to create the server instance.
+    } else {
+        REDIS_LOG(sp,
+            "Failed to add server '%s' tagged as '%s'",
+            location, tag);
+    }
+
+    // Done!
+    return result;
+}
+
 static const char *
 get_reply(struct sess *sp, redisReply *reply)
 {
@@ -539,7 +554,6 @@ get_reply(struct sess *sp, redisReply *reply)
     const char *result = NULL;
 
     // Check type of Redis reply.
-    // XXX: array replies are *not* supported.
     char buffer[64];
     switch (reply->type) {
         case REDIS_REPLY_ERROR:
@@ -556,35 +570,12 @@ get_reply(struct sess *sp, redisReply *reply)
             break;
 
         case REDIS_REPLY_ARRAY:
-            result = WS_Dup(sp->wrk->ws, "array");
-            AN(result);
+            // XXX: array replies are *not* supported.
+            result = NULL;
             break;
 
         default:
             result = NULL;
-    }
-
-    // Done!
-    return result;
-}
-
-static const char *
-sha1(struct sess *sp, const char *script)
-{
-    // Hash.
-    unsigned char buffer[20];
-    SHA1_CTX ctx;
-    SHA1Init(&ctx);
-    SHA1Update(&ctx, script, strlen(script));
-    SHA1Final(buffer, &ctx);
-
-    // Encode.
-    char *result = WS_Alloc(sp->wrk->ws, 41);
-    AN(result);
-    char *ptr = result;
-    for (int i = 0; i < 20; i++) {
-        sprintf(ptr, "%02x", buffer[i]);
-        ptr += 2;
     }
 
     // Done!
