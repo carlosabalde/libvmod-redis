@@ -206,7 +206,7 @@ Arguments
 
     shared_contexts: if enabled, Redis connections are not local to Varnish worker threads, but shared by all threads using one or more pools.
 
-    max_contexts: when ``shared_contexts`` is disabled, this option sets the maximum number of Redis connections per Varnish worker thread. Each thread keeps up to one connection per tag. If more than one tag is available, incrementing this limit allows recycling of Redis connections. When ``shared_contexts`` is enabled, this option sets the maximum number of Redis connections per tag. Note that when Redis Cluster support is enabled, each server is the cluster is internally labeled with a different tag.
+    max_contexts: when ``shared_contexts`` is disabled, this option sets the maximum number of Redis connections per Varnish worker thread. Each thread keeps up to one connection per tag. If more than one tag is available, incrementing this limit allows recycling of Redis connections. When ``shared_contexts`` is enabled, the VMOD created one pool per tag; this option sets the maximum number of Redis connections per pool. Note that when Redis Cluster support is enabled, each server is the cluster is internally labeled by the VMOD with a different tag (i.e. each server in the cluster has its own pool of Redis connections).
 Return value
     VOID
 Description
@@ -253,7 +253,7 @@ Description
     Adds an extra Redis Cluster server.
     Must be used during the ``vcl_init`` phase.
 
-    This feature is only available once Redis Custer support has been enabled when calling ``redis.init()``. Other servers is the cluster are automatically discovered by the VMOD using the ``CLUSTER SLOTS`` commands. Anyway, knowing more cluster servers during startup increases the chances of discover the cluster topology if some server is failing.
+    This feature is only available once Redis Custer support has been enabled when calling ``redis.init()``. Other servers in the cluster are automatically discovered by the VMOD using the ``CLUSTER SLOTS`` commands. Anyway, knowing more cluster servers during startup increases the chances of discover the cluster topology if some server is failing.
 
 COMAND EXECUTION FUNCTIONS
 ==========================
@@ -273,7 +273,7 @@ Description
     Enqueues a Redis command (only the name of the command) for further execution.
     Arguments should be enqueued separately calling one or more times to the ``redis.push()`` function.
 
-    On execution time, ``EVAL`` commands are internally replace by ``EVALSHA`` commands, which fallback to the original ``EVAL`` command if the Redis server returns a NOSCRIPT error (see http://redis.io/commands/eval).
+    On execution time, ``EVAL`` commands are internally replace by ``EVALSHA`` commands, which fallback to the original ``EVAL`` command if the Redis server returns a ``NOSCRIPT`` error (see http://redis.io/commands/eval).
 
 server
 ------
