@@ -69,13 +69,8 @@ cluster_execute(
                     ((strncmp(result->str, "MOVED", 5) == 0) &&
                      (strncmp(result->str, "ASK", 3) == 0))) {
                     // ASK vs. MOVED.
-                    if (strncmp(result->str, "ASK", 3) == 0) {
-                        asking = 1;
-                    }
-
-                    // ...
                     AZ(pthread_mutex_lock(&config->mutex));
-                    if (!asking) {
+                    if (strncmp(result->str, "MOVED", 3) == 0) {
                         // Ignore reply and rediscover the cluster topology.
                         unsafe_discover_slots(sp, config);
 
@@ -88,6 +83,9 @@ cluster_execute(
                         char *location = strchr(ptr + 1, ' ');
                         AN(location);
                         location++;
+
+                        // Next attempt should send a ASKING command.
+                        asking = 1;
 
                         // Add server and use its tag.
                         redis_server_t *server = unsafe_add_redis_server(
