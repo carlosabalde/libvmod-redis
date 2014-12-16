@@ -24,6 +24,7 @@ import redis;
     # Configuration.
     Function VOID init(TAG, LOCATION, TIMEOUT, TTL, SHARED_CONTEXTS, MAX_CONTEXTS)
     Function VOID add_server(TAG, LOCATION, TIMEOUT, TTL)
+    Function VOID add_cserver(LOCATION)
 
     # Command execution.
     Function VOID command(COMMAND)
@@ -157,10 +158,10 @@ Clustered setup
     sub vcl_init {
         # VMOD configuration: clustered setup, keeping up to 100 Redis
         # connections per server, all shared between all Varnish worker threads.
-        # Two initial cluster server are provided; remaining servers are
+        # Two initial cluster servers are provided; remaining servers are
         # automatically discovered.
         redis.init("cluster", "192.168.1.100:6379", 500, 0, true, 100);
-        redis.add_server("cluster", "192.168.1.101:6379", 500, 0);
+        redis.add_cserver("192.168.1.101:6379");
     }
 
     sub vcl_deliver {
@@ -195,14 +196,13 @@ Arguments
 
     location: Redis connection string. Both host + port and UNIX sockets are supported. If this is a Redis Cluster server only host + port format is allowed.
 
-    timeout: connection timeout (milliseconds) to the Redis server.
+    timeout: connection timeout (milliseconds) to the Redis server. If Redis Cluster support has been enabled all servers in the cluster will use this timeout.
 
-    ttl: TTL (seconds) of Redis connections (0 means no TTL). Once the TTL of a connection is consumed, the module transparently reestablishes it. See "Client timeouts" in http://redis.io/topics/clients for extra information.
+    ttl: TTL (seconds) of Redis connections (0 means no TTL). Once the TTL of a connection is consumed, the module transparently reestablishes it. See "Client timeouts" in http://redis.io/topics/clients for extra information. If Redis Cluster support has been enabled all servers in the cluster will use this TTL.
 
     shared_contexts: if enabled, Redis connections are not local to Varnish worker threads, but shared by all threads using one or more pools.
 
     max_contexts: when ``shared_contexts`` is disabled, this option sets the maximum number of Redis connections per Varnish worker thread. Each thread keeps up to one connection per tag. If more than one tag is available, incrementing this limit allows recycling of Redis connections. When ``shared_contexts`` is enabled, this option sets the maximum number of Redis connections per tag. Note that when Redis Cluster support is enabled, each server is the cluster is internally labeled with a different tag.
-
 Return value
     VOID
 Description
@@ -217,14 +217,13 @@ Prototype
 
                 add_server(STRING tag, STRING location, INT timeout, INT ttl)
 Arguments
-    tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.). Using the reserved tag ``cluster`` is only allowed if Redis Cluster support was enabled when calling ``redis.init()``.
+    tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.). Using the reserved tag ``cluster`` is not allowed.
 
-    location: Redis connection string. Both host + port and UNIX sockets are supported. If this is a Redis Cluster server only host + port format is allowed.
+    location: Redis connection string. Both host + port and UNIX sockets are supported.
 
-    timeout: connection timeout (milliseconds) to the Redis server. If this is a Redis Cluster server the recommendation is using the same timeout used when calling ``redis.init()`` to enabled Redis Cluster support.
+    timeout: connection timeout (milliseconds) to the Redis server.
 
-    ttl: TTL (seconds) of Redis connections (0 means no TTL). Once the TTL of a connection is consumed, the module transparently reestablishes it. See "Client timeouts" in http://redis.io/topics/clients for extra information. If this is a Redis Cluster server the recommendation is using the same TTL used when calling ``redis.init()`` to enabled Redis Cluster support.
-
+    ttl: TTL (seconds) of Redis connections (0 means no TTL). Once the TTL of a connection is consumed, the module transparently reestablishes it. See "Client timeouts" in http://redis.io/topics/clients for extra information.
 Return value
     VOID
 Description
@@ -234,6 +233,23 @@ Description
     Use this feature (1) when using master-slave replication; or (2) when using multiple independent servers; or (3) when using some kind of proxy assisted partitioning (e.g. https://github.com/twitter/twemproxy) and more than one proxy is available.
 
     When a command is submitted using ``redis.execute()`` and more that one Redis server is available, the destination server is selected according with the tag specified with `redis.server()`. If not specified and Redis Cluster support hasn't been enabled, a randomly selected connection will be used (if the worker thread / corresponding pool already has any Redis connection established and available), or a new connection to a randomly selected server will be established.
+
+add_cserver
+-----------
+
+Prototype
+        ::
+
+                add_cserver(STRING location)
+Arguments
+    location: Redis connection string. Only host + port format is allowed.
+Return value
+    VOID
+Description
+    Adds an extra Redis Cluster server.
+    Must be used during the ``vcl_init`` phase.
+
+    This feature is only available once Redis Custer support has been enabled when calling ``redis.init()``. Other servers is the cluster are automatically discovered by the VMOD using the ``CLUSTER SLOTS`` commands. Anyway, knowing more cluster servers during startup increases the chances of discover the cluster topology if some server is failing.
 
 COMAND EXECUTION FUNCTIONS
 ==========================

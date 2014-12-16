@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <ctype.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -14,12 +15,15 @@
 #include "cluster.h"
 
 #define DISCOVERY_COMMAND "CLUSTER SLOTS"
+#define MAX_REDIRECTIONS 16
 
 static void unsafe_add_slot(
-    vcl_priv_t *config, redis_server_t *iserver,
+    vcl_priv_t *config,
     unsigned start, unsigned stop, const char *host, unsigned port);
 
-static unsigned key2slot(const char *key);
+static const char *get_cluster_tag(vcl_priv_t *config, const char *key);
+
+static int get_key_index(const char *command);
 
 void
 discover_cluster_slots(struct sess *sp, vcl_priv_t *config)
@@ -76,7 +80,7 @@ discover_cluster_slots(struct sess *sp, vcl_priv_t *config)
                             // Check slot data.
                             if ((start >= 0) && (start < MAX_REDIS_CLUSTER_SLOTS) &&
                                 (end >= 0) && (end < MAX_REDIS_CLUSTER_SLOTS)) {
-                                unsafe_add_slot(config, iserver, start, end, host, port);
+                                unsafe_add_slot(config, start, end, host, port);
                             }
                         }
                     }
@@ -114,55 +118,29 @@ discover_cluster_slots(struct sess *sp, vcl_priv_t *config)
     AZ(pthread_mutex_unlock(&config->mutex));
 }
 
-const char *
-get_cluster_tag(struct sess *sp, vcl_priv_t *config, const char *key)
-{
-    // Initializations.
-    const char *result = NULL;
-    unsigned slot = key2slot(key);
-
-    // Get config lock.
-    AZ(pthread_mutex_lock(&config->mutex));
-
-    // Select a tag according with the current slot-tag mapping.
-    for (int i = slot; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
-        if (config->slots[i] != NULL) {
-            result = config->slots[i];
-            break;
-        }
-    }
-
-    // If failed to find the tag (this is possible e.g. if the discovery
-    // function failed to fetch the slots-servers mapping), user the tag of
-    // any known server running in clustered mode (servers are never deleted;
-    // at least one clustered server must exist).
-    if (result == NULL) {
-        redis_server_t *iserver;
-        VTAILQ_FOREACH(iserver, &config->servers, list) {
-            if (iserver->clustered) {
-                // Check server.
-                CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
-
-                // Fetch tag.
-                result = iserver->tag;
-            }
-        }
-    }
-    AN(result);
-
-    // Release config lock.
-    AZ(pthread_mutex_unlock(&config->mutex));
-
-    // Done!
-    return result;
-}
-
 redisReply *
 cluster_execute(
     struct sess *sp, vcl_priv_t *config, thread_state_t *state,
     unsigned version, unsigned argc, const char *argv[])
 {
-    return NULL;
+    // Initializations.
+    redisReply *result = NULL;
+
+    // Can the command be executed in a clustered setup?
+    int index = get_key_index(argv[0]);
+    if ((index > 0) && (index < argc)) {
+        // Initializations.
+        const char *key_tag = get_cluster_tag(config, argv[index]);
+
+    // Invalid Redis Cluster command.
+    } else {
+        REDIS_LOG(sp,
+            "Invalid Redis Cluster command (%s)",
+            argv[0]);
+    }
+
+    // Done!
+    return result;
 }
 
 /******************************************************************************
@@ -171,18 +149,15 @@ cluster_execute(
 
 static void
 unsafe_add_slot(
-    vcl_priv_t *config, redis_server_t *iserver,
+    vcl_priv_t *config,
     unsigned start, unsigned stop, const char *host, unsigned port)
 {
-    // Create new server instance (timeout & TTL are copied from the server used
-    // to discover this new server).
+    // Create new server instance.
     char location[256];
     snprintf(location, sizeof(location), "%s:%d", host, port);
     redis_server_t *server = new_redis_server(
-        CLUSTERED_REDIS_SERVER_TAG,
-        location,
-        iserver->timeout.tv_sec * 1000 + iserver->timeout.tv_usec / 1000,
-        iserver->ttl);
+        CLUSTERED_REDIS_SERVER_TAG, location, config->timeout, config->ttl);
+    AN(server);
 
     // Add new slot (and release previous one, if required).
     if (config->slots[stop] != NULL) {
@@ -203,8 +178,29 @@ unsafe_add_slot(
     }
 }
 
+static int
+get_key_index(const char *command)
+{
+    // Initializations.
+    char buffer[64];
+    snprintf(buffer, sizeof(buffer), "|%s|", command);
+
+    // Some commands (e.g. INFO) are explicitly banned returning -1. Some other
+    // commands (e.g. EVAL) are explicitly handled to return the correct
+    // location of the key value. Finally, all other commands are assumed to
+    // contains the key as the first argument after the command name. This is
+    // indeed the key for most commands, and when it is not true the cluster
+    // redirection will point to the right node anyway.
+    if (strcasestr("|INFO|MULTI|EXEC|SLAVEOF|CONFIG|SHUTDOWN|SCRIPT|", buffer) != NULL) {
+        return -1;
+    } else if (strcasestr("|EVAL|EVALSHA|", buffer) != NULL) {
+        return 3;
+    }
+    return 1;
+}
+
 static unsigned
-key2slot(const char *key)
+get_cluster_slot(const char *key)
 {
     // Extract data to be hashed. Only hash what is inside {...} if there is
     // such a pattern in 'key'. Note that the specification requires the
@@ -228,4 +224,47 @@ key2slot(const char *key)
 
     // Done!
     return crc16(ptr, len) % MAX_REDIS_CLUSTER_SLOTS;
+}
+
+static const char *
+get_cluster_tag(vcl_priv_t *config, const char *key)
+{
+    // Initializations.
+    const char *result = NULL;
+    unsigned slot = get_cluster_slot(key);
+
+    // Get config lock.
+    AZ(pthread_mutex_lock(&config->mutex));
+
+    // Select a tag according with the current slot-tag mapping.
+    for (int i = slot; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
+        if (config->slots[i] != NULL) {
+            result = config->slots[i];
+            break;
+        }
+    }
+
+    // If failed to find the tag (this is possible e.g. if the discovery
+    // function failed to fetch the slots-servers mapping), use the tag of
+    // any known server running in clustered mode (servers are never deleted;
+    // at least one clustered server must exist).
+    if (result == NULL) {
+        redis_server_t *iserver;
+        VTAILQ_FOREACH(iserver, &config->servers, list) {
+            if (iserver->clustered) {
+                // Check server.
+                CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
+
+                // Fetch tag.
+                result = iserver->tag;
+            }
+        }
+    }
+    AN(result);
+
+    // Release config lock.
+    AZ(pthread_mutex_unlock(&config->mutex));
+
+    // Done!
+    return result;
 }

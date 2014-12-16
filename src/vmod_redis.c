@@ -25,6 +25,10 @@ static pthread_key_t thread_key;
 static thread_state_t *get_thread_state(struct sess *sp, unsigned drop_reply);
 static void make_thread_key();
 
+static redis_server_t *unsafe_add_redis_server(
+    struct sess *sp, vcl_priv_t *config,
+    const char *tag, const char *location, unsigned timeout, unsigned ttl);
+
 static const char *get_reply(struct sess *sp, redisReply *reply);
 
 /******************************************************************************
@@ -70,21 +74,21 @@ vmod_init(
     if ((tag != NULL) && (strlen(tag) > 0) &&
         (location != NULL) && (strlen(location) > 0) &&
         (max_contexts > 0)) {
-        // Initializations.
-        redis_server_t *server = new_redis_server(tag, location, timeout, ttl);
+        // Create new configuration.
+        vcl_priv_t *config = new_vcl_priv(shared_contexts, max_contexts);
+
+        // Add initial server.
+        redis_server_t *server = unsafe_add_redis_server(
+            sp, config, tag, location, timeout, ttl);
 
         // Do not continue if we failed to create the server instance.
         if (server != NULL) {
-            // Create new configuration.
-            vcl_priv_t *config = new_vcl_priv(shared_contexts, max_contexts);
-            VTAILQ_INSERT_TAIL(&config->servers, server, list);
-            redis_context_pool_t *pool = new_redis_context_pool(server->tag);
-            VTAILQ_INSERT_TAIL(&config->pools, pool, list);
-
-            // If a clustered server was added, enable clustering and populate
-            // the list of slots.
+            // If a clustered server was added, enable clustering, set clustering
+            // options and populate the list of slots.
             if (server->clustered) {
                 config->clustered = 1;
+                config->timeout = timeout;
+                config->ttl = ttl;
                 discover_cluster_slots(sp, config);
             }
 
@@ -95,9 +99,7 @@ vmod_init(
 
         // Failed to create the server instance.
         } else {
-            REDIS_LOG(sp,
-                "Failed to add initial server '%s' tagged as '%s'",
-                location, tag);
+            free_vcl_priv(config);
         }
     }
 }
@@ -118,43 +120,58 @@ vmod_add_server(
         vcl_priv_t *config = vcl_priv->priv;
 
         // Do not allow usage of tags internally reserved for clustering.
-        if (((!config->clustered) &&
-             (strcmp(tag, CLUSTERED_REDIS_SERVER_TAG) != 0)) ||
-            ((config->clustered) &&
-             (strncmp(tag, CLUSTERED_REDIS_SERVER_TAG_PREFIX,
-                      strlen(CLUSTERED_REDIS_SERVER_TAG_PREFIX)) != 0))) {
-            // Initializations.
-            redis_server_t *server = new_redis_server(tag, location, timeout, ttl);
+        if ((strcmp(tag, CLUSTERED_REDIS_SERVER_TAG) != 0) &&
+            (strncmp(tag, CLUSTERED_REDIS_SERVER_TAG_PREFIX,
+                     strlen(CLUSTERED_REDIS_SERVER_TAG_PREFIX)) != 0)) {
+            // Get config lock.
+            AZ(pthread_mutex_lock(&config->mutex));
 
-            // Do not continue if we failed to create the server instance.
-            if (server != NULL) {
-                // Get config lock.
-                AZ(pthread_mutex_lock(&config->mutex));
+            // Add new server.
+            unsafe_add_redis_server(sp, config, tag, location, timeout, ttl);
 
-                // Add new server.
-                VTAILQ_INSERT_TAIL(&config->servers, server, list);
-
-                // If required, add new pool.
-                if (!unsafe_context_pool_exists(config, server->tag)) {
-                    redis_context_pool_t *pool = new_redis_context_pool(server->tag);
-                    VTAILQ_INSERT_TAIL(&config->pools, pool, list);
-                }
-
-                // Release config lock.
-                AZ(pthread_mutex_unlock(&config->mutex));
-
-            // Failed to create the server instance.
-            } else {
-                REDIS_LOG(sp,
-                    "Failed to add server '%s' tagged as '%s'",
-                    location, tag);
-            }
+            // Release config lock.
+            AZ(pthread_mutex_unlock(&config->mutex));
 
         // Reserved tag.
         } else {
             REDIS_LOG(sp,
                 "Failed to add server '%s' using reserved tag '%s'",
                 location, tag);
+        }
+    }
+}
+
+/******************************************************************************
+ * redis.add_cserver();
+ *****************************************************************************/
+
+void
+vmod_add_cserver(struct sess *sp, struct vmod_priv *vcl_priv, const char *location)
+{
+    // Check input.
+    if ((location != NULL) && (strlen(location) > 0)) {
+        // Initializations.
+        vcl_priv_t *config = vcl_priv->priv;
+
+        // Do not continue if clustering has not been enabled.
+        if (config->clustered) {
+            // Get config lock.
+            AZ(pthread_mutex_lock(&config->mutex));
+
+            // Add new server.
+            unsafe_add_redis_server(
+                sp, config,
+                CLUSTERED_REDIS_SERVER_TAG,
+                location, config->timeout, config->ttl);
+
+            // Release config lock.
+            AZ(pthread_mutex_unlock(&config->mutex));
+
+        // Clustering is not enabled
+        } else {
+            REDIS_LOG(sp,
+                "Failed to add cluster server '%s' while clustering is disabled",
+                location);
         }
     }
 }
@@ -251,6 +268,14 @@ vmod_execute(struct sess *sp, struct vmod_priv *vcl_priv)
             state->reply = redis_execute(
                 sp, config, state,
                 state->tag, version, state->argc, state->argv, 0);
+        }
+
+        // Log error replies.
+        if ((state->reply != NULL) && (state->reply->type == REDIS_REPLY_ERROR)) {
+            REDIS_LOG(sp,
+                "Got error reply while executing Redis command (%s): %s",
+                state->argv[0],
+                state->reply->str);
         }
     }
 }
@@ -441,6 +466,37 @@ static void
 make_thread_key()
 {
     AZ(pthread_key_create(&thread_key, (void *) free_thread_state));
+}
+
+static redis_server_t *
+unsafe_add_redis_server(
+    struct sess *sp, vcl_priv_t *config,
+    const char *tag, const char *location, unsigned timeout, unsigned ttl)
+{
+    // Initializations.
+    redis_server_t *result = new_redis_server(tag, location, timeout, ttl);
+
+    // Do not continue if we failed to create the server instance.
+    // Caller should own config->mutex!
+    if (result != NULL) {
+        // Add new server.
+        VTAILQ_INSERT_TAIL(&config->servers, result, list);
+
+        // If required, add new pool.
+        if (!unsafe_context_pool_exists(config, result->tag)) {
+            redis_context_pool_t *pool = new_redis_context_pool(result->tag);
+            VTAILQ_INSERT_TAIL(&config->pools, pool, list);
+        }
+
+    // Failed to create the server instance.
+    } else {
+        REDIS_LOG(sp,
+            "Failed to add server '%s' tagged as '%s'",
+            location, tag);
+    }
+
+    // Done!
+    return result;
 }
 
 static const char *

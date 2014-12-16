@@ -28,7 +28,7 @@ static const char *sha1(struct sess *sp, const char *script);
 
 redis_server_t *
 new_redis_server(
-    const char *tag, const char *location, int timeout, int ttl)
+    const char *tag, const char *location, unsigned timeout, unsigned ttl)
 {
     // Initializations.
     redis_server_t *result = NULL;
@@ -186,13 +186,16 @@ new_vcl_priv(unsigned shared_contexts, unsigned max_contexts)
 
     VTAILQ_INIT(&result->servers);
 
+    result->shared_contexts = shared_contexts;
+    result->max_contexts = max_contexts;
+
+    result->clustered = 0;
+    result->timeout = 0;
+    result->ttl = 0;
+    result->discovering = 0;
     for (int i = 0; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
         result->slots[i] = NULL;
     }
-
-    result->clustered = 0;
-    result->shared_contexts = shared_contexts;
-    result->max_contexts = max_contexts;
 
     VTAILQ_INIT(&result->pools);
 
@@ -211,16 +214,19 @@ free_vcl_priv(vcl_priv_t *priv)
         free_redis_server(iserver);
     }
 
+    priv->shared_contexts = 0;
+    priv->max_contexts = 0;
+
+    priv->clustered = 0;
+    priv->timeout = 0;
+    priv->ttl = 0;
+    priv->discovering = 0;
     for (int i = 0; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
         if (priv->slots[i] != NULL) {
             free((void *) (priv->slots[i]));
             priv->slots[i] = NULL;
         }
     }
-
-    priv->clustered = 0;
-    priv->shared_contexts = 0;
-    priv->max_contexts = 0;
 
     redis_context_pool_t *ipool;
     while (!VTAILQ_EMPTY(&priv->pools)) {

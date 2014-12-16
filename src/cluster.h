@@ -7,8 +7,6 @@
 
 void discover_cluster_slots(struct sess *sp, vcl_priv_t *config);
 
-const char *get_cluster_tag(struct sess *sp, vcl_priv_t *config, const char *key);
-
 redisReply *cluster_execute(
     struct sess *sp, vcl_priv_t *config, thread_state_t *state,
     unsigned version, unsigned argc, const char *argv[]);

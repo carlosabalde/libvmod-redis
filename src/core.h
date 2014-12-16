@@ -92,13 +92,16 @@ typedef struct vcl_priv {
     // Redis servers (allocated in the heap).
     VTAILQ_HEAD(,redis_server) servers;
 
-    // Redis Cluster slots (allocated in the heap).
-    const char *slots[MAX_REDIS_CLUSTER_SLOTS];
-
     // General options.
-    unsigned clustered;
     unsigned shared_contexts;
     unsigned max_contexts;
+
+    // Redis Cluster options / state (allocated in the heap).
+    unsigned clustered;
+    unsigned timeout;
+    unsigned ttl;
+    unsigned discovering;
+    const char *slots[MAX_REDIS_CLUSTER_SLOTS];
 
     // Shared contexts (allocated in the heap).
     VTAILQ_HEAD(,redis_context_pool) pools;
@@ -137,7 +140,7 @@ typedef struct thread_state {
     } while (0)
 
 redis_server_t *new_redis_server(
-    const char *tag, const char *location, int timeout, int ttl);
+    const char *tag, const char *location, unsigned timeout, unsigned ttl);
 void free_redis_server(redis_server_t *server);
 
 redis_context_t *new_redis_context(
