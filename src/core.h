@@ -100,7 +100,6 @@ typedef struct vcl_priv {
     unsigned clustered;
     unsigned timeout;
     unsigned ttl;
-    unsigned discover;
     const char *slots[MAX_REDIS_CLUSTER_SLOTS];
 
     // Shared contexts (allocated in the heap).
@@ -156,8 +155,8 @@ void free_vcl_priv(vcl_priv_t *priv);
 thread_state_t *new_thread_state();
 void free_thread_state(thread_state_t *state);
 
-unsigned unsafe_redis_server_exists(vcl_priv_t *config, const char *tag);
-unsigned unsafe_context_pool_exists(vcl_priv_t *config, const char *tag);
+redis_server_t *unsafe_get_redis_server(vcl_priv_t *config, const char *tag);
+redis_context_pool_t *unsafe_get_context_pool(vcl_priv_t *config, const char *tag);
 
 redisReply *redis_execute(
     struct sess *sp, vcl_priv_t *config, thread_state_t *state,

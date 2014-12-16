@@ -58,6 +58,7 @@ import redis;
 
     # Other.
     Function VOID free()
+    Function VOID fini()
 
 DESCRIPTION
 ===========
@@ -178,6 +179,9 @@ Clustered setup
         set req.http.X-Foo = redis.get_string_reply();
     }
 
+    sub vcl_fini {
+        redis.fini();
+    }
 
 
 CONFIGURATION FUNCTIONS
@@ -561,24 +565,24 @@ Description
     Frees memory internally used by Redis commands an replies.
     It's recommended to use this function, but if not called this will be handled automatically during the next call to ``redis.command()``.
 
+fini
+----
+
+Prototype
+        ::
+
+                fini()
+Return value
+    VOID
+Description
+    Closes all established Redis connections in shared pools.
+    Must be used during the ``vcl_fini`` phase.
+    It's recommended to use this function, but if not called this will be handled automatically during the unload of the VCL using the VMOD.
+
 INSTALLATION
 ============
 
 The source tree is based on autotools to configure the building, and does also have the necessary bits in place to do functional unit tests using the varnishtest tool.
-
-Usage::
-
- ./configure VARNISHSRC=DIR [VMODDIR=DIR]
-
-``VARNISHSRC`` is the directory of the Varnish source tree for which to compile your VMOD. Both the ``VARNISHSRC`` and ``VARNISHSRC/include`` will be added to the include search paths for your module.
-
-Optionally you can also set the VMOD install directory by adding ``VMODDIR=DIR`` (defaults to the pkg-config discovered directory from your Varnish installation).
-
-Make targets:
-
-* make - builds the VMOD
-* make install - installs your VMOD in ``VMODDIR``
-* make check - runs the unit tests in ``src/tests/*.vtc``
 
 Dependencies:
 

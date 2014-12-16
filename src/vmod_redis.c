@@ -42,7 +42,10 @@ init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
     // required* to be thread safe.
     //   - Initialize (once) the key required to store thread-specific data.
     //   - Increase (every time the VMOD is initialized) the global version.
-    //     This will be used to reestablish Redis connections on reloads.
+    //     This will be used to reestablish Redis connections binded to
+    //     worker threads during reloads. Pooled connections shared between
+    //     threads are stored in the local VCL data structure, which is
+    //     regenerated every time the VMOD is initialized.
     AZ(pthread_once(&thread_once, make_thread_key));
     AZ(pthread_mutex_lock(&mutex));
     version++;
@@ -84,12 +87,11 @@ vmod_init(
         // Do not continue if we failed to create the server instance.
         if (server != NULL) {
             // If a clustered server was added, enable clustering, set clustering
-            // options and populate the list of slots.
+            // options, and populate the slots-tags mapping.
             if (server->clustered) {
                 config->clustered = 1;
                 config->timeout = timeout;
                 config->ttl = ttl;
-                config->discover = 1;
                 discover_cluster_slots(sp, config);
             }
 
@@ -432,6 +434,51 @@ vmod_free(struct sess *sp)
 }
 
 /******************************************************************************
+ * redis.fini();
+ *****************************************************************************/
+
+void
+vmod_fini(struct sess *sp, struct vmod_priv *vcl_priv)
+{
+    // Initializations.
+    vcl_priv_t *config = vcl_priv->priv;
+
+    // Get config lock.
+    AZ(pthread_mutex_lock(&config->mutex));
+
+    redis_context_pool_t *ipool;
+    VTAILQ_FOREACH(ipool, &config->pools, list) {
+        // Check object.
+        CHECK_OBJ_NOTNULL(ipool, REDIS_CONTEXT_POOL_MAGIC);
+
+        // Get pool lock.
+        AZ(pthread_mutex_lock(&ipool->mutex));
+
+        // Release all connections.
+        ipool->ncontexts = 0;
+        while (!VTAILQ_EMPTY(&ipool->free_contexts)) {
+            redis_context_t *icontext;
+            while (!VTAILQ_EMPTY(&ipool->free_contexts)) {
+                icontext = VTAILQ_FIRST(&ipool->free_contexts);
+                VTAILQ_REMOVE(&ipool->free_contexts, icontext, list);
+                free_redis_context(icontext);
+            }
+            while (!VTAILQ_EMPTY(&ipool->busy_contexts)) {
+                icontext = VTAILQ_FIRST(&ipool->busy_contexts);
+                VTAILQ_REMOVE(&ipool->busy_contexts, icontext, list);
+                free_redis_context(icontext);
+            }
+        }
+
+        // Release pool lock.
+        AZ(pthread_mutex_lock(&ipool->mutex));
+    }
+
+    // Release config lock.
+    AZ(pthread_mutex_unlock(&config->mutex));
+}
+
+/******************************************************************************
  * UTILITIES.
  *****************************************************************************/
 
@@ -484,7 +531,7 @@ unsafe_add_redis_server(
         VTAILQ_INSERT_TAIL(&config->servers, result, list);
 
         // If required, add new pool.
-        if (!unsafe_context_pool_exists(config, result->tag)) {
+        if (unsafe_get_context_pool(config, result->tag) == NULL) {
             redis_context_pool_t *pool = new_redis_context_pool(result->tag);
             VTAILQ_INSERT_TAIL(&config->pools, pool, list);
         }
@@ -507,7 +554,6 @@ get_reply(struct sess *sp, redisReply *reply)
     const char *result = NULL;
 
     // Check type of Redis reply.
-    // XXX: array replies are *not* supported.
     char buffer[64];
     switch (reply->type) {
         case REDIS_REPLY_ERROR:
@@ -524,8 +570,8 @@ get_reply(struct sess *sp, redisReply *reply)
             break;
 
         case REDIS_REPLY_ARRAY:
-            result = WS_Dup(sp->wrk->ws, "array");
-            AN(result);
+            // XXX: array replies are *not* supported.
+            result = NULL;
             break;
 
         default:

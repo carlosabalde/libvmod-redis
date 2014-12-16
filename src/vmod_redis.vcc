@@ -50,3 +50,4 @@ Function STRING get_array_reply_value(INT)
 ###############################################################################
 
 Function VOID free()
+Function VOID fini(PRIV_VCL)
