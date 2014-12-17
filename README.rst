@@ -72,7 +72,7 @@ Highlights:
 * **Support for classic Redis deployments** using multiple Redis servers (replicated or standalone) **and for clustered deployments based on Redis Cluster**.
 * **Support for multiple Redis connections**, local to each Varnish worker thread, or shared using one or more pools.
 
-Please, check out the [project wiki](https://github.com/carlosabalde/libvmod-redis/wiki) for some extra information and useful links.
+Please, check out the project wiki at https://github.com/carlosabalde/libvmod-redis/wiki for some extra information and useful links.
 
 Looking for official support for this VMOD? Please, contact Allenta Consulting (http://www.allenta.com), the Varnish Software integration partner for Spain and Portugal (https://www.varnish-software.com/partner/allenta-consulting).
 
