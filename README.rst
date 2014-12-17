@@ -2,9 +2,6 @@
 vmod_redis
 ==========
 
-.. image:: https://travis-ci.org/carlosabalde/libvmod-redis.svg?branch=master
-    :target: https://travis-ci.org/carlosabalde/libvmod-redis
-
 --------------------
 Varnish Redis Module
 --------------------
