@@ -51,7 +51,7 @@ cluster_execute(
         int ttl = MAX_REDIRECTIONS;
         unsigned asking = 0;
 
-        // Get initial destination server tag.
+        // Get destination tag according with the slots-servers mapping.
         AZ(pthread_mutex_lock(&config->mutex));
         const char *tag = unsafe_get_cluster_tag(config, argv[index]);
         AZ(pthread_mutex_unlock(&config->mutex));
@@ -72,9 +72,13 @@ cluster_execute(
                     AZ(pthread_mutex_lock(&config->mutex));
                     if (strncmp(result->str, "MOVED", 3) == 0) {
                         // Ignore reply and rediscover the cluster topology.
+                        // XXX: at the moment this implementation may result in
+                        // multiple threads executing multiple -serialized-
+                        // cluster discoveries.
                         unsafe_discover_slots(sp, config);
 
-                        // Update tag, according with the updated mapping.
+                        // Update tag, according with the -hopefully- new
+                        // slots-servers mapping.
                         tag = unsafe_get_cluster_tag(config, argv[index]);
                     } else {
                         // Extract location (e.g. ASK 3999 127.0.0.1:6381).
@@ -105,7 +109,7 @@ cluster_execute(
 
             // No reply. Do not execute retries in this particular case (note
             // that this does not follow the suggestion in the reference Ruby
-            // implementation of Redis Cluster).
+            // implementation of a Redis Cluster client).
             } else {
                 break;
             }
@@ -138,15 +142,15 @@ unsafe_add_redis_server(vcl_priv_t *config, const char *location)
 {
     // Initializations.
     redis_server_t *result = NULL;
-    redis_server_t *server = new_redis_server(
-        CLUSTERED_REDIS_SERVER_TAG, location, config->timeout, config->ttl);
-    AN(server);
+    const char *tag = new_clustered_redis_server_tag(location);
 
     // Register new server & slot if required.
-    result = unsafe_get_redis_server(config, server->tag);
+    result = unsafe_get_redis_server(config, tag);
     if (result == NULL) {
         // Add new server.
-        result = server;
+        result = new_redis_server(
+            CLUSTERED_REDIS_SERVER_TAG, location, config->timeout, config->ttl);
+        AN(result);
         VTAILQ_INSERT_TAIL(&config->servers, result, list);
 
         // If required, add new pool.
@@ -154,10 +158,10 @@ unsafe_add_redis_server(vcl_priv_t *config, const char *location)
             redis_context_pool_t *pool = new_redis_context_pool(result->tag);
             VTAILQ_INSERT_TAIL(&config->pools, pool, list);
         }
-    } else {
-        // The initial server instance was only useful to fetch its tag.
-        free_redis_server(server);
     }
+
+    // Release previously allocated tag.
+    free((void *) tag);
 
     // Done!
     return result;
@@ -173,7 +177,7 @@ unsafe_add_slot(
 
     // Add new slot (and release previous one, if required).
     if (config->slots[stop] != NULL) {
-        free((void *)(config->slots[stop]));
+        free((void *) (config->slots[stop]));
     }
     config->slots[stop] = strdup(server->tag);
     AN(config->slots[stop]);
@@ -328,7 +332,7 @@ unsafe_get_cluster_tag(vcl_priv_t *config, const char *key)
     const char *result = NULL;
     unsigned slot = get_cluster_slot(key);
 
-    // Select a tag according with the current slot-tag mapping.
+    // Select a tag according with the current slots-tags mapping.
     for (int i = slot; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
         if (config->slots[i] != NULL) {
             result = config->slots[i];

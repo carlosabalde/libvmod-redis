@@ -22,6 +22,8 @@ Function VOID execute(PRIV_VCL)
 ## Access to replies.
 ###############################################################################
 
+Function BOOL replied()
+
 Function BOOL reply_is_error()
 Function BOOL reply_is_nil()
 Function BOOL reply_is_status()

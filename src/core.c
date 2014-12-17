@@ -26,6 +26,25 @@ static redisReply *get_redis_repy(
 
 static const char *sha1(struct sess *sp, const char *script);
 
+const char *
+new_clustered_redis_server_tag(const char *location)
+{
+    // Check location (only host + port format is allowed).
+    AN(strchr(location, ':'));
+
+    // Build tag.
+    char *result = malloc(
+        strlen(CLUSTERED_REDIS_SERVER_TAG_PREFIX) +
+        strlen(location) +
+        1);
+    AN(result);
+    strcpy(result, CLUSTERED_REDIS_SERVER_TAG_PREFIX);
+    strcat(result, location);
+
+    // Done!
+    return result;
+}
+
 redis_server_t *
 new_redis_server(
     const char *tag, const char *location, unsigned timeout, unsigned ttl)
@@ -53,12 +72,7 @@ new_redis_server(
         }
 
         if (clustered) {
-            char buffer[256];
-            snprintf(buffer, sizeof(buffer), CLUSTERED_REDIS_SERVER_TAG_FORMAT,
-                CLUSTERED_REDIS_SERVER_TAG_PREFIX,
-                result->location.address.host,
-                result->location.address.port);
-            result->tag = strdup(buffer);
+            result->tag = new_clustered_redis_server_tag(location);
         } else {
             result->tag = strdup(tag);
         }
