@@ -2,16 +2,13 @@
 vmod_redis
 ==========
 
-.. image:: https://travis-ci.org/carlosabalde/libvmod-redis.svg?branch=master
-    :target: https://travis-ci.org/carlosabalde/libvmod-redis
-
 --------------------
 Varnish Redis Module
 --------------------
 
 :Author: Carlos Abalde
-:Date: 2014-12-16
-:Version: 0.2.0
+:Date: 2014-12-17
+:Version: 0.2.1
 :Manual section: 3
 
 SYNOPSIS
@@ -33,6 +30,8 @@ import redis;
     Function VOID execute()
 
     # Access to replies.
+    Function BOOL replied()
+
     Function BOOL reply_is_error()
     Function BOOL reply_is_nil()
     Function BOOL reply_is_status()
@@ -72,6 +71,8 @@ Highlights:
 * **Redis pipelines are not (and won't be) supported**. LUA scripting, which is fully supported by the VMOD, it's a much more flexible alternative to pipelines for atomic execution and minimizing latency. Pipelines are hard to use and error prone, specially when using the ``WATCH`` command.
 * **Support for classic Redis deployments** using multiple Redis servers (replicated or standalone) **and for clustered deployments based on Redis Cluster**.
 * **Support for multiple Redis connections**, local to each Varnish worker thread, or shared using one or more pools.
+
+Please, check out the project wiki at https://github.com/carlosabalde/libvmod-redis/wiki for some extra information and useful links.
 
 Looking for official support for this VMOD? Please, contact Allenta Consulting (http://www.allenta.com), the Varnish Software integration partner for Spain and Portugal (https://www.varnish-software.com/partner/allenta-consulting).
 
@@ -319,6 +320,18 @@ Description
 
 ACCESS TO REPLY FUNCTIONS
 =========================
+
+replied
+-------
+
+Prototype
+        ::
+
+                replied()
+Return value
+    BOOL
+Description
+    Returns TRUE if a previously executed Redis command using ``redis.execute()`` returned any reply. Not returning a reply usually means a failed connection, a connection timeout, etc.
 
 reply_is_error
 --------------

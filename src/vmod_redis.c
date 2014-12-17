@@ -99,8 +99,6 @@ vmod_init(
             vcl_priv_t *old_config = vcl_priv->priv;
             vcl_priv->priv = config;
             free_vcl_priv(old_config);
-
-        // Failed to create the server instance.
         } else {
             free_vcl_priv(config);
         }
@@ -134,8 +132,6 @@ vmod_add_server(
 
             // Release config lock.
             AZ(pthread_mutex_unlock(&config->mutex));
-
-        // Reserved tag.
         } else {
             REDIS_LOG(ctx,
                 "Failed to add server '%s' using reserved tag '%s'",
@@ -169,8 +165,6 @@ vmod_add_cserver(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, const ch
 
             // Release config lock.
             AZ(pthread_mutex_unlock(&config->mutex));
-
-        // Clustering is not enabled
         } else {
             REDIS_LOG(ctx,
                 "Failed to add cluster server '%s' while clustering is disabled",
@@ -273,7 +267,8 @@ vmod_execute(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
                 state->tag, version, state->argc, state->argv, 0);
         }
 
-        // Log error replies.
+        // Log error replies (other errors are already logged while executing
+        // commands).
         if ((state->reply != NULL) && (state->reply->type == REDIS_REPLY_ERROR)) {
             REDIS_LOG(ctx,
                 "Got error reply while executing Redis command (%s): %s",
@@ -281,6 +276,17 @@ vmod_execute(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
                 state->reply->str);
         }
     }
+}
+
+/******************************************************************************
+ * redis.replied();
+ *****************************************************************************/
+
+VCL_BOOL
+vmod_replied(const struct vrt_ctx *ctx)
+{
+    thread_state_t *state = get_thread_state(ctx, 0);
+    return (state->reply != NULL);
 }
 
 /******************************************************************************
@@ -446,15 +452,14 @@ vmod_fini(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
     // Get config lock.
     AZ(pthread_mutex_lock(&config->mutex));
 
+    // Release contexts in all pools.
     redis_context_pool_t *ipool;
     VTAILQ_FOREACH(ipool, &config->pools, list) {
-        // Check object.
-        CHECK_OBJ_NOTNULL(ipool, REDIS_CONTEXT_POOL_MAGIC);
-
         // Get pool lock.
         AZ(pthread_mutex_lock(&ipool->mutex));
 
-        // Release all connections.
+        // Release all contexts (both free an busy; this method is assumed
+        // to be called during vcl_fini).
         ipool->ncontexts = 0;
         while (!VTAILQ_EMPTY(&ipool->free_contexts)) {
             redis_context_t *icontext;
@@ -535,8 +540,6 @@ unsafe_add_redis_server(
             redis_context_pool_t *pool = new_redis_context_pool(result->tag);
             VTAILQ_INSERT_TAIL(&config->pools, pool, list);
         }
-
-    // Failed to create the server instance.
     } else {
         REDIS_LOG(ctx,
             "Failed to add server '%s' tagged as '%s'",
