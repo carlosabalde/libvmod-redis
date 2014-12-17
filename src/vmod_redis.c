@@ -284,6 +284,17 @@ vmod_execute(struct sess *sp, struct vmod_priv *vcl_priv)
 }
 
 /******************************************************************************
+ * redis.replied();
+ *****************************************************************************/
+
+unsigned
+vmod_replied(struct sess *sp)
+{
+    thread_state_t *state = get_thread_state(sp, 0);
+    return (state->reply != NULL);
+}
+
+/******************************************************************************
  * redis.reply_is_error();
  * redis.reply_is_nil();
  * redis.reply_is_status();
