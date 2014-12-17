@@ -284,6 +284,17 @@ vmod_execute(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
 }
 
 /******************************************************************************
+ * redis.replied();
+ *****************************************************************************/
+
+VCL_BOOL
+vmod_replied(const struct vrt_ctx *ctx)
+{
+    thread_state_t *state = get_thread_state(ctx, 0);
+    return (state->reply != NULL);
+}
+
+/******************************************************************************
  * redis.reply_is_error();
  * redis.reply_is_nil();
  * redis.reply_is_status();

@@ -30,6 +30,8 @@ import redis;
     Function VOID execute()
 
     # Access to replies.
+    Function BOOL replied()
+
     Function BOOL reply_is_error()
     Function BOOL reply_is_nil()
     Function BOOL reply_is_status()
@@ -316,6 +318,18 @@ Description
 
 ACCESS TO REPLY FUNCTIONS
 =========================
+
+replied
+-------
+
+Prototype
+        ::
+
+                replied()
+Return value
+    BOOL
+Description
+    Returns TRUE if a previously executed Redis command using ``redis.execute()`` returned any reply. Not returning a reply usually means a failed connection, a connection timeout, etc.
 
 reply_is_error
 --------------
