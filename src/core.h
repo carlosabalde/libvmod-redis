@@ -9,7 +9,6 @@
 
 #define CLUSTERED_REDIS_SERVER_TAG "cluster"
 #define CLUSTERED_REDIS_SERVER_TAG_PREFIX ":"
-#define CLUSTERED_REDIS_SERVER_TAG_FORMAT "%s%s:%u"
 
 #define MAX_REDIS_CLUSTER_SLOTS 16384
 
@@ -23,7 +22,7 @@ typedef struct redis_server {
 #define REDIS_SERVER_MAGIC 0xac587b11
     unsigned magic;
 
-    // Tag (i.e. 'main', 'master', 'slave', etc.).
+    // Tag (allocated in the heap; i.e. 'main', 'master', 'slave', etc.).
     const char *tag;
     unsigned clustered;
 
@@ -50,7 +49,7 @@ typedef struct redis_context {
 #define REDIS_CONTEXT_MAGIC 0xe11eaa70
     unsigned magic;
 
-    // Data.
+    // Data (allocated in the heap).
     redis_server_t *server;
     redisContext *rcontext;
     unsigned version;
@@ -65,7 +64,7 @@ typedef struct redis_context_pool {
 #define REDIS_CONTEXT_POOL_MAGIC 0x9700a5ef
     unsigned magic;
 
-    // Tag.
+    // Tag (allocated in the heap).
     const char *tag;
 
     // Mutex & condition variable.
@@ -137,6 +136,8 @@ typedef struct thread_state {
             VSLb(ctx->vsl, SLT_Error, _buffer, ##__VA_ARGS__); \
         } \
     } while (0)
+
+const char *new_clustered_redis_server_tag(const char *location);
 
 redis_server_t *new_redis_server(
     const char *tag, const char *location, unsigned timeout, unsigned ttl);
