@@ -12,6 +12,7 @@
 #include "cluster.h"
 #include "core.h"
 
+#define DEFAULT_RETRIES 0
 #define DEFAULT_SHARED_CONTEXTS 0
 #define DEFAULT_MAX_CONTEXTS 1
 
@@ -55,7 +56,10 @@ init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
     // Code initializing / freeing the VCL private data structure *is
     // not required* to be thread safe.
     if (vcl_priv->priv == NULL) {
-        vcl_priv->priv = new_vcl_priv(DEFAULT_SHARED_CONTEXTS, DEFAULT_MAX_CONTEXTS);
+        vcl_priv->priv = new_vcl_priv(
+            DEFAULT_RETRIES,
+            DEFAULT_SHARED_CONTEXTS,
+            DEFAULT_MAX_CONTEXTS);
         vcl_priv->free = (vmod_priv_free_f *)free_vcl_priv;
     }
 
@@ -71,14 +75,14 @@ void
 vmod_init(
     struct sess *sp, struct vmod_priv *vcl_priv,
     const char *tag, const char *location, int timeout, int ttl,
-    unsigned shared_contexts, int max_contexts)
+    int retries, unsigned shared_contexts, int max_contexts)
 {
     // Check input.
     if ((tag != NULL) && (strlen(tag) > 0) &&
         (location != NULL) && (strlen(location) > 0) &&
         (max_contexts > 0)) {
         // Create new configuration.
-        vcl_priv_t *config = new_vcl_priv(shared_contexts, max_contexts);
+        vcl_priv_t *config = new_vcl_priv(retries, shared_contexts, max_contexts);
 
         // Add initial server.
         redis_server_t *server = unsafe_add_redis_server(
@@ -262,9 +266,14 @@ vmod_execute(struct sess *sp, struct vmod_priv *vcl_priv)
                 sp, config, state,
                 version, state->argc, state->argv);
         } else {
-            state->reply = redis_execute(
-                sp, config, state,
-                state->tag, version, state->argc, state->argv, 0);
+            int tries = 1 + config->retries;
+            while ((tries > 0) && (state->reply == NULL)) {
+                state->reply = redis_execute(
+                    sp, config, state,
+                    state->tag, version, state->argc, state->argv, 0);
+                tries--;
+            }
+
         }
 
         // Log error replies (other errors are already logged while executing

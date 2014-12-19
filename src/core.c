@@ -190,7 +190,7 @@ free_redis_context_pool(redis_context_pool_t *pool)
 }
 
 vcl_priv_t *
-new_vcl_priv(unsigned shared_contexts, unsigned max_contexts)
+new_vcl_priv(unsigned retries, unsigned shared_contexts, unsigned max_contexts)
 {
     vcl_priv_t *result;
     ALLOC_OBJ(result, VCL_PRIV_MAGIC);
@@ -200,6 +200,7 @@ new_vcl_priv(unsigned shared_contexts, unsigned max_contexts)
 
     VTAILQ_INIT(&result->servers);
 
+    result->retries = retries;
     result->shared_contexts = shared_contexts;
     result->max_contexts = max_contexts;
 
@@ -227,6 +228,7 @@ free_vcl_priv(vcl_priv_t *priv)
         free_redis_server(iserver);
     }
 
+    priv->retries = 0;
     priv->shared_contexts = 0;
     priv->max_contexts = 0;
 

@@ -15,7 +15,7 @@
 #include "cluster.h"
 
 #define DISCOVERY_COMMAND "CLUSTER SLOTS"
-#define MAX_REDIRECTIONS 16
+#define MAX_HOPS 16
 
 static redis_server_t * unsafe_add_redis_server(
     vcl_priv_t *config, const char *location);
@@ -23,8 +23,8 @@ static redis_server_t * unsafe_add_redis_server(
 static void unsafe_discover_slots(
     struct sess *sp, vcl_priv_t *config);
 
-static const char *unsafe_get_cluster_tag(
-    vcl_priv_t *config, const char *key);
+static const char *unsafe_get_cluster_tag(vcl_priv_t *config, const char *key);
+static const char *unsafe_get_random_cluster_tag(vcl_priv_t *config);
 
 static int get_key_index(const char *command);
 
@@ -48,18 +48,40 @@ cluster_execute(
     int index = get_key_index(argv[0]);
     if ((index > 0) && (index < argc)) {
         // Initializations.
-        int ttl = MAX_REDIRECTIONS;
+        int hops = MAX_HOPS;
+        int tries = 1 + config->retries;
+        const char *tag = NULL;
         unsigned asking = 0;
+        unsigned random = 0;
 
-        // Get destination tag according with the slots-servers mapping.
-        AZ(pthread_mutex_lock(&config->mutex));
-        const char *tag = unsafe_get_cluster_tag(config, argv[index]);
-        AZ(pthread_mutex_unlock(&config->mutex));
+        // Execute command, retrying & following redirections, up to some limit.
+        for (; tries > 0 && hops > 0; hops--) {
+            // Get destination tag: random vs. slots-servers mapping based
+            // selection. Note that the later may return NULL (this is possible
+            // e.g. if the discovery function failed to fetch the slots-servers
+            // mapping). If that happens, simply use the tag of any known server
+            // running in clustered mode (servers are never deleted; at least one
+            // clustered server must exist).
+            if (!asking) {
+                AZ(pthread_mutex_lock(&config->mutex));
+                if (!random) {
+                    tag = unsafe_get_cluster_tag(config, argv[index]);
+                    if (tag == NULL) {
+                        tag = unsafe_get_random_cluster_tag(config);
+                    }
+                } else {
+                    tag = unsafe_get_random_cluster_tag(config);
+                }
+                AZ(pthread_mutex_unlock(&config->mutex));
+            }
+            AN(tag);
 
-        // Execute command, following redirections, up to some limit.
-        for (; ttl > 0; ttl--) {
-            // Execute command & reset 'asking' flag.
+            // Execute command.
             result = redis_execute(sp, config, state, tag, version, argc, argv, asking);
+
+            // Reset flags.
+            tag = NULL;
+            random = 0;
             asking = 0;
 
             // Check reply.
@@ -76,10 +98,6 @@ cluster_execute(
                         // multiple threads executing multiple -serialized-
                         // cluster discoveries.
                         unsafe_discover_slots(sp, config);
-
-                        // Update tag, according with the -hopefully- new
-                        // slots-servers mapping.
-                        tag = unsafe_get_cluster_tag(config, argv[index]);
                     } else {
                         // Extract location (e.g. ASK 3999 127.0.0.1:6381).
                         char *ptr = strchr(result->str, ' ');
@@ -107,18 +125,19 @@ cluster_execute(
                     break;
                 }
 
-            // No reply. Do not execute retries in this particular case (note
-            // that this does not follow the suggestion in the reference Ruby
-            // implementation of a Redis Cluster client).
+            // No reply. If some retries are available, during next execution
+            // try with a random clustered server.
             } else {
-                break;
+                tries--;
+                random = 1;
             }
         }
 
-        // Too many redirections?
-        if (ttl <= 0) {
-            REDIS_LOG(sp,
-                "Too many redirections while executing Redis Cluster command (%s)",
+        // Too many retries / redirections?
+        if ((tries <= 0) || (hops <= 0)) {
+              REDIS_LOG(sp,
+                "Too many %s while executing Redis Cluster command (%s)",
+                tries <= 0 ? "retries" : "redirections",
                 argv[0]);
         }
 
@@ -330,9 +349,9 @@ unsafe_get_cluster_tag(vcl_priv_t *config, const char *key)
 {
     // Initializations.
     const char *result = NULL;
-    unsigned slot = get_cluster_slot(key);
 
     // Select a tag according with the current slots-tags mapping.
+    unsigned slot = get_cluster_slot(key);
     for (int i = slot; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
         if (config->slots[i] != NULL) {
             result = config->slots[i];
@@ -340,23 +359,33 @@ unsafe_get_cluster_tag(vcl_priv_t *config, const char *key)
         }
     }
 
-    // If failed to find the tag (this is possible e.g. if the discovery
-    // function failed to fetch the slots-servers mapping), use the tag of
-    // any known server running in clustered mode (servers are never deleted;
-    // at least one clustered server must exist).
-    if (result == NULL) {
-        redis_server_t *iserver;
-        VTAILQ_FOREACH(iserver, &config->servers, list) {
-            if (iserver->clustered) {
-                // Check server.
-                CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
+    // Done!
+    return result;
+}
 
-                // Fetch tag.
-                result = iserver->tag;
-            }
+static const char *
+unsafe_get_random_cluster_tag(vcl_priv_t *config)
+{
+    // Initializations.
+    const char *result = NULL;
+
+    // Look for a clustered server.
+    redis_server_t *iserver;
+    VTAILQ_FOREACH(iserver, &config->servers, list) {
+        if (iserver->clustered) {
+            // Found!
+            CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
+            result = iserver->tag;
+
+            // Move the server to the end of the list (this ensures a nice
+            // distribution of load between all available servers).
+            VTAILQ_REMOVE(&config->servers, iserver, list);
+            VTAILQ_INSERT_TAIL(&config->servers, iserver, list);
+
+            // Done!
+            break;
         }
     }
-    AN(result);
 
     // Done!
     return result;
