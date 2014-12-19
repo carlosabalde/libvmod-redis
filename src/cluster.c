@@ -135,7 +135,7 @@ cluster_execute(
 
         // Too many retries / redirections?
         if ((tries <= 0) || (hops <= 0)) {
-              REDIS_LOG(ctx,
+              REDIS_LOG(sp,
                 "Too many %s while executing Redis Cluster command (%s)",
                 tries <= 0 ? "retries" : "redirections",
                 argv[0]);
