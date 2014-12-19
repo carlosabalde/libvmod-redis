@@ -15,7 +15,7 @@
 #include "cluster.h"
 
 #define DISCOVERY_COMMAND "CLUSTER SLOTS"
-#define MAX_REDIRECTIONS 16
+#define MAX_HOPS 16
 
 static redis_server_t * unsafe_add_redis_server(
     vcl_priv_t *config, const char *location);
@@ -23,8 +23,8 @@ static redis_server_t * unsafe_add_redis_server(
 static void unsafe_discover_slots(
     struct sess *sp, vcl_priv_t *config);
 
-static const char *unsafe_get_cluster_tag(
-    vcl_priv_t *config, const char *key);
+static const char *unsafe_get_cluster_tag(vcl_priv_t *config, const char *key);
+static const char *unsafe_get_random_cluster_tag(vcl_priv_t *config);
 
 static int get_key_index(const char *command);
 
@@ -330,9 +330,9 @@ unsafe_get_cluster_tag(vcl_priv_t *config, const char *key)
 {
     // Initializations.
     const char *result = NULL;
-    unsigned slot = get_cluster_slot(key);
 
     // Select a tag according with the current slots-tags mapping.
+    unsigned slot = get_cluster_slot(key);
     for (int i = slot; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
         if (config->slots[i] != NULL) {
             result = config->slots[i];
@@ -340,23 +340,33 @@ unsafe_get_cluster_tag(vcl_priv_t *config, const char *key)
         }
     }
 
-    // If failed to find the tag (this is possible e.g. if the discovery
-    // function failed to fetch the slots-servers mapping), use the tag of
-    // any known server running in clustered mode (servers are never deleted;
-    // at least one clustered server must exist).
-    if (result == NULL) {
-        redis_server_t *iserver;
-        VTAILQ_FOREACH(iserver, &config->servers, list) {
-            if (iserver->clustered) {
-                // Check server.
-                CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
+    // Done!
+    return result;
+}
 
-                // Fetch tag.
-                result = iserver->tag;
-            }
+static const char *
+unsafe_get_random_cluster_tag(vcl_priv_t *config)
+{
+    // Initializations.
+    const char *result = NULL;
+
+    // Look for a clustered server.
+    redis_server_t *iserver;
+    VTAILQ_FOREACH(iserver, &config->servers, list) {
+        if (iserver->clustered) {
+            // Found!
+            CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
+            result = iserver->tag;
+
+            // Move the server to the end of the list (this ensures a nice
+            // distribution of load between all available servers).
+            VTAILQ_REMOVE(&config->servers, iserver, list);
+            VTAILQ_INSERT_TAIL(&config->servers, iserver, list);
+
+            // Done!
+            break;
         }
     }
-    AN(result);
 
     // Done!
     return result;

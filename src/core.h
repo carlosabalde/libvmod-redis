@@ -92,6 +92,7 @@ typedef struct vcl_priv {
     VTAILQ_HEAD(,redis_server) servers;
 
     // General options.
+    unsigned retries;
     unsigned shared_contexts;
     unsigned max_contexts;
 
@@ -150,7 +151,7 @@ void free_redis_context(redis_context_t *context);
 redis_context_pool_t *new_redis_context_pool(const char *tag);
 void free_redis_context_pool(redis_context_pool_t *pool);
 
-vcl_priv_t *new_vcl_priv(unsigned shared_pool, unsigned max_pool_size);
+vcl_priv_t *new_vcl_priv(unsigned retries, unsigned shared_pool, unsigned max_pool_size);
 void free_vcl_priv(vcl_priv_t *priv);
 
 thread_state_t *new_thread_state();

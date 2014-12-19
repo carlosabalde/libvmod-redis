@@ -19,7 +19,7 @@ import redis;
 ::
 
     # Configuration.
-    Function VOID init(TAG, LOCATION, TIMEOUT, TTL, SHARED_CONTEXTS, MAX_CONTEXTS)
+    Function VOID init(TAG, LOCATION, TIMEOUT, TTL, RETRIES, SHARED_CONTEXTS, MAX_CONTEXTS)
     Function VOID add_server(TAG, LOCATION, TIMEOUT, TTL)
     Function VOID add_cserver(LOCATION)
 
@@ -87,7 +87,7 @@ Single server
     sub vcl_init {
         # VMOD configuration: simple case, keeping up to one Redis connection
         # per Varnish worker thread.
-        redis.init("main", "192.168.1.100:6379", 500, 0, false, 1);
+        redis.init("main", "192.168.1.100:6379", 500, 0, 0, false, 1);
     }
 
     sub vcl_deliver {
@@ -130,7 +130,7 @@ Multiple servers
         # VMOD configuration: master-slave replication, keeping up to two
         # Redis connections per Varnish worker thread (up to one to the master
         # server & up to one to a randomly selected slave server).
-        redis.init("master", "192.168.1.100:6379", 500, 0, false, 2);
+        redis.init("master", "192.168.1.100:6379", 500, 0, 0, false, 2);
         redis.add_server("slave", "192.168.1.101:6379", 500, 0);
         redis.add_server("slave", "192.168.1.102:6379", 500, 0);
         redis.add_server("slave", "192.168.1.103:6379", 500, 0);
@@ -162,7 +162,7 @@ Clustered setup
         # connections per server, all shared between all Varnish worker threads.
         # Two initial cluster servers are provided; remaining servers are
         # automatically discovered.
-        redis.init("cluster", "192.168.1.100:6379", 500, 0, true, 100);
+        redis.init("cluster", "192.168.1.100:6379", 500, 0, 0, true, 100);
         redis.add_cserver("192.168.1.101:6379");
     }
 
@@ -194,7 +194,7 @@ init
 Prototype
         ::
 
-                init(STRING tag, STRING location, INT timeout, INT ttl, BOOL shared_contexts, INT max_contexts)
+                init(STRING tag, STRING location, INT timeout, INT ttl, INT retries, BOOL shared_contexts, INT max_contexts)
 Arguments
     tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.). When using the reserved tag ``cluster`` the VMOD internally enables the
     Redis Cluster support, automatically discovering other servers in the cluster using the command ``CLUSTER SLOTS``.
@@ -204,6 +204,8 @@ Arguments
     timeout: connection timeout (milliseconds) to the Redis server. If Redis Cluster support has been enabled all servers in the cluster will use this timeout.
 
     ttl: TTL (seconds) of Redis connections (0 means no TTL). Once the TTL of a connection is consumed, the module transparently reestablishes it. See "Client timeouts" in http://redis.io/topics/clients for extra information. If Redis Cluster support has been enabled all servers in the cluster will use this TTL.
+
+    retries: number of retries to be executed after a failed command execution.
 
     shared_contexts: if enabled, Redis connections are not local to Varnish worker threads, but shared by all threads using one or more pools.
 
