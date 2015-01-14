@@ -7,8 +7,8 @@ URL: https://github.com/carlosabalde/libvmod-redis
 Group: System Environment/Daemons
 Source0: libvmod-redis.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
-Requires: varnish > 3.0, hiredis >= 0.11.0
-BuildRequires: make, python-docutils
+Requires: varnish >= 4.0.2, hiredis >= 0.11.0
+BuildRequires: make, python-docutils, varnish >= 4.0.2, varnish-libs-devel >= 4.0.2
 
 %description
 Redis VMOD for Varnish
@@ -18,19 +18,20 @@ Redis VMOD for Varnish
 
 %build
 ./configure VMODDIR=%{VMODDIR} --prefix=/usr/ --docdir='${datarootdir}/doc/%{name}'
-make
-make check
+%{__make} %{?_smp_mflags}
+%{__make} %{?_smp_mflags} check
 
 %install
-make install DESTDIR=%{buildroot}
+[ %{buildroot} != "/" ] && %{__rm} -rf %{buildroot}
+%{__make} install DESTDIR=%{buildroot}
 
 %clean
-rm -rf %{buildroot}
+[ %{buildroot} != "/" ] && %{__rm} -rf %{buildroot}
 
 %files
 %defattr(-,root,root,-)
 %{_libdir}/varnish*/vmods/
-%doc /usr/share/doc/%{name}/*
+%doc /usr/share/doc/lib%{name}/*
 %{_mandir}/man?/*
 
 %changelog
