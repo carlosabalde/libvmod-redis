@@ -538,7 +538,6 @@ lock_private_redis_context(
     const char *tag, unsigned version)
 {
     redis_context_t *icontext;
-    redis_server_t *iserver;
 
     // Initializations.
     redis_context_t *result = NULL;
@@ -615,7 +614,6 @@ lock_shared_redis_context(
     const char *tag, unsigned version)
 {
     redis_context_t *icontext;
-    redis_server_t *iserver;
 
     // Initializations.
     redis_context_t *result = NULL;
@@ -788,7 +786,7 @@ sha1(struct sess *sp, const char *script)
     unsigned char buffer[20];
     SHA1_CTX ctx;
     SHA1Init(&ctx);
-    SHA1Update(&ctx, script, strlen(script));
+    SHA1Update(&ctx, (const unsigned char *) script, strlen(script));
     SHA1Final(buffer, &ctx);
 
     // Encode.
