@@ -1,4 +1,4 @@
-AM_CPPFLAGS = -I$(VARNISHSRC)/include -I$(VARNISHSRC)
+AM_CPPFLAGS = -I$(VARNISHSRC)/include -I$(VARNISHSRC) -Wall -Werror
 
 vmoddir = $(VMODDIR)
 vmod_LTLIBRARIES = libvmod_redis.la
@@ -22,7 +22,7 @@ VMOD_TESTS = tests/*.vtc
 .PHONY: $(VMOD_TESTS)
 
 tests/*.vtc:
-	tests/runner.sh $(VARNISHSRC)/bin/varnishtest/varnishtest -Dvarnishd=$(VARNISHSRC)/bin/varnishd/varnishd -Dvmod_topbuild=$(abs_top_builddir) $@
+	tests/runner.sh $(VARNISHSRC)/bin/varnishtest/varnishtest -Dvarnish_source=$(VARNISHSRC) -Dvarnishd=$(VARNISHSRC)/bin/varnishd/varnishd -Dvmod_topbuild=$(abs_top_builddir) $@
 
 check: $(VMOD_TESTS)
 
