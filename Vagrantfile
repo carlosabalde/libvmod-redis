@@ -8,7 +8,7 @@ $script = <<SCRIPT
 
   # General packages.
   apt-get update -q
-  apt-get install -qq libhiredis-dev apt-transport-https \
+  apt-get install -qq unzip apt-transport-https \
     autotools-dev automake libtool python-docutils pkg-config libpcre3-dev \
     libeditline-dev libedit-dev make dpkg-dev
   gem install redis
@@ -29,6 +29,17 @@ $script = <<SCRIPT
     cd varnish*; \
     ./configure; \
     make'
+
+  # hiredis.
+  sudo -u vagrant bash -c '\
+    cd /home/vagrant; \
+    wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.12.1.zip -O hiredis-0.12.1.zip; \
+    unzip hiredis-0.12.1.zip; \
+    rm -f hiredis-0.12.1.zip; \
+    cd hiredis*; \
+    make; \
+    sudo make PREFIX="/usr/local" install; \
+    sudo ldconfig'
 
   # Redis.
   sudo -u vagrant bash -c '\

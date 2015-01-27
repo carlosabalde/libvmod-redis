@@ -528,6 +528,13 @@ new_rcontext(
         result = NULL;
     }
 
+#if HIREDIS_MAJOR >= 0 && HIREDIS_MINOR >= 12
+    // Enable TCP keep-alive.
+    if ((result != NULL) && (server->type == REDIS_SERVER_HOST_TYPE)) {
+        redisEnableKeepAlive(result);
+    }
+#endif
+
     // Done!
     return result;
 }
