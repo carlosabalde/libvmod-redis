@@ -1,4 +1,4 @@
-AM_CPPFLAGS = @VMOD_INCLUDES@
+AM_CPPFLAGS = @VMOD_INCLUDES@ -Wall -Werror
 
 vmoddir = @VMOD_DIR@
 vmod_LTLIBRARIES = libvmod_redis.la
@@ -18,10 +18,10 @@ libvmod_redis_la_SOURCES = \
 vcc_if.c vcc_if.h: @VMODTOOL@ $(top_srcdir)/src/vmod_redis.vcc
 	@VMODTOOL@ $(top_srcdir)/src/vmod_redis.vcc
 
-VMOD_TESTS = tests/*.vtc
+VMOD_TESTS = $(top_srcdir)/src/tests/*.vtc
 .PHONY: $(VMOD_TESTS)
 
-tests/*.vtc:
+$(top_srcdir)/src/tests/*.vtc:
 	tests/runner.sh @VARNISHTEST@ -Dvarnishd=@VARNISHD@ -Dvmod_topbuild=$(abs_top_builddir) $@
 
 check: $(VMOD_TESTS)

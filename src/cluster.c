@@ -320,28 +320,37 @@ get_key_index(const char *command)
 static unsigned
 get_cluster_slot(const char *key)
 {
-    // Extract data to be hashed. Only hash what is inside {...} if there is
-    // such a pattern in 'key'. Note that the specification requires the
-    // content that is between the first { and the first } after the first {.
-    // If {} is found without nothing in the middle, the whole key should
-    // be hashed.
-    const char *ptr = NULL;
-    unsigned len;
-    const char *left = strchr(key, '{');
-    if (left != NULL) {
-        const char *right = strchr(left, '}');
-        if ((right != NULL) && (right-left > 1)) {
-            ptr = left + 1;
-            len = right - ptr;
+    // Start-end indexes of '{'' and '}'.
+    int s, e;
+
+    // Search the first occurrence of '{'.
+    int keylen = strlen(key);
+    for (s = 0; s < keylen; s++) {
+        if (key[s] == '{') {
+            break;
         }
     }
-    if (ptr == NULL) {
-        ptr = key;
-        len = strlen(key);
+
+    // No '{'? Hash the whole key. This is the base case.
+    if (s == keylen) {
+        return crc16(key, keylen) & (MAX_REDIS_CLUSTER_SLOTS - 1);
     }
 
-    // Done!
-    return crc16(ptr, len) % MAX_REDIS_CLUSTER_SLOTS;
+    // '{' found? Check if we have the corresponding '}'.
+    for (e = s+1; e < keylen; e++){
+        if (key[e] == '}') {
+            break;
+        }
+    }
+
+    // No '}' or nothing between {}? Hash the whole key.
+    if ((e == keylen) || (e == s + 1)) {
+        return crc16(key, keylen) & (MAX_REDIS_CLUSTER_SLOTS - 1);
+    }
+
+    // If we are here there is both a '{' and a '}' on its right. Hash
+    // what is in the middle between '{' and '}'.
+    return crc16(key + s + 1, e - s - 1) & (MAX_REDIS_CLUSTER_SLOTS - 1);
 }
 
 static const char *

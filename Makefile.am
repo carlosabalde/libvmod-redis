@@ -2,7 +2,12 @@ ACLOCAL_AMFLAGS = -I m4
 
 SUBDIRS = src
 
-EXTRA_DIST = README.rst
+DISTCHECK_CONFIGURE_FLAGS = \
+    VMOD_DIR='$${libdir}/varnish/vmods'
+
+EXTRA_DIST = README.rst LICENSE redhat
+
+doc_DATA = README.rst LICENSE
 
 dist_man_MANS = vmod_redis.3
 MAINTAINERCLEANFILES = $(dist_man_MANS)
