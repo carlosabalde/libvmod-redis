@@ -8,7 +8,7 @@ Group: System Environment/Daemons
 Source0: libvmod-redis.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 Requires: varnish >= 4.0.2, hiredis >= 0.11.0
-BuildRequires: make, python-docutils, varnish >= 4.0.2, varnish-libs-devel >= 4.0.2
+BuildRequires: make, python-docutils, varnish >= 4.0.2, varnish-libs-devel >= 4.0.2, hiredis-devel >= 0.11.0
 
 %description
 Redis VMOD for Varnish
@@ -17,7 +17,8 @@ Redis VMOD for Varnish
 %setup -n libvmod-redis
 
 %build
-./configure VMODDIR=%{VMODDIR} --prefix=/usr/ --docdir='${datarootdir}/doc/%{name}'
+./autogen.sh
+./configure --prefix=/usr/ --docdir='${datarootdir}/doc/%{name}'
 %{__make} %{?_smp_mflags}
 %{__make} %{?_smp_mflags} check
 
@@ -31,7 +32,7 @@ Redis VMOD for Varnish
 %files
 %defattr(-,root,root,-)
 %{_libdir}/varnish*/vmods/
-%doc /usr/share/doc/lib%{name}/*
+%doc /usr/share/doc/%{name}/*
 %{_mandir}/man?/*
 
 %changelog
@@ -53,5 +54,5 @@ Redis VMOD for Varnish
 - Discard Redis contexts when connections are hung up by the server.
 * Wed Sep 17 2014 Carlos Abalde <carlos.abalde@gmail.com> - 0.1.1-0.20140917
 - Added missing WS_Dup()'s / WS_Copy()'s.
-* Sun Aug 22 2014 Carlos Abalde <carlos.abalde@gmail.com> - 0.1-0.20140822
+* Fri Aug 22 2014 Carlos Abalde <carlos.abalde@gmail.com> - 0.1-0.20140822
 - Initial version.
