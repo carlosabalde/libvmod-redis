@@ -34,10 +34,10 @@ $script = <<SCRIPT
   # Redis.
   sudo -u vagrant bash -c '\
     cd /home/vagrant; \
-    wget https://github.com/antirez/redis/archive/3.0.0-rc1.tar.gz; \
-    tar zxvf 3.0.0-rc1.tar.gz; \
-    rm -f 3.0.0-rc1.tar.gz; \
-    cd redis*; \
+    wget http://download.redis.io/releases/redis-3.0.0.tar.gz; \
+    tar zxvf redis-*.tar.gz; \
+    rm -f redis-*.tar.gz; \
+    cd redis-*; \
     make; \
     sudo make PREFIX="/usr/local" install; \
     sudo ldconfig'
