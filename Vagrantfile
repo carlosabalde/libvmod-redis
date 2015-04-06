@@ -23,9 +23,9 @@ $script = <<SCRIPT
   # Varnish Cache sources.
   sudo -u vagrant bash -c '\
     cd /home/vagrant; \
-    wget --no-check-certificate https://repo.varnish-cache.org/ubuntu/pool/varnish-3.0/v/varnish/varnish_3.0.6.orig.tar.gz; \
-    tar zxvf varnish_3.0.6.orig.tar.gz; \
-    rm -f varnish_3.0.6.orig.tar.gz; \
+    wget --no-check-certificate https://repo.varnish-cache.org/ubuntu/pool/varnish-3.0/v/varnish/varnish_3.0.7.orig.tar.gz; \
+    tar zxvf varnish_3.0.7.orig.tar.gz; \
+    rm -f varnish_3.0.7.orig.tar.gz; \
     cd varnish*; \
     ./configure; \
     make'
@@ -44,10 +44,10 @@ $script = <<SCRIPT
   # Redis.
   sudo -u vagrant bash -c '\
     cd /home/vagrant; \
-    wget https://github.com/antirez/redis/archive/3.0.0-rc1.tar.gz; \
-    tar zxvf 3.0.0-rc1.tar.gz; \
-    rm -f 3.0.0-rc1.tar.gz; \
-    cd redis*; \
+    wget http://download.redis.io/releases/redis-3.0.0.tar.gz; \
+    tar zxvf redis-*.tar.gz; \
+    rm -f redis-*.tar.gz; \
+    cd redis-*; \
     make; \
     sudo make PREFIX="/usr/local" install; \
     sudo ldconfig'

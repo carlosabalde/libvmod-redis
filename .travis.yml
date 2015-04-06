@@ -8,7 +8,7 @@ before_install:
   - echo "deb-src https://repo.varnish-cache.org/ubuntu/ precise varnish-3.0" | sudo tee -a /etc/apt/sources.list.d/varnish-cache.list
   - sudo apt-get update -q
   - sudo apt-get install -qq varnish libvarnishapi-dev
-  - wget http://download.redis.io/releases/redis-2.8.17.tar.gz
+  - wget http://download.redis.io/releases/redis-3.0.0.tar.gz
   - tar zxvf redis-*.tar.gz
   - cd redis-*
   - make
@@ -24,9 +24,9 @@ before_install:
 
 before_script:
   - #apt-get source -q varnish
-  - wget --no-check-certificate https://repo.varnish-cache.org/ubuntu/pool/varnish-3.0/v/varnish/varnish_3.0.6.orig.tar.gz
-  - tar zxvf varnish_3.0.6.orig.tar.gz
-  - rm -f varnish_3.0.6.orig.tar.gz
+  - wget --no-check-certificate https://repo.varnish-cache.org/ubuntu/pool/varnish-3.0/v/varnish/varnish_3.0.7.orig.tar.gz
+  - tar zxvf varnish_3.0.7.orig.tar.gz
+  - rm -f varnish_3.0.7.orig.tar.gz
   - cd varnish*
   - ./configure
   - make
