@@ -606,7 +606,7 @@ Dependencies:
 COPYRIGHT
 =========
 
-This document is licensed under the same license as the libvmod-redis project. See LICENSE for details.
+See LICENSE for details.
 
 Implementation of the SHA-1 and CRC-16 cryptographic hash functions embedded in this VMOD (required to the optimistic execution of ``EVALSHA`` commands, and to the Redis Cluster slot calculation, respectively) are borrowed from the Redis implementation:
 
