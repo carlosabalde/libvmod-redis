@@ -23,9 +23,9 @@ $script = <<SCRIPT
   # Varnish Cache sources.
   sudo -u vagrant bash -c '\
     cd /home/vagrant; \
-    wget --no-check-certificate https://repo.varnish-cache.org/ubuntu/pool/varnish-3.0/v/varnish/varnish_3.0.6.orig.tar.gz; \
-    tar zxvf varnish_3.0.6.orig.tar.gz; \
-    rm -f varnish_3.0.6.orig.tar.gz; \
+    wget --no-check-certificate https://repo.varnish-cache.org/ubuntu/pool/varnish-3.0/v/varnish/varnish_3.0.7.orig.tar.gz; \
+    tar zxvf varnish_3.0.7.orig.tar.gz; \
+    rm -f varnish_3.0.7.orig.tar.gz; \
     cd varnish*; \
     ./configure; \
     make'
