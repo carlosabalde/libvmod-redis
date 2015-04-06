@@ -615,4 +615,4 @@ Implementation of the SHA-1 and CRC-16 cryptographic hash functions embedded in 
 * http://download.redis.io/redis-stable/src/config.h
 * https://github.com/antirez/redis/blob/unstable/src/crc16.c
 
-Copyright (c) 2014 Carlos Abalde <carlos.abalde@gmail.com>
+Copyright (c) 2014-2015 Carlos Abalde <carlos.abalde@gmail.com>
