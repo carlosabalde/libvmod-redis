@@ -36,8 +36,9 @@ else
 fi
 
 set -ex
-
-aclocal -I m4
+# check for varnishapi.m4 in custom paths
+dataroot=$(pkg-config --variable=datarootdir varnishapi)
+aclocal -I m4 -I ${dataroot}/aclocal
 $LIBTOOLIZE --copy --force
 autoheader
 automake --add-missing --copy --foreign
