@@ -1,4 +1,17 @@
+#
+# Copyright (c) 2014-2015 Carlos Abalde <carlos.abalde@gmail.com>
+#
+# You're free to use and distribute this under terms in the
+# LICENSE file.
+#
+
 $Module redis 3 Redis VMOD
+
+DESCRIPTION
+===========
+
+VMOD using the synchronous hiredis library API to access Redis servers from VCL.
+
 $Init init_function
 
 ###############################################################################
