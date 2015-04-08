@@ -15,7 +15,6 @@
 #include "cluster.h"
 
 #define DISCOVERY_COMMAND "CLUSTER SLOTS"
-#define MAX_HOPS 16
 
 static redis_server_t * unsafe_add_redis_server(
     vcl_priv_t *config, const char *location);
@@ -39,7 +38,7 @@ discover_cluster_slots(struct sess *sp, vcl_priv_t *config)
 redisReply *
 cluster_execute(
     struct sess *sp, vcl_priv_t *config, thread_state_t *state,
-    unsigned version, unsigned argc, const char *argv[])
+    unsigned version, unsigned timeout, unsigned argc, const char *argv[])
 {
     // Initializations.
     redisReply *result = NULL;
@@ -48,7 +47,7 @@ cluster_execute(
     int index = get_key_index(argv[0]);
     if ((index > 0) && (index < argc)) {
         // Initializations.
-        int hops = MAX_HOPS;
+        int hops = config->max_cluster_hops > 0 ? config->max_cluster_hops : UINT_MAX;
         int tries = 1 + config->retries;
         const char *tag = NULL;
         unsigned asking = 0;
@@ -77,7 +76,7 @@ cluster_execute(
             AN(tag);
 
             // Execute command.
-            result = redis_execute(sp, config, state, tag, version, argc, argv, asking);
+            result = redis_execute(sp, config, state, tag, version, timeout, argc, argv, asking);
 
             // Reset flags.
             tag = NULL;
@@ -168,7 +167,7 @@ unsafe_add_redis_server(vcl_priv_t *config, const char *location)
     if (result == NULL) {
         // Add new server.
         result = new_redis_server(
-            CLUSTERED_REDIS_SERVER_TAG, location, config->timeout, config->ttl);
+            CLUSTERED_REDIS_SERVER_TAG, location, config->connection_timeout, config->context_ttl);
         AN(result);
         VTAILQ_INSERT_TAIL(&config->servers, result, list);
 
@@ -228,10 +227,17 @@ unsafe_discover_slots(struct sess *sp, vcl_priv_t *config)
             assert(iserver->type == REDIS_SERVER_HOST_TYPE);
 
             // Create context.
-            redisContext *rcontext = redisConnectWithTimeout(
-                iserver->location.address.host,
-                iserver->location.address.port,
-                iserver->timeout);
+            redisContext *rcontext;
+            if ((iserver->connection_timeout.tv_sec > 0) || (iserver->connection_timeout.tv_usec > 0)) {
+                rcontext = redisConnectWithTimeout(
+                    iserver->location.address.host,
+                    iserver->location.address.port,
+                    iserver->connection_timeout);
+            } else {
+                rcontext = redisConnect(
+                    iserver->location.address.host,
+                    iserver->location.address.port);
+            }
             AN(rcontext);
 
             // Check context.
