@@ -12,6 +12,7 @@
 #include "cluster.h"
 #include "core.h"
 
+#define DEFAULT_COMMAND_TIMEOUT 0
 #define DEFAULT_RETRIES 0
 #define DEFAULT_SHARED_CONTEXTS 0
 #define DEFAULT_MAX_CONTEXTS 1
@@ -28,7 +29,7 @@ static void make_thread_key();
 
 static redis_server_t *unsafe_add_redis_server(
     const struct vrt_ctx *ctx, vcl_priv_t *config,
-    const char *tag, const char *location, unsigned timeout, unsigned ttl);
+    const char *tag, const char *location, unsigned connection_timeout, unsigned context_ttl);
 
 static const char *get_reply(const struct vrt_ctx *ctx, redisReply *reply);
 
@@ -57,6 +58,7 @@ init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
     // not required* to be thread safe.
     if (vcl_priv->priv == NULL) {
         vcl_priv->priv = new_vcl_priv(
+            DEFAULT_COMMAND_TIMEOUT,
             DEFAULT_RETRIES,
             DEFAULT_SHARED_CONTEXTS,
             DEFAULT_MAX_CONTEXTS);
@@ -71,10 +73,11 @@ init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
  * redis.init();
  *****************************************************************************/
 
-void
+VCL_VOID
 vmod_init(
     const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv,
-    VCL_STRING tag, VCL_STRING location, VCL_INT timeout, VCL_INT ttl,
+    VCL_STRING tag, VCL_STRING location, VCL_INT connection_timeout, VCL_INT context_ttl,
+    VCL_INT command_timeout, VCL_INT max_cluster_hops,
     VCL_INT retries, VCL_BOOL shared_contexts, VCL_INT max_contexts)
 {
     // Check input.
@@ -82,11 +85,11 @@ vmod_init(
         (location != NULL) && (strlen(location) > 0) &&
         (max_contexts > 0)) {
         // Create new configuration.
-        vcl_priv_t *config = new_vcl_priv(retries, shared_contexts, max_contexts);
+        vcl_priv_t *config = new_vcl_priv(command_timeout, retries, shared_contexts, max_contexts);
 
         // Add initial server.
         redis_server_t *server = unsafe_add_redis_server(
-            ctx, config, tag, location, timeout, ttl);
+            ctx, config, tag, location, connection_timeout, context_ttl);
 
         // Do not continue if we failed to create the server instance.
         if (server != NULL) {
@@ -94,8 +97,9 @@ vmod_init(
             // options, and populate the slots-tags mapping.
             if (server->clustered) {
                 config->clustered = 1;
-                config->timeout = timeout;
-                config->ttl = ttl;
+                config->connection_timeout = connection_timeout;
+                config->max_cluster_hops = max_cluster_hops;
+                config->context_ttl = context_ttl;
                 discover_cluster_slots(ctx, config);
             }
 
@@ -113,10 +117,10 @@ vmod_init(
  * redis.add_server();
  *****************************************************************************/
 
-void
+VCL_VOID
 vmod_add_server(
     const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv,
-    VCL_STRING tag, VCL_STRING location, VCL_INT timeout, VCL_INT ttl)
+    VCL_STRING tag, VCL_STRING location, VCL_INT connection_timeout, VCL_INT context_ttl)
 {
     // Check input.
     if ((tag != NULL) && (strlen(tag) > 0) &&
@@ -132,7 +136,7 @@ vmod_add_server(
             AZ(pthread_mutex_lock(&config->mutex));
 
             // Add new server.
-            unsafe_add_redis_server(ctx, config, tag, location, timeout, ttl);
+            unsafe_add_redis_server(ctx, config, tag, location, connection_timeout, context_ttl);
 
             // Release config lock.
             AZ(pthread_mutex_unlock(&config->mutex));
@@ -148,8 +152,8 @@ vmod_add_server(
  * redis.add_cserver();
  *****************************************************************************/
 
-void
-vmod_add_cserver(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, const char *location)
+VCL_VOID
+vmod_add_cserver(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, VCL_STRING location)
 {
     // Check input.
     if ((location != NULL) && (strlen(location) > 0)) {
@@ -165,7 +169,7 @@ vmod_add_cserver(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, const ch
             unsafe_add_redis_server(
                 ctx, config,
                 CLUSTERED_REDIS_SERVER_TAG,
-                location, config->timeout, config->ttl);
+                location, config->connection_timeout, config->context_ttl);
 
             // Release config lock.
             AZ(pthread_mutex_unlock(&config->mutex));
@@ -181,15 +185,19 @@ vmod_add_cserver(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, const ch
  * redis.command();
  *****************************************************************************/
 
-void
-vmod_command(const struct vrt_ctx *ctx, VCL_STRING name)
+VCL_VOID
+vmod_command(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, VCL_STRING name)
 {
     // Check input.
     if ((name != NULL) && (strlen(name) > 0)) {
+        // Initializations.
+        vcl_priv_t *config = vcl_priv->priv;
+
         // Fetch local thread state & flush previous command.
         thread_state_t *state = get_thread_state(ctx, 1);
 
         // Initialize.
+        state->timeout = config->command_timeout;
         state->argc = 1;
         state->argv[0] = WS_Copy(ctx->ws, name, -1);
         AN(state->argv[0]);
@@ -200,8 +208,8 @@ vmod_command(const struct vrt_ctx *ctx, VCL_STRING name)
  * redis.server();
  *****************************************************************************/
 
-void
-vmod_server(const struct vrt_ctx *ctx, const char *tag)
+VCL_VOID
+vmod_server(const struct vrt_ctx *ctx, VCL_STRING tag)
 {
     // Check input.
     if ((tag != NULL) && (strlen(tag) > 0)) {
@@ -218,10 +226,27 @@ vmod_server(const struct vrt_ctx *ctx, const char *tag)
 }
 
 /******************************************************************************
+ * redis.timeout();
+ *****************************************************************************/
+
+VCL_VOID
+vmod_timeout(const struct vrt_ctx *ctx, VCL_INT command_timeout)
+{
+    // Fetch local thread state.
+    thread_state_t *state = get_thread_state(ctx, 0);
+
+    // Do not continue if the initial call to redis.command() was not
+    // executed.
+    if (state->argc >= 1) {
+        state->timeout = command_timeout;
+    }
+}
+
+/******************************************************************************
  * redis.push();
  *****************************************************************************/
 
-void
+VCL_VOID
 vmod_push(const struct vrt_ctx *ctx, VCL_STRING arg)
 {
     // Fetch local thread state.
@@ -248,7 +273,7 @@ vmod_push(const struct vrt_ctx *ctx, VCL_STRING arg)
  * redis.execute();
  *****************************************************************************/
 
-void
+VCL_VOID
 vmod_execute(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
 {
     // Initializations.
@@ -264,13 +289,13 @@ vmod_execute(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
              (strcmp(state->tag, CLUSTERED_REDIS_SERVER_TAG) == 0))) {
             state->reply = cluster_execute(
                 ctx, config, state,
-                version, state->argc, state->argv);
+                version, state->timeout, state->argc, state->argv);
         } else {
             int tries = 1 + config->retries;
             while ((tries > 0) && (state->reply == NULL)) {
                 state->reply = redis_execute(
                     ctx, config, state,
-                    state->tag, version, state->argc, state->argv, 0);
+                    state->tag, version, state->timeout, state->argc, state->argv, 0);
                 tries--;
             }
         }
@@ -441,7 +466,7 @@ vmod_get_array_reply_value(const struct vrt_ctx *ctx, VCL_INT index)
  * redis.free();
  *****************************************************************************/
 
-void
+VCL_VOID
 vmod_free(const struct vrt_ctx *ctx)
 {
     get_thread_state(ctx, 1);
@@ -451,7 +476,7 @@ vmod_free(const struct vrt_ctx *ctx)
  * redis.fini();
  *****************************************************************************/
 
-void
+VCL_VOID
 vmod_fini(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
 {
     // Initializations.
@@ -532,10 +557,10 @@ make_thread_key()
 static redis_server_t *
 unsafe_add_redis_server(
     const struct vrt_ctx *ctx, vcl_priv_t *config,
-    const char *tag, const char *location, unsigned timeout, unsigned ttl)
+    const char *tag, const char *location, unsigned connection_timeout, unsigned context_ttl)
 {
     // Initializations.
-    redis_server_t *result = new_redis_server(tag, location, timeout, ttl);
+    redis_server_t *result = new_redis_server(tag, location, connection_timeout, context_ttl);
 
     // Do not continue if we failed to create the server instance.
     // Caller should own config->mutex!
