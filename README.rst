@@ -7,8 +7,8 @@ Varnish Redis Module
 --------------------
 
 :Author: Carlos Abalde
-:Date: 2015-01-28
-:Version: 0.2.3
+:Date: 2015-04-17
+:Version: 0.2.4
 :Manual section: 3
 
 SYNOPSIS
@@ -19,13 +19,14 @@ import redis;
 ::
 
     # Configuration.
-    Function VOID init(TAG, LOCATION, TIMEOUT, TTL, RETRIES, SHARED_CONTEXTS, MAX_CONTEXTS)
-    Function VOID add_server(TAG, LOCATION, TIMEOUT, TTL)
+    Function VOID init(TAG, LOCATION, CONNECTION_TIMEOUT, CONNECTION_TTL, COMMAND_TIMEOUT, MAX_CLUSTER_HOPS, RETRIES, SHARED_CONTEXTS, MAX_CONTEXTS)
+    Function VOID add_server(TAG, LOCATION, CONNECTION_TIMEOUT, CONNECTION_TTL)
     Function VOID add_cserver(LOCATION)
 
     # Command execution.
     Function VOID command(COMMAND)
     Function VOID server(TAG)
+    Function VOID timeout(COMMAND_TIMEOUT)
     Function VOID push(ARGUMENT)
     Function VOID execute()
 
@@ -87,7 +88,7 @@ Single server
     sub vcl_init {
         # VMOD configuration: simple case, keeping up to one Redis connection
         # per Varnish worker thread.
-        redis.init("main", "192.168.1.100:6379", 500, 0, 0, false, 1);
+        redis.init("main", "192.168.1.100:6379", 500, 0, 0, 0, 0, false, 1);
     }
 
     sub vcl_deliver {
@@ -130,7 +131,7 @@ Multiple servers
         # VMOD configuration: master-slave replication, keeping up to two
         # Redis connections per Varnish worker thread (up to one to the master
         # server & up to one to a randomly selected slave server).
-        redis.init("master", "192.168.1.100:6379", 500, 0, 0, false, 2);
+        redis.init("master", "192.168.1.100:6379", 500, 0, 0, 0, 0, false, 2);
         redis.add_server("slave", "192.168.1.101:6379", 500, 0);
         redis.add_server("slave", "192.168.1.102:6379", 500, 0);
         redis.add_server("slave", "192.168.1.103:6379", 500, 0);
@@ -162,7 +163,7 @@ Clustered setup
         # connections per server, all shared between all Varnish worker threads.
         # Two initial cluster servers are provided; remaining servers are
         # automatically discovered.
-        redis.init("cluster", "192.168.1.100:6379", 500, 0, 0, true, 100);
+        redis.init("cluster", "192.168.1.100:6379", 500, 0, 0, 16, 0, true, 100);
         redis.add_cserver("192.168.1.101:6379");
     }
 
@@ -194,16 +195,20 @@ init
 Prototype
         ::
 
-                init(STRING tag, STRING location, INT timeout, INT ttl, INT retries, BOOL shared_contexts, INT max_contexts)
+                init(STRING tag, STRING location, INT connection_timeout, INT connection_ttl, INT command_timeout, INT max_cluster_hops, INT retries, BOOL shared_contexts, INT max_contexts)
 Arguments
     tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.). When using the reserved tag ``cluster`` the VMOD internally enables the
     Redis Cluster support, automatically discovering other servers in the cluster using the command ``CLUSTER SLOTS``.
 
     location: Redis connection string. Both host + port and UNIX sockets are supported. If this is a Redis Cluster server only host + port format is allowed.
 
-    timeout: connection timeout (milliseconds) to the Redis server. If Redis Cluster support has been enabled all servers in the cluster will use this timeout.
+    connection_timeout: connection timeout (milliseconds; 0 means no timeout) to the Redis server. If Redis Cluster support has been enabled all servers in the cluster will use this timeout.
 
-    ttl: TTL (seconds) of Redis connections (0 means no TTL). Once the TTL of a connection is consumed, the module transparently reestablishes it. See "Client timeouts" in http://redis.io/topics/clients for extra information. If Redis Cluster support has been enabled all servers in the cluster will use this TTL.
+    connection_ttl: TTL (seconds) of Redis connections (0 means no TTL). Once the TTL of a connection is consumed, the module transparently reestablishes it. See "Client timeouts" in http://redis.io/topics/clients for extra information. If Redis Cluster support has been enabled all servers in the cluster will use this TTL.
+
+    command_timeout: command timeout (milliseconds; 0 means no timeout) when executing a Redis command.
+
+    max_cluster_hops: maximum number of redirections (0 means no limit) when executing a command and Redis Cluster support has been enabled.
 
     retries: number of retries to be executed after a failed command execution.
 
@@ -222,15 +227,15 @@ add_server
 Prototype
         ::
 
-                add_server(STRING tag, STRING location, INT timeout, INT ttl)
+                add_server(STRING tag, STRING location, INT connection_timeout, INT connection_ttl)
 Arguments
     tag: name tagging the Redis server in some category (e.g. ``main``, ``master``, ``slave``, etc.). Using the reserved tag ``cluster`` is not allowed.
 
     location: Redis connection string. Both host + port and UNIX sockets are supported.
 
-    timeout: connection timeout (milliseconds) to the Redis server.
+    connection_timeout: connection timeout (milliseconds) to the Redis server.
 
-    ttl: TTL (seconds) of Redis connections (0 means no TTL). Once the TTL of a connection is consumed, the module transparently reestablishes it. See "Client timeouts" in http://redis.io/topics/clients for extra information.
+    connection_ttl: TTL (seconds) of Redis connections (0 means no TTL). Once the TTL of a connection is consumed, the module transparently reestablishes it. See "Client timeouts" in http://redis.io/topics/clients for extra information.
 Return value
     VOID
 Description
@@ -293,6 +298,20 @@ Description
     Selects the type of Redis server a previously enqueued Redis command will be delivered to.
 
     If not specified and Redis Cluster support hasn't been enabled, a randomly selected connection / server will be used (see ``redis.add_server()`` for extra information).
+
+timeout
+-------
+
+Prototype
+        ::
+
+                timeout(INT command_timeout)
+Arguments
+    command_timeout: command timeout (milliseconds; 0 means no timeout) to be used when executing a specific Redis command.
+Return value
+    VOID
+Description
+    Allows overriding the default command timeout provided when calling ``redis.init()``.
 
 push
 ----

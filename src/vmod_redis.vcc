@@ -5,7 +5,7 @@ Init init_function
 ## Configuration.
 ###############################################################################
 
-Function VOID init(PRIV_VCL, STRING, STRING, INT, INT, INT, BOOL, INT)
+Function VOID init(PRIV_VCL, STRING, STRING, INT, INT, INT, INT, INT, BOOL, INT)
 Function VOID add_server(PRIV_VCL, STRING, STRING, INT, INT)
 Function VOID add_cserver(PRIV_VCL, STRING)
 
@@ -13,8 +13,9 @@ Function VOID add_cserver(PRIV_VCL, STRING)
 ## Command execution.
 ###############################################################################
 
-Function VOID command(STRING)
+Function VOID command(PRIV_VCL, STRING)
 Function VOID server(STRING)
+Function VOID timeout(INT)
 Function VOID push(STRING)
 Function VOID execute(PRIV_VCL)
 

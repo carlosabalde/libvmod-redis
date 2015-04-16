@@ -22,7 +22,8 @@ static void unlock_redis_context(
     redis_context_t *context);
 
 static redisReply *get_redis_repy(
-    redis_context_t *context, unsigned argc, const char *argv[], unsigned asking);
+    struct sess *sp, redis_context_t *context,
+    struct timeval timeout, unsigned argc, const char *argv[], unsigned asking);
 
 static const char *sha1(struct sess *sp, const char *script);
 
@@ -47,7 +48,7 @@ new_clustered_redis_server_tag(const char *location)
 
 redis_server_t *
 new_redis_server(
-    const char *tag, const char *location, unsigned timeout, unsigned ttl)
+    const char *tag, const char *location, struct timeval connection_timeout, unsigned context_ttl)
 {
     // Initializations.
     redis_server_t *result = NULL;
@@ -78,9 +79,8 @@ new_redis_server(
         }
         AN(result->tag);
         result->clustered = clustered;
-        result->timeout.tv_sec = timeout / 1000;
-        result->timeout.tv_usec = (timeout % 1000) * 1000;
-        result->ttl = ttl;
+        result->connection_timeout = connection_timeout;
+        result->context_ttl = context_ttl;
     }
 
     // Done!
@@ -107,9 +107,8 @@ free_redis_server(redis_server_t *server)
             break;
     }
 
-    server->timeout.tv_sec = 0;
-    server->timeout.tv_usec = 0;
-    server->ttl = 0;
+    server->connection_timeout = (struct timeval){ 0 };
+    server->context_ttl = 0;
 
     FREE_OBJ(server);
 }
@@ -190,7 +189,8 @@ free_redis_context_pool(redis_context_pool_t *pool)
 }
 
 vcl_priv_t *
-new_vcl_priv(unsigned retries, unsigned shared_contexts, unsigned max_contexts)
+new_vcl_priv(
+    struct timeval command_timeout, unsigned retries, unsigned shared_contexts, unsigned max_contexts)
 {
     vcl_priv_t *result;
     ALLOC_OBJ(result, VCL_PRIV_MAGIC);
@@ -200,13 +200,15 @@ new_vcl_priv(unsigned retries, unsigned shared_contexts, unsigned max_contexts)
 
     VTAILQ_INIT(&result->servers);
 
+    result->command_timeout = command_timeout;
     result->retries = retries;
     result->shared_contexts = shared_contexts;
     result->max_contexts = max_contexts;
 
     result->clustered = 0;
-    result->timeout = 0;
-    result->ttl = 0;
+    result->connection_timeout = (struct timeval){ 0 };
+    result->max_cluster_hops = 0;
+    result->context_ttl = 0;
     for (int i = 0; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
         result->slots[i] = NULL;
     }
@@ -228,13 +230,15 @@ free_vcl_priv(vcl_priv_t *priv)
         free_redis_server(iserver);
     }
 
+    priv->command_timeout = (struct timeval){ 0 };
     priv->retries = 0;
     priv->shared_contexts = 0;
     priv->max_contexts = 0;
 
     priv->clustered = 0;
-    priv->timeout = 0;
-    priv->ttl = 0;
+    priv->connection_timeout = (struct timeval){ 0 };
+    priv->max_cluster_hops = 0;
+    priv->context_ttl = 0;
     for (int i = 0; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
         if (priv->slots[i] != NULL) {
             free((void *) (priv->slots[i]));
@@ -279,6 +283,7 @@ free_thread_state(thread_state_t *state)
         free_redis_context(icontext);
     }
 
+    state->timeout = (struct timeval){ 0 };
     state->tag = NULL;
     state->argc = 0;
     if (state->reply != NULL) {
@@ -333,7 +338,7 @@ unsafe_get_context_pool(vcl_priv_t *config, const char *tag)
 redisReply *
 redis_execute(
     struct sess *sp, vcl_priv_t *config, thread_state_t *state,
-    const char *tag, unsigned version, unsigned argc, const char *argv[],
+    const char *tag, unsigned version, struct timeval timeout, unsigned argc, const char *argv[],
     unsigned asking)
 {
     // Initializations.
@@ -354,7 +359,7 @@ redis_execute(
             argv[1] = sha1(sp, script);
 
             // Execute the EVALSHA command.
-            result = get_redis_repy(context, argc, argv, asking);
+            result = get_redis_repy(sp, context, timeout, argc, argv, asking);
 
             // Check reply. If Redis replies with a NOSCRIPT, the original
             // EVAL command should be executed to register the script for
@@ -381,7 +386,7 @@ redis_execute(
         // Send command, unless it was originally an EVAL command and it
         // was already executed using EVALSHA.
         if (!done) {
-            result = get_redis_repy(context, argc, argv, asking);
+            result = get_redis_repy(sp, context, timeout, argc, argv, asking);
         }
 
         // Check reply.
@@ -415,8 +420,8 @@ is_valid_redis_context(redis_context_t *context, unsigned version, time_t now)
     // Check if context is in an error state or if it's too old.
     if ((context->rcontext->err) ||
         (context->version != version) ||
-        ((context->server->ttl > 0) &&
-         (now - context->tst > context->server->ttl))) {
+        ((context->server->context_ttl > 0) &&
+         (now - context->tst > context->server->context_ttl))) {
         return 0;
 
     // Check if context connection has been hung up by the server.
@@ -499,22 +504,40 @@ new_rcontext(
     redisContext *result;
 
     // Create context.
-    switch (server->type) {
-        case REDIS_SERVER_HOST_TYPE:
-            result = redisConnectWithTimeout(
-                server->location.address.host,
-                server->location.address.port,
-                server->timeout);
-            break;
+    if ((server->connection_timeout.tv_sec > 0) || (server->connection_timeout.tv_usec > 0)) {
+        switch (server->type) {
+            case REDIS_SERVER_HOST_TYPE:
+                result = redisConnectWithTimeout(
+                    server->location.address.host,
+                    server->location.address.port,
+                    server->connection_timeout);
+                break;
 
-        case REDIS_SERVER_SOCKET_TYPE:
-            result = redisConnectUnixWithTimeout(
-                server->location.path,
-                server->timeout);
-            break;
+            case REDIS_SERVER_SOCKET_TYPE:
+                result = redisConnectUnixWithTimeout(
+                    server->location.path,
+                    server->connection_timeout);
+                break;
 
-        default:
-            result = NULL;
+            default:
+                result = NULL;
+        }
+    } else {
+        switch (server->type) {
+            case REDIS_SERVER_HOST_TYPE:
+                result = redisConnect(
+                    server->location.address.host,
+                    server->location.address.port);
+                break;
+
+            case REDIS_SERVER_SOCKET_TYPE:
+                result = redisConnectUnix(
+                    server->location.path);
+                break;
+
+            default:
+                result = NULL;
+        }
     }
     AN(result);
 
@@ -761,9 +784,16 @@ unlock_redis_context(
 
 static redisReply *
 get_redis_repy(
-    redis_context_t *context, unsigned argc, const char *argv[], unsigned asking)
+    struct sess *sp, redis_context_t *context,
+    struct timeval timeout, unsigned argc, const char *argv[], unsigned asking)
 {
     redisReply *reply;
+
+    // Set command execution timeout.
+    int tr = redisSetTimeout(context->rcontext, timeout);
+    if (tr != REDIS_OK) {
+        REDIS_LOG(sp, "Failed to set command execution timeout (%d)", tr);
+    }
 
     // Prepare pipeline.
     if (asking) {

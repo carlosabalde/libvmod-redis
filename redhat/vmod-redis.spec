@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 0.2.3
+Version: 0.2.4
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -35,6 +35,9 @@ rm -rf %{buildroot}
 %{_mandir}/man?/*
 
 %changelog
+* Thu Apr 17 2015 Carlos Abalde <carlos.abalde@gmail.com> - 0.2.4-0.20150417
+- Added support for timeouts when executing commands.
+- Maximum number of Redis Cluster hops is now configurable.
 * Wed Jan 28 2015 Carlos Abalde <carlos.abalde@gmail.com> - 0.2.3-0.20150128
 - Added support for hiredis 0.12.1 (redisEnableKeepAlive).
 - Updated Redis Cluster key -> slot calculation.
