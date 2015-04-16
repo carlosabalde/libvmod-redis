@@ -9,6 +9,6 @@ void discover_cluster_slots(const struct vrt_ctx *ctx, vcl_priv_t *config);
 
 redisReply *cluster_execute(
     const struct vrt_ctx *ctx, vcl_priv_t *config, thread_state_t *state,
-    unsigned version, unsigned timeout, unsigned argc, const char *argv[]);
+    unsigned version, struct timeval timeout, unsigned argc, const char *argv[]);
 
 #endif
