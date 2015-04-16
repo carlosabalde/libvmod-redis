@@ -22,7 +22,7 @@ static void unlock_redis_context(
     redis_context_t *context);
 
 static redisReply *get_redis_repy(
-    redis_context_t *context,
+    const struct vrt_ctx *ctx, redis_context_t *context,
     struct timeval timeout, unsigned argc, const char *argv[], unsigned asking);
 
 static const char *sha1(struct sess *sp, const char *script);
@@ -359,7 +359,7 @@ redis_execute(
             argv[1] = sha1(sp, script);
 
             // Execute the EVALSHA command.
-            result = get_redis_repy(context, timeout, argc, argv, asking);
+            result = get_redis_repy(ctx, context, timeout, argc, argv, asking);
 
             // Check reply. If Redis replies with a NOSCRIPT, the original
             // EVAL command should be executed to register the script for
@@ -386,7 +386,7 @@ redis_execute(
         // Send command, unless it was originally an EVAL command and it
         // was already executed using EVALSHA.
         if (!done) {
-            result = get_redis_repy(context, timeout, argc, argv, asking);
+            result = get_redis_repy(ctx, context, timeout, argc, argv, asking);
         }
 
         // Check reply.
@@ -784,12 +784,16 @@ unlock_redis_context(
 
 static redisReply *
 get_redis_repy(
-    redis_context_t *context,
+    const struct vrt_ctx *ctx, redis_context_t *context,
     struct timeval timeout, unsigned argc, const char *argv[], unsigned asking)
 {
     redisReply *reply;
 
-    // TODO: Set timeout value.
+    // Set command execution timeout.
+    int tr = redisSetTimeout(context->rcontext, timeout);
+    if (tr != REDIS_OK) {
+        REDIS_LOG(ctx, "Failed to set command execution timeout (%d)", tr);
+    }
 
     // Prepare pipeline.
     if (asking) {

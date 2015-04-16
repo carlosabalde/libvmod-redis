@@ -242,7 +242,11 @@ unsafe_discover_slots(struct sess *sp, vcl_priv_t *config)
 
             // Check context.
             if (!rcontext->err) {
-                // TODO: Set timeout value.
+                // Set command execution timeout.
+                int tr = redisSetTimeout(rcontext, config->command_timeout);
+                if (tr != REDIS_OK) {
+                    REDIS_LOG(ctx, "Failed to set command execution timeout (%d)", tr);
+                }
 
                 // Send command.
                 redisReply *reply = redisCommand(rcontext, DISCOVERY_COMMAND);
