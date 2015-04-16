@@ -94,14 +94,14 @@ typedef struct vcl_priv {
     VTAILQ_HEAD(,redis_server) servers;
 
     // General options.
-    unsigned command_timeout;
+    struct timeval command_timeout;
     unsigned retries;
     unsigned shared_contexts;
     unsigned max_contexts;
 
     // Redis Cluster options / state (allocated in the heap).
     unsigned clustered;
-    unsigned connection_timeout;
+    struct timeval connection_timeout;
     unsigned max_cluster_hops;
     unsigned context_ttl;
     const char *slots[MAX_REDIS_CLUSTER_SLOTS];
@@ -124,7 +124,7 @@ typedef struct thread_state {
     //   - Arguments (allocated in the session workspace).
     //   - Reply (allocated in the heap).
 #define MAX_REDIS_COMMAND_ARGS 128
-    unsigned timeout;
+    struct timeval timeout;
     const char *tag;
     unsigned argc;
     const char *argv[MAX_REDIS_COMMAND_ARGS];
@@ -146,7 +146,7 @@ typedef struct thread_state {
 const char *new_clustered_redis_server_tag(const char *location);
 
 redis_server_t *new_redis_server(
-    const char *tag, const char *location, unsigned connection_timeout, unsigned context_ttl);
+    const char *tag, const char *location, struct timeval connection_timeout, unsigned context_ttl);
 void free_redis_server(redis_server_t *server);
 
 redis_context_t *new_redis_context(
@@ -157,7 +157,7 @@ redis_context_pool_t *new_redis_context_pool(const char *tag);
 void free_redis_context_pool(redis_context_pool_t *pool);
 
 vcl_priv_t *new_vcl_priv(
-    unsigned command_timeout, unsigned retries, unsigned shared_pool, unsigned max_pool_size);
+    struct timeval command_timeout, unsigned retries, unsigned shared_pool, unsigned max_pool_size);
 void free_vcl_priv(vcl_priv_t *priv);
 
 thread_state_t *new_thread_state();
@@ -168,7 +168,7 @@ redis_context_pool_t *unsafe_get_context_pool(vcl_priv_t *config, const char *ta
 
 redisReply *redis_execute(
     struct sess *sp, vcl_priv_t *config, thread_state_t *state,
-    const char *tag, unsigned version, unsigned timeout, unsigned argc, const char *argv[],
+    const char *tag, unsigned version, struct timeval timeout, unsigned argc, const char *argv[],
     unsigned asking);
 
 #endif

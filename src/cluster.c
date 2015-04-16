@@ -38,7 +38,7 @@ discover_cluster_slots(struct sess *sp, vcl_priv_t *config)
 redisReply *
 cluster_execute(
     struct sess *sp, vcl_priv_t *config, thread_state_t *state,
-    unsigned version, unsigned timeout, unsigned argc, const char *argv[])
+    unsigned version, struct timeval timeout, unsigned argc, const char *argv[])
 {
     // Initializations.
     redisReply *result = NULL;
@@ -242,6 +242,8 @@ unsafe_discover_slots(struct sess *sp, vcl_priv_t *config)
 
             // Check context.
             if (!rcontext->err) {
+                // TODO: Set timeout value.
+
                 // Send command.
                 redisReply *reply = redisCommand(rcontext, DISCOVERY_COMMAND);
 

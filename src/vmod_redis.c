@@ -12,7 +12,6 @@
 #include "cluster.h"
 #include "core.h"
 
-#define DEFAULT_COMMAND_TIMEOUT 0
 #define DEFAULT_RETRIES 0
 #define DEFAULT_SHARED_CONTEXTS 0
 #define DEFAULT_MAX_CONTEXTS 1
@@ -29,7 +28,7 @@ static void make_thread_key();
 
 static redis_server_t *unsafe_add_redis_server(
     struct sess *sp, vcl_priv_t *config,
-    const char *tag, const char *location, unsigned connection_timeout, unsigned context_ttl);
+    const char *tag, const char *location, struct timeval connection_timeout, unsigned context_ttl);
 
 static const char *get_reply(struct sess *sp, redisReply *reply);
 
@@ -58,7 +57,7 @@ init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
     // not required* to be thread safe.
     if (vcl_priv->priv == NULL) {
         vcl_priv->priv = new_vcl_priv(
-            DEFAULT_COMMAND_TIMEOUT,
+            (struct timeval){ 0 },
             DEFAULT_RETRIES,
             DEFAULT_SHARED_CONTEXTS,
             DEFAULT_MAX_CONTEXTS);
@@ -84,12 +83,20 @@ vmod_init(
     if ((tag != NULL) && (strlen(tag) > 0) &&
         (location != NULL) && (strlen(location) > 0) &&
         (max_contexts > 0)) {
+        // Initializations.
+        struct timeval connection_timeout_tv;
+        connection_timeout_tv.tv_sec = connection_timeout / 1000;
+        connection_timeout_tv.tv_usec = (connection_timeout % 1000) * 1000;
+        struct timeval command_timeout_tv;
+        command_timeout_tv.tv_sec = command_timeout / 1000;
+        command_timeout_tv.tv_usec = (command_timeout % 1000) * 1000;
+
         // Create new configuration.
-        vcl_priv_t *config = new_vcl_priv(command_timeout, retries, shared_contexts, max_contexts);
+        vcl_priv_t *config = new_vcl_priv(command_timeout_tv, retries, shared_contexts, max_contexts);
 
         // Add initial server.
         redis_server_t *server = unsafe_add_redis_server(
-            sp, config, tag, location, connection_timeout, context_ttl);
+            sp, config, tag, location, connection_timeout_tv, context_ttl);
 
         // Do not continue if we failed to create the server instance.
         if (server != NULL) {
@@ -97,7 +104,7 @@ vmod_init(
             // options, and populate the slots-tags mapping.
             if (server->clustered) {
                 config->clustered = 1;
-                config->connection_timeout = connection_timeout;
+                config->connection_timeout = connection_timeout_tv;
                 config->max_cluster_hops = max_cluster_hops;
                 config->context_ttl = context_ttl;
                 discover_cluster_slots(sp, config);
@@ -132,11 +139,16 @@ vmod_add_server(
         if ((strcmp(tag, CLUSTERED_REDIS_SERVER_TAG) != 0) &&
             (strncmp(tag, CLUSTERED_REDIS_SERVER_TAG_PREFIX,
                      strlen(CLUSTERED_REDIS_SERVER_TAG_PREFIX)) != 0)) {
+            // Initializations.
+            struct timeval connection_timeout_tv;
+            connection_timeout_tv.tv_sec = connection_timeout / 1000;
+            connection_timeout_tv.tv_usec = (connection_timeout % 1000) * 1000;
+
             // Get config lock.
             AZ(pthread_mutex_lock(&config->mutex));
 
             // Add new server.
-            unsafe_add_redis_server(sp, config, tag, location, connection_timeout, context_ttl);
+            unsafe_add_redis_server(sp, config, tag, location, connection_timeout_tv, context_ttl);
 
             // Release config lock.
             AZ(pthread_mutex_unlock(&config->mutex));
@@ -238,7 +250,8 @@ vmod_timeout(struct sess *sp, int command_timeout)
     // Do not continue if the initial call to redis.command() was not
     // executed.
     if (state->argc >= 1) {
-        state->timeout = command_timeout;
+        state->timeout.tv_sec = command_timeout / 1000;
+        state->timeout.tv_usec = (command_timeout % 1000) * 1000;
     }
 }
 
@@ -558,7 +571,7 @@ make_thread_key()
 static redis_server_t *
 unsafe_add_redis_server(
     struct sess *sp, vcl_priv_t *config,
-    const char *tag, const char *location, unsigned connection_timeout, unsigned context_ttl)
+    const char *tag, const char *location, struct timeval connection_timeout, unsigned context_ttl)
 {
     // Initializations.
     redis_server_t *result = new_redis_server(tag, location, connection_timeout, context_ttl);

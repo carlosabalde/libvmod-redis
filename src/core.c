@@ -23,7 +23,7 @@ static void unlock_redis_context(
 
 static redisReply *get_redis_repy(
     redis_context_t *context,
-    unsigned timeout, unsigned argc, const char *argv[], unsigned asking);
+    struct timeval timeout, unsigned argc, const char *argv[], unsigned asking);
 
 static const char *sha1(struct sess *sp, const char *script);
 
@@ -48,7 +48,7 @@ new_clustered_redis_server_tag(const char *location)
 
 redis_server_t *
 new_redis_server(
-    const char *tag, const char *location, unsigned connection_timeout, unsigned context_ttl)
+    const char *tag, const char *location, struct timeval connection_timeout, unsigned context_ttl)
 {
     // Initializations.
     redis_server_t *result = NULL;
@@ -79,8 +79,7 @@ new_redis_server(
         }
         AN(result->tag);
         result->clustered = clustered;
-        result->connection_timeout.tv_sec = connection_timeout / 1000;
-        result->connection_timeout.tv_usec = (connection_timeout % 1000) * 1000;
+        result->connection_timeout = connection_timeout;
         result->context_ttl = context_ttl;
     }
 
@@ -108,8 +107,7 @@ free_redis_server(redis_server_t *server)
             break;
     }
 
-    server->connection_timeout.tv_sec = 0;
-    server->connection_timeout.tv_usec = 0;
+    server->connection_timeout = (struct timeval){ 0 };
     server->context_ttl = 0;
 
     FREE_OBJ(server);
@@ -192,7 +190,7 @@ free_redis_context_pool(redis_context_pool_t *pool)
 
 vcl_priv_t *
 new_vcl_priv(
-    unsigned command_timeout, unsigned retries, unsigned shared_contexts, unsigned max_contexts)
+    struct timeval command_timeout, unsigned retries, unsigned shared_contexts, unsigned max_contexts)
 {
     vcl_priv_t *result;
     ALLOC_OBJ(result, VCL_PRIV_MAGIC);
@@ -208,7 +206,7 @@ new_vcl_priv(
     result->max_contexts = max_contexts;
 
     result->clustered = 0;
-    result->connection_timeout = 0;
+    result->connection_timeout = (struct timeval){ 0 };
     result->max_cluster_hops = 0;
     result->context_ttl = 0;
     for (int i = 0; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
@@ -232,13 +230,13 @@ free_vcl_priv(vcl_priv_t *priv)
         free_redis_server(iserver);
     }
 
-    priv->command_timeout = 0;
+    priv->command_timeout = (struct timeval){ 0 };
     priv->retries = 0;
     priv->shared_contexts = 0;
     priv->max_contexts = 0;
 
     priv->clustered = 0;
-    priv->connection_timeout = 0;
+    priv->connection_timeout = (struct timeval){ 0 };
     priv->max_cluster_hops = 0;
     priv->context_ttl = 0;
     for (int i = 0; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
@@ -285,7 +283,7 @@ free_thread_state(thread_state_t *state)
         free_redis_context(icontext);
     }
 
-    state->timeout = 0;
+    state->timeout = (struct timeval){ 0 };
     state->tag = NULL;
     state->argc = 0;
     if (state->reply != NULL) {
@@ -340,7 +338,7 @@ unsafe_get_context_pool(vcl_priv_t *config, const char *tag)
 redisReply *
 redis_execute(
     struct sess *sp, vcl_priv_t *config, thread_state_t *state,
-    const char *tag, unsigned version, unsigned timeout, unsigned argc, const char *argv[],
+    const char *tag, unsigned version, struct timeval timeout, unsigned argc, const char *argv[],
     unsigned asking)
 {
     // Initializations.
@@ -787,17 +785,17 @@ unlock_redis_context(
 static redisReply *
 get_redis_repy(
     redis_context_t *context,
-    unsigned timeout, unsigned argc, const char *argv[], unsigned asking)
+    struct timeval timeout, unsigned argc, const char *argv[], unsigned asking)
 {
     redisReply *reply;
+
+    // TODO: Set timeout value.
 
     // Prepare pipeline.
     if (asking) {
         redisAppendCommand(context->rcontext, "ASKING");
     }
     redisAppendCommandArgv(context->rcontext, argc, argv, NULL);
-
-    // TODO: use the timeout value.
 
     // Fetch ASKING command reply.
     if (asking) {
