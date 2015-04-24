@@ -1,4 +1,4 @@
-AM_CPPFLAGS = @VMOD_INCLUDES@ -Wall -Werror
+AM_CPPFLAGS = @VMOD_INCLUDES@ -Wall -Werror -std=c99
 
 vmoddir = @VMOD_DIR@
 vmod_LTLIBRARIES = libvmod_redis.la
