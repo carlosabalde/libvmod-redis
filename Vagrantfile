@@ -33,9 +33,9 @@ $script = <<SCRIPT
   # hiredis.
   sudo -u vagrant bash -c '\
     cd /home/vagrant; \
-    wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.12.1.zip -O hiredis-0.12.1.zip; \
-    unzip hiredis-0.12.1.zip; \
-    rm -f hiredis-0.12.1.zip; \
+    wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.13.0.zip -O hiredis-0.13.0.zip; \
+    unzip hiredis-0.13.0.zip; \
+    rm -f hiredis-0.13.0.zip; \
     cd hiredis*; \
     make; \
     sudo make PREFIX="/usr/local" install; \
