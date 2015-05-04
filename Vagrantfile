@@ -48,7 +48,7 @@ $script = <<SCRIPT
     cp /home/vagrant/redis*/utils/redis_init_script /etc/init.d/redis-server-$PORT
     sed /etc/init.d/redis-server-$PORT -i \
       -e "s%^REDISPORT=.*%REDISPORT=$PORT%" \
-      -e "s%^PIDFILE=/var/run/redis_%PIDFILE=/var/run/redis-%" \
+      -e "s%^PIDFILE=/var/run/redis_%PIDFILE=/var/run/redis-%"
     chmod +x /etc/init.d/redis-server-$PORT
     update-rc.d -f redis-server-$PORT defaults
 
