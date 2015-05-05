@@ -23,9 +23,9 @@ $script = <<SCRIPT
   # hiredis.
   sudo -u vagrant bash -c '\
     cd /home/vagrant; \
-    wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.12.1.zip -O hiredis-0.12.1.zip; \
-    unzip hiredis-0.12.1.zip; \
-    rm -f hiredis-0.12.1.zip; \
+    wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.13.1.zip -O hiredis-0.13.1.zip; \
+    unzip hiredis-0.13.1.zip; \
+    rm -f hiredis-0.13.1.zip; \
     cd hiredis*; \
     make; \
     sudo make PREFIX="/usr/local" install; \
@@ -34,7 +34,7 @@ $script = <<SCRIPT
   # Redis.
   sudo -u vagrant bash -c '\
     cd /home/vagrant; \
-    wget http://download.redis.io/releases/redis-3.0.0.tar.gz; \
+    wget http://download.redis.io/releases/redis-3.0.1.tar.gz; \
     tar zxvf redis-*.tar.gz; \
     rm -f redis-*.tar.gz; \
     cd redis-*; \
@@ -48,7 +48,7 @@ $script = <<SCRIPT
     cp /home/vagrant/redis*/utils/redis_init_script /etc/init.d/redis-server-$PORT
     sed /etc/init.d/redis-server-$PORT -i \
       -e "s%^REDISPORT=.*%REDISPORT=$PORT%" \
-      -e "s%^PIDFILE=/var/run/redis_%PIDFILE=/var/run/redis-%" \
+      -e "s%^PIDFILE=/var/run/redis_%PIDFILE=/var/run/redis-%"
     chmod +x /etc/init.d/redis-server-$PORT
     update-rc.d -f redis-server-$PORT defaults
 
