@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 0.2.4
+Version: 0.2.5
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,6 +36,8 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Tue May 12 2015 Carlos Abalde <carlos.abalde@gmail.com> - 0.2.5-0.20150512
+- Do not require C99 standard.
 * Thu Apr 17 2015 Carlos Abalde <carlos.abalde@gmail.com> - 0.2.4-0.20150417
 - Added support for timeouts when executing commands.
 - Maximum number of Redis Cluster hops is now configurable.
