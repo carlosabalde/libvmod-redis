@@ -79,6 +79,7 @@ $script = <<SCRIPT
     if [ `expr $PORT % 10` -ne "0" ]; then
       MASTER_PORT=`expr $PORT - $PORT % 10`
       sed /etc/redis/$PORT.conf -i \
+        -e "s%^logfile .*%logfile /var/log/redis-$PORT.log%" \
         -e "s%^# slaveof .*%slaveof 127.0.0.1 $MASTER_PORT%"
     fi
 
@@ -91,6 +92,7 @@ $script = <<SCRIPT
     REDIS_CLUSTER_NODES="$REDIS_CLUSTER_NODES 127.0.0.1:$PORT"
 
     sed /etc/redis/$PORT.conf -i \
+      -e "s%^logfile .*%logfile /var/log/redis-$PORT.log%" \
       -e "s%^# cluster-enabled .*%cluster-enabled yes%" \
       -e "s%^# cluster-config-file .*%cluster-config-file nodes-$PORT.conf%" \
       -e "s%^# cluster-node-timeout .*%cluster-node-timeout 5000%" \
