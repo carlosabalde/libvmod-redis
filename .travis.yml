@@ -28,8 +28,6 @@ before_script:
   - make -j1
 
 script:
-  - $PWD/redis-3.0.1/src/redis-trib.rb
-  - PATH=$PATH:$PWD/redis-3.0.1/src redis-trib.rb
   - PATH=$PATH:$PWD/redis-3.0.1/src make check -j1
 
 compiler:
