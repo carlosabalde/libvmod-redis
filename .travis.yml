@@ -27,7 +27,7 @@ before_script:
   - make -j1
 
 script:
-  - PATH=$PATH:./redis-*/src make check -j1
+  - PATH=$PATH:$HOME/redis-*/src make check -j1
 
 compiler:
   - clang
