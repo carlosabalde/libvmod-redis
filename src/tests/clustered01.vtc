@@ -1,0 +1,27 @@
+varnishtest "Minimal test template"
+
+server s1 {
+   rxreq
+   txresp
+} -repeat 1 -start
+
+varnish v1 -vcl+backend {
+    import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
+
+    sub vcl_init {
+        redis.init("cluster", "${redis_cserver1_address}", 500, 0, 0, 16, 0, true, 32);
+        redis.add_cserver("${redis_cserver2_address}");
+        redis.add_cserver("${redis_cserver3_address}");
+    }
+
+    sub vcl_fini {
+        redis.fini();
+    }
+} -start
+
+client c1 {
+    txreq
+    rxresp
+} -run
+
+varnish v1 -expect client_req == 1
