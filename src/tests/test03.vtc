@@ -9,8 +9,8 @@ varnish v1 -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
-        redis.init("s1", "${redis1_address}", 500, 0, 0, 0, 0, false, 2);
-        redis.add_server("s2", "${redis2_socket}", 500, 0);
+        redis.init("s1", "${redis_master1_address}", 500, 0, 0, 0, 0, false, 2);
+        redis.add_server("s2", "${redis_master2_socket}", 500, 0);
     }
 
     sub vcl_deliver {
