@@ -27,6 +27,12 @@ before_script:
   - make -j1
 
 script:
+  - echo $HOME
+  - echo $PWD
+  - pwd
+  - ls $HOME
+  - ls $PWD
+  - ls `pwd`
   - PATH=$PATH:$HOME/redis-*/src make check -j1
 
 compiler:
