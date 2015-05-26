@@ -36,7 +36,7 @@ before_script:
   - make
 
 script:
-  - make check
+  - PATH=$PATH:./redis-*/src make check
 
 compiler:
   - clang

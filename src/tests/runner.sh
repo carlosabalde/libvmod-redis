@@ -1,17 +1,14 @@
 #! /bin/bash
 
 ##
-## Initializations.
+## Configuration.
 ##
-set -e
 REDIS_SERVERS=2
 REDIS_START_PORT=40000
 REDIS_CLUSTER_SERVERS=9
 REDIS_CLUSTER_START_PORT=50000
 REDIS_CLUSTER_REPLICAS=2
 REDIS_CLUSTER_ENABLED=0
-CONTEXT=""
-TMP=`mktemp -d`
 
 ##
 ## Cleanup callback.
@@ -38,32 +35,43 @@ cleanup() {
 }
 
 ##
+## Initializations.
+##
+set -e
+TMP=`mktemp -d`
+SKIP=1
+CONTEXT=""
+
+##
 ## Register cleanup callback.
 ##
 trap "cleanup $TMP" EXIT
 
 ##
-## Launch standalone Redis servers.
+## Launch standalone Redis servers?
 ##
-for INDEX in $(seq 1 $REDIS_SERVERS); do
-    cat > "$TMP/redis-master$INDEX.conf" <<EOF
-daemonize yes
-port $((REDIS_START_PORT+INDEX))
-bind 127.0.0.1
-unixsocket $TMP/redis-master$INDEX.sock
-pidfile $TMP/redis-master$INDEX.pid
+if [[ $2 =~ ^.*standalone[0-9]{2}\.vtc$ ]]; then
+    SKIP=0
+    for INDEX in $(seq 1 $REDIS_SERVERS); do
+        cat > "$TMP/redis-master$INDEX.conf" <<EOF
+        daemonize yes
+        port $((REDIS_START_PORT+INDEX))
+        bind 127.0.0.1
+        unixsocket $TMP/redis-master$INDEX.sock
+        pidfile $TMP/redis-master$INDEX.pid
 EOF
-    redis-server "$TMP/redis-master$INDEX.conf"
-    CONTEXT="\
-        $CONTEXT \
-        -Dredis_master${INDEX}_address=127.0.0.1:$((REDIS_START_PORT+INDEX)) \
-        -Dredis_master${INDEX}_socket=$TMP/redis-master$INDEX.sock"
-done
+        redis-server "$TMP/redis-master$INDEX.conf"
+        CONTEXT="\
+            $CONTEXT \
+            -Dredis_master${INDEX}_address=127.0.0.1:$((REDIS_START_PORT+INDEX)) \
+            -Dredis_master${INDEX}_socket=$TMP/redis-master$INDEX.sock"
+    done
 
 ##
 ## Launch clustered Redis servers?
 ##
-if [[ $2 =~ ^.*clustered[0-9]{2}\.vtc$ ]] && hash redis-trib.rb 2>/dev/null; then
+elif [[ $2 =~ ^.*clustered[0-9]{2}\.vtc$ ]] && hash redis-trib.rb 2>/dev/null; then
+    SKIP=0
     REDIS_CLUSTER_ENABLED=1
     CSERVERS=""
     for INDEX in $(seq 1 $REDIS_CLUSTER_SERVERS); do
@@ -90,7 +98,9 @@ EOF
 fi
 
 ##
-## Execute wrapped command.
+## Execute wrapped command?
 ##
-set -x
-$@ $CONTEXT
+if [[ $SKIP == 0 ]]; then
+    set -x
+    $@ $CONTEXT
+fi
