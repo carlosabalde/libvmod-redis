@@ -87,7 +87,7 @@ cluster_execute(
             if (result != NULL) {
                 // Is this a MOVED or ASK error reply?
                 if ((result->type == REDIS_REPLY_ERROR) &&
-                    ((strncmp(result->str, "MOVED", 5) == 0) &&
+                    ((strncmp(result->str, "MOVED", 5) == 0) ||
                      (strncmp(result->str, "ASK", 3) == 0))) {
                     // ASK vs. MOVED.
                     AZ(pthread_mutex_lock(&config->mutex));
