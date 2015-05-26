@@ -27,6 +27,10 @@ before_script:
   - make -j1
 
 script:
+  - ls -al $HOME
+  - ls -al $HOME/redis-3.0.1
+  - ls -al $HOME/redis-3.0.1/src
+  - $HOME/redis-3.0.1/src/redis-trib.rb
   - PATH=$PATH:$HOME/redis-3.0.1/src redis-trib.rb
   - PATH=$PATH:$HOME/redis-3.0.1/src make check -j1
 
