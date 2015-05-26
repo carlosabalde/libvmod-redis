@@ -20,7 +20,7 @@ before_install:
   - sudo make PREFIX="/usr/local" install
   - sudo ldconfig
   - cd ..
-  - sudo gem install redis
+  - gem install redis
 
 before_script:
   - ./autogen.sh
