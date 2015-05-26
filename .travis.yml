@@ -9,14 +9,12 @@ before_install:
   - sudo apt-get install -qq varnish libvarnishapi-dev
   - wget http://download.redis.io/releases/redis-3.0.1.tar.gz
   - tar zxvf redis-*.tar.gz
-  - rm redis-*.tar.gz
   - cd redis-*
   - make
   - sudo make PREFIX="/usr/local" install
   - cd ..
   - wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.13.1.zip -O hiredis-0.13.1.zip
   - unzip hiredis-*.zip
-  - rm hiredis-*.zip
   - cd hiredis-*
   - make
   - sudo make PREFIX="/usr/local" install
@@ -29,7 +27,7 @@ before_script:
   - make -j1
 
 script:
-  - PATH=$PATH:$HOME/redis-*/src make check -j1
+  - PATH=$PATH:$HOME/redis-3.0.1/src make check -j1
 
 compiler:
   - clang
