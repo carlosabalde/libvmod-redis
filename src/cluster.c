@@ -318,8 +318,8 @@ get_key_index(const char *command)
     // Some commands (e.g. INFO) are explicitly banned returning -1. Some other
     // commands (e.g. EVAL) are explicitly handled to return the correct
     // location of the key value. Finally, all other commands are assumed to
-    // contains the key as the first argument after the command name. This is
-    // indeed the key for most commands, and when it is not true the cluster
+    // contain the key as the first argument after the command name. This is
+    // indeed the case for most commands, and when it is not true the cluster
     // redirection will point to the right node anyway.
     if (strcasestr("|INFO|MULTI|EXEC|SLAVEOF|CONFIG|SHUTDOWN|SCRIPT|", buffer) != NULL) {
         return -1;
