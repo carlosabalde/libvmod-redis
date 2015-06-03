@@ -92,6 +92,8 @@ $script = <<SCRIPT
   done
   echo "/home/vagrant/redis*/src/redis-trib.rb create --replicas 2 $REDIS_CLUSTER_NODES" \
     > /home/vagrant/create-redis-cluster.sh
+  chown vagrant:vagrant /home/vagrant/create-redis-cluster.sh
+  chmod +x /home/vagrant/create-redis-cluster.sh
 
   # VMOD.
   sudo -u vagrant bash -c '\
