@@ -547,6 +547,7 @@ get_thread_state(const struct vrt_ctx *ctx, unsigned flush)
 
     // Drop previously stored Redis command?
     if (flush) {
+        result->timeout = (struct timeval){ 0 };
         result->tag = NULL;
         result->argc = 0;
         if (result->reply != NULL) {
