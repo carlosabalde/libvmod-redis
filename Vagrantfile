@@ -40,7 +40,8 @@ $script = <<SCRIPT
     cd redis-*; \
     make; \
     sudo make PREFIX="/usr/local" install; \
-    sudo ldconfig'
+    sudo ldconfig \
+    cp src/redis-trib.rb /usr/local/bin'
 
   # General Redis setup.
   mkdir -p /etc/redis /var/lib/redis
