@@ -34,14 +34,14 @@ $script = <<SCRIPT
   # Redis.
   sudo -u vagrant bash -c '\
     cd /home/vagrant; \
-    wget http://download.redis.io/releases/redis-3.0.1.tar.gz; \
+    wget http://download.redis.io/releases/redis-3.0.2.tar.gz; \
     tar zxvf redis-*.tar.gz; \
     rm -f redis-*.tar.gz; \
     cd redis-*; \
     make; \
     sudo make PREFIX="/usr/local" install; \
-    sudo ldconfig \
-    cp src/redis-trib.rb /usr/local/bin'
+    sudo ldconfig; \
+    sudo cp src/redis-trib.rb /usr/local/bin'
 
   # General Redis setup.
   mkdir -p /etc/redis /var/lib/redis
@@ -91,10 +91,11 @@ $script = <<SCRIPT
 
     service redis-server-$PORT start
   done
-  echo "/home/vagrant/redis*/src/redis-trib.rb create --replicas 2 $REDIS_CLUSTER_NODES" \
-    > /home/vagrant/create-redis-cluster.sh
-  chown vagrant:vagrant /home/vagrant/create-redis-cluster.sh
-  chmod +x /home/vagrant/create-redis-cluster.sh
+
+  sudo -u vagrant bash -c "\
+    echo '/home/vagrant/redis*/src/redis-trib.rb create --replicas 2 $REDIS_CLUSTER_NODES' \
+      > /home/vagrant/create-redis-cluster.sh; \
+    chmod +x /home/vagrant/create-redis-cluster.sh"
 
   # VMOD.
   sudo -u vagrant bash -c '\
