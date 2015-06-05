@@ -1,0 +1,193 @@
+varnishtest "Tests general execution of commands (private pool)"
+
+server s1 {
+   rxreq
+   txresp
+} -repeat 1 -start
+
+varnish v1 -vcl+backend {
+    import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
+
+    sub vcl_init {
+        redis.init("cluster", "${master1}", 500, 0, 0, 16, 0, false, 1);
+        redis.add_cserver("${master2}");
+        redis.add_cserver("${master3}");
+    }
+
+    sub vcl_deliver {
+        # SET.
+        redis.command("SET");
+        redis.push("${key_in_master1}");
+        redis.push("hello");
+        redis.execute();
+        if (redis.reply_is_status()) {
+            set resp.http.Reply-1 = redis.get_status_reply();
+        }
+
+        # SETEX.
+        redis.command("SETEX");
+        redis.push("${key_in_master2}");
+        redis.push("3600");
+        redis.push("Hello world!");
+        redis.execute();
+        if (redis.reply_is_status()) {
+            set resp.http.Reply-2 = redis.get_status_reply();
+        }
+
+        # GET.
+        redis.command("GET");
+        redis.push("${key_in_master2}");
+        redis.execute();
+        if (redis.reply_is_string()) {
+            set resp.http.Reply-3 = redis.get_string_reply();
+        }
+
+        # DEL.
+        redis.command("DEL");
+        redis.push("${key_in_master2}");
+        redis.execute();
+        if (redis.reply_is_integer()) {
+            set resp.http.Reply-4 = redis.get_integer_reply();
+        }
+
+        # MGET.
+        redis.command("MGET");
+        redis.push("${key_in_master1}");
+        redis.push("{${key_in_master1}}:other");
+        redis.execute();
+        if (redis.reply_is_array()) {
+            set resp.http.Reply-5-Length = redis.get_array_reply_length();
+            set resp.http.Reply-5-Value-1 = redis.get_array_reply_value(0);
+            set resp.http.Reply-5-Value-2 = redis.get_array_reply_value(1);
+        }
+
+        # MGET (CROSSSLOT).
+        redis.command("MGET");
+        redis.push("${key_in_master1}");
+        redis.push("${key_in_master2}");
+        redis.execute();
+        if (redis.reply_is_error()) {
+            set resp.http.Reply-6 = "1";
+        }
+
+        # HMSET.
+        redis.command("HMSET");
+        redis.push("${key_in_master2}");
+        redis.push("field1");
+        redis.push("Hello world!");
+        redis.push("field2");
+        redis.push("42");
+        redis.execute();
+        if (redis.reply_is_status()) {
+            set resp.http.Reply-7 = redis.get_status_reply();
+        }
+
+        # HMGET.
+        redis.command("HGET");
+        redis.push("${key_in_master2}");
+        redis.push("field1");
+        redis.execute();
+        if (redis.reply_is_string()) {
+            set resp.http.Reply-8 = redis.get_string_reply();
+        }
+
+        # INCR.
+        redis.command("INCR");
+        redis.push("${key_in_master1}");
+        redis.execute();
+        if (redis.reply_is_error()) {
+            set resp.http.Reply-9 = redis.get_error_reply();
+        }
+
+        # EVAL.
+        set req.http.Script = {"
+            redis.call('SET', KEYS[1], ARGV[1]);
+            redis.call('SET', KEYS[2], ARGV[1]);
+        "};
+        redis.command("EVAL");
+        redis.push(req.http.Script);
+        redis.push("2");
+        redis.push("${key_in_master1}");
+        redis.push("{${key_in_master1}}:other");
+        redis.push("Atomic!");
+        redis.execute();
+        if (redis.reply_is_nil()) {
+            set resp.http.Reply-10 = "o/";
+        }
+
+        # EVAL.
+        redis.command("EVAL");
+        redis.push(req.http.Script);
+        redis.push("2");
+        redis.push("${key_in_master1}");
+        redis.push("{${key_in_master1}}:other");
+        redis.push("Atomic x 2!");
+        redis.execute();
+        if (redis.reply_is_nil()) {
+            set resp.http.Reply-11 = "o/";
+        }
+
+        # EVAL (CROSSSLOT).
+        set req.http.Script = {"
+            redis.call('SET', KEYS[1], ARGV[1]);
+            redis.call('SET', KEYS[2], ARGV[1]);
+        "};
+        redis.command("EVAL");
+        redis.push(req.http.Script);
+        redis.push("2");
+        redis.push("${key_in_master1}");
+        redis.push("${key_in_master2}");
+        redis.push("Atomic!");
+        redis.execute();
+        if (redis.reply_is_error()) {
+            set resp.http.Reply-12 = "1";
+        }
+
+        # GET.
+        redis.command("GET");
+        redis.push("${key_in_master1}");
+        redis.execute();
+        if (redis.reply_is_string()) {
+            set resp.http.Reply-13 = redis.get_string_reply();
+        }
+    }
+
+    sub vcl_fini {
+        redis.fini();
+    }
+} -start
+
+client c1 {
+    txreq
+    rxresp
+
+    expect resp.http.Reply-1 == "OK"
+
+    expect resp.http.Reply-2 == "OK"
+
+    expect resp.http.Reply-3 == "Hello world!"
+
+    expect resp.http.Reply-4 == "1"
+
+    expect resp.http.Reply-5-Length == "2"
+    expect resp.http.Reply-5-Value-1 == "hello"
+    expect resp.http.Reply-5-Value-2 == ""
+
+    expect resp.http.Reply-6 == "1"
+
+    expect resp.http.Reply-7 == "OK"
+
+    expect resp.http.Reply-8 == "Hello world!"
+
+    expect resp.http.Reply-9 != ""
+
+    expect resp.http.Reply-10 == "o/"
+
+    expect resp.http.Reply-11 == "o/"
+
+    expect resp.http.Reply-12 == "1"
+
+    expect resp.http.Reply-13 == "Atomic x 2!"
+} -run
+
+varnish v1 -expect client_req == 1

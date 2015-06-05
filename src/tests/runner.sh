@@ -8,7 +8,7 @@ REDIS_START_PORT=40000
 REDIS_CLUSTER_SERVERS=9
 REDIS_CLUSTER_START_PORT=50000
 REDIS_CLUSTER_REPLICAS=2
-REDIS_CLUSTER_ENABLED=0
+REDIS_CLUSTER_ENABLED=1
 
 ##
 ## Cleanup callback.
@@ -86,6 +86,7 @@ elif [[ $2 =~ ^.*clustered[0-9]{2}\.vtc$ ]] && hash redis-trib.rb 2>/dev/null; t
         cluster-node-timeout 5000
         cluster-slave-validity-factor 0
         cluster-require-full-coverage yes
+        dir $TMP
 EOF
         redis-server "$TMP/redis-cserver$INDEX.conf"
         CONTEXT="\
@@ -94,7 +95,23 @@ EOF
             -Dredis_cserver${INDEX}_socket=$TMP/redis-cserver$INDEX.sock"
         CSERVERS="$CSERVERS 127.0.0.1:$((REDIS_CLUSTER_START_PORT+INDEX))"
     done
+
     yes yes | redis-trib.rb create --replicas $REDIS_CLUSTER_REPLICAS $CSERVERS > /dev/null
+
+    # Wait at least half of NODE_TIMEOUT for all nodes to get the new configuration.
+    sleep 3
+
+    # Add to context:
+    #   1) All master nodes' addresses ordered by the slots they handle (master1, master2, ...).
+    #   2) An example key for each of those master nodes (key_in_master1, key_in_master2, ...).
+    INDEX=1
+    while read line; do
+        CONTEXT="\
+            $CONTEXT \
+            -Dmaster${INDEX}=$(echo $line | cut -f 2 -d ' ') \
+            -Dkey_in_master${INDEX}=$(grep "^$(echo $line | cut -f 9 -d ' ' | cut -f 1 -d '-'): " tests/hashslot_keys.txt | cut -f 2 -d ' ')"
+        INDEX=$(( INDEX + 1 ))
+    done <<< "$(redis-cli -p $((REDIS_CLUSTER_START_PORT+1)) CLUSTER NODES | grep master | sort -k 9 -n)"
 fi
 
 ##
