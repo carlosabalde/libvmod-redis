@@ -9,15 +9,15 @@ varnish v1 -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
-        redis.init("cluster", "${master1}", 500, 0, 0, 16, 0, false, 1);
-        redis.add_cserver("${master2}");
-        redis.add_cserver("${master3}");
+        redis.init("cluster", "${redis_master1}", 500, 0, 0, 16, 0, false, 3);
+        redis.add_cserver("${redis_master2}");
+        redis.add_cserver("${redis_master3}");
     }
 
     sub vcl_deliver {
         # SET.
         redis.command("SET");
-        redis.push("${key_in_master1}");
+        redis.push("${redis_key_in_master1}");
         redis.push("hello");
         redis.execute();
         if (redis.reply_is_status()) {
@@ -26,7 +26,7 @@ varnish v1 -vcl+backend {
 
         # SETEX.
         redis.command("SETEX");
-        redis.push("${key_in_master2}");
+        redis.push("${redis_key_in_master2}");
         redis.push("3600");
         redis.push("Hello world!");
         redis.execute();
@@ -36,7 +36,7 @@ varnish v1 -vcl+backend {
 
         # GET.
         redis.command("GET");
-        redis.push("${key_in_master2}");
+        redis.push("${redis_key_in_master2}");
         redis.execute();
         if (redis.reply_is_string()) {
             set resp.http.Reply-3 = redis.get_string_reply();
@@ -44,7 +44,7 @@ varnish v1 -vcl+backend {
 
         # DEL.
         redis.command("DEL");
-        redis.push("${key_in_master2}");
+        redis.push("${redis_key_in_master2}");
         redis.execute();
         if (redis.reply_is_integer()) {
             set resp.http.Reply-4 = redis.get_integer_reply();
@@ -52,8 +52,8 @@ varnish v1 -vcl+backend {
 
         # MGET.
         redis.command("MGET");
-        redis.push("${key_in_master1}");
-        redis.push("{${key_in_master1}}:other");
+        redis.push("${redis_key_in_master1}");
+        redis.push("{${redis_key_in_master1}}:other");
         redis.execute();
         if (redis.reply_is_array()) {
             set resp.http.Reply-5-Length = redis.get_array_reply_length();
@@ -63,8 +63,8 @@ varnish v1 -vcl+backend {
 
         # MGET (CROSSSLOT).
         redis.command("MGET");
-        redis.push("${key_in_master1}");
-        redis.push("${key_in_master2}");
+        redis.push("${redis_key_in_master1}");
+        redis.push("${redis_key_in_master2}");
         redis.execute();
         if (redis.reply_is_error()) {
             set resp.http.Reply-6 = "1";
@@ -72,7 +72,7 @@ varnish v1 -vcl+backend {
 
         # HMSET.
         redis.command("HMSET");
-        redis.push("${key_in_master2}");
+        redis.push("${redis_key_in_master2}");
         redis.push("field1");
         redis.push("Hello world!");
         redis.push("field2");
@@ -84,7 +84,7 @@ varnish v1 -vcl+backend {
 
         # HMGET.
         redis.command("HGET");
-        redis.push("${key_in_master2}");
+        redis.push("${redis_key_in_master2}");
         redis.push("field1");
         redis.execute();
         if (redis.reply_is_string()) {
@@ -93,7 +93,7 @@ varnish v1 -vcl+backend {
 
         # INCR.
         redis.command("INCR");
-        redis.push("${key_in_master1}");
+        redis.push("${redis_key_in_master1}");
         redis.execute();
         if (redis.reply_is_error()) {
             set resp.http.Reply-9 = redis.get_error_reply();
@@ -107,8 +107,8 @@ varnish v1 -vcl+backend {
         redis.command("EVAL");
         redis.push(req.http.Script);
         redis.push("2");
-        redis.push("${key_in_master1}");
-        redis.push("{${key_in_master1}}:other");
+        redis.push("${redis_key_in_master1}");
+        redis.push("{${redis_key_in_master1}}:other");
         redis.push("Atomic!");
         redis.execute();
         if (redis.reply_is_nil()) {
@@ -119,8 +119,8 @@ varnish v1 -vcl+backend {
         redis.command("EVAL");
         redis.push(req.http.Script);
         redis.push("2");
-        redis.push("${key_in_master1}");
-        redis.push("{${key_in_master1}}:other");
+        redis.push("${redis_key_in_master1}");
+        redis.push("{${redis_key_in_master1}}:other");
         redis.push("Atomic x 2!");
         redis.execute();
         if (redis.reply_is_nil()) {
@@ -135,8 +135,8 @@ varnish v1 -vcl+backend {
         redis.command("EVAL");
         redis.push(req.http.Script);
         redis.push("2");
-        redis.push("${key_in_master1}");
-        redis.push("${key_in_master2}");
+        redis.push("${redis_key_in_master1}");
+        redis.push("${redis_key_in_master2}");
         redis.push("Atomic!");
         redis.execute();
         if (redis.reply_is_error()) {
@@ -145,7 +145,7 @@ varnish v1 -vcl+backend {
 
         # GET.
         redis.command("GET");
-        redis.push("${key_in_master1}");
+        redis.push("${redis_key_in_master1}");
         redis.execute();
         if (redis.reply_is_string()) {
             set resp.http.Reply-13 = redis.get_string_reply();

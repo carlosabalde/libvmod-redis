@@ -8,11 +8,13 @@ before_install:
   - echo "deb-src https://repo.varnish-cache.org/ubuntu/ precise varnish-3.0" | sudo tee -a /etc/apt/sources.list.d/varnish-cache.list
   - sudo apt-get update -q
   - sudo apt-get install -qq varnish libvarnishapi-dev
-  - wget http://download.redis.io/releases/redis-3.0.1.tar.gz
+  - wget http://download.redis.io/releases/redis-3.0.2.tar.gz
   - tar zxvf redis-*.tar.gz
   - cd redis-*
   - make
   - sudo make PREFIX="/usr/local" install
+  - sudo ldconfig
+  - sudo cp src/redis-trib.rb /usr/local/bin
   - cd ..
   - wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.13.1.zip -O hiredis-0.13.1.zip
   - unzip hiredis-*.zip
@@ -37,7 +39,7 @@ before_script:
   - make
 
 script:
-  - PATH=$PATH:$PWD/redis-3.0.1/src make check
+  - make check
 
 compiler:
   - clang

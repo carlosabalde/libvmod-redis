@@ -9,15 +9,15 @@ varnish v1 -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
-        redis.init("cluster", "${master1}", 500, 0, 0, 16, 0, true, 32);
-        redis.add_cserver("${master2}");
-        redis.add_cserver("${master3}");
+        redis.init("cluster", "${redis_master1}", 500, 0, 0, 16, 0, true, 32);
+        redis.add_cserver("${redis_master2}");
+        redis.add_cserver("${redis_master3}");
     }
 
     sub vcl_deliver {
         # Set key in master1.
         redis.command("SET");
-        redis.push("${key_in_master1}");
+        redis.push("${redis_key_in_master1}");
         redis.push("hello");
         redis.execute();
         if (redis.reply_is_status()) {
@@ -41,15 +41,15 @@ varnish v2 -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
-        redis.init("master1", "${master1}", 500, 0, 0, 16, 0, true, 32);
-        redis.add_server("master2", "${master2}", 500, 0);
+        redis.init("master1", "${redis_master1}", 500, 0, 0, 16, 0, true, 32);
+        redis.add_server("master2", "${redis_master2}", 500, 0);
     }
 
     sub vcl_deliver {
         # Get the key's containing slot.
         redis.command("CLUSTER");
         redis.push("KEYSLOT");
-        redis.push("${key_in_master1}");
+        redis.push("${redis_key_in_master1}");
         redis.execute();
         if (redis.reply_is_integer()) {
             set resp.http.Slot = redis.get_integer_reply();
@@ -60,7 +60,7 @@ varnish v2 -vcl+backend {
         redis.push("NODES");
         redis.execute();
         if (redis.reply_is_string()) {
-            set resp.http.NodeOrig = regsub(redis.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${master1} .*$", "\1");
+            set resp.http.NodeOrig = regsub(redis.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master1} .*$", "\1");
             if (resp.http.NodeOrig !~ "[0-9a-f]+") {
                 unset resp.http.NodeOrig;
             }
@@ -71,7 +71,7 @@ varnish v2 -vcl+backend {
         redis.push("NODES");
         redis.execute();
         if (redis.reply_is_string()) {
-            set resp.http.NodeDest = regsub(redis.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${master2} .*$", "\1");
+            set resp.http.NodeDest = regsub(redis.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master2} .*$", "\1");
             if (resp.http.NodeDest !~ "[0-9a-f]+") {
                 unset resp.http.NodeDest;
             }
@@ -104,9 +104,9 @@ varnish v2 -vcl+backend {
         # Migrate key.
         redis.command("MIGRATE");
         redis.server("master1");
-        redis.push(regsub("${master2}", "([\d\.]*):([\d]*)", "\1"));
-        redis.push(regsub("${master2}", "([\d\.]*):([\d]*)", "\2"));
-        redis.push("${key_in_master1}");
+        redis.push(regsub("${redis_master2}", "([\d\.]*):([\d]*)", "\1"));
+        redis.push(regsub("${redis_master2}", "([\d\.]*):([\d]*)", "\2"));
+        redis.push("${redis_key_in_master1}");
         redis.push("0");
         redis.push("0");
         redis.execute();
@@ -117,7 +117,7 @@ varnish v2 -vcl+backend {
         # Check that the original node replies with an ASK redirection.
         redis.command("GET");
         redis.server("master1");
-        redis.push("${key_in_master1}");
+        redis.push("${redis_key_in_master1}");
         redis.execute();
         if (redis.reply_is_error()) {
             if (redis.get_error_reply() ~ "^ASK ") {
@@ -154,15 +154,15 @@ varnish v3 -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
-        redis.init("cluster", "${master1}", 500, 0, 0, 16, 0, true, 32);
-        redis.add_cserver("${master2}");
-        redis.add_cserver("${master3}");
+        redis.init("cluster", "${redis_master1}", 500, 0, 0, 16, 0, true, 32);
+        redis.add_cserver("${redis_master2}");
+        redis.add_cserver("${redis_master3}");
     }
 
     sub vcl_deliver {
         # Get the key (should internally handle the ASK redirection).
         redis.command("GET");
-        redis.push("${key_in_master1}");
+        redis.push("${redis_key_in_master1}");
         redis.execute();
         if (redis.reply_is_string()) {
             set resp.http.Reply-8 = redis.get_string_reply();

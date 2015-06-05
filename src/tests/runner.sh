@@ -8,7 +8,7 @@ REDIS_START_PORT=40000
 REDIS_CLUSTER_SERVERS=9
 REDIS_CLUSTER_START_PORT=50000
 REDIS_CLUSTER_REPLICAS=2
-REDIS_CLUSTER_ENABLED=1
+REDIS_CLUSTER_ENABLED=0
 
 ##
 ## Cleanup callback.
@@ -102,14 +102,14 @@ EOF
     sleep 3
 
     # Add to context:
-    #   1) All master nodes' addresses ordered by the slots they handle (master1, master2, ...).
-    #   2) An example key for each of those master nodes (key_in_master1, key_in_master2, ...).
+    #   1) All master nodes' addresses ordered by the slots they handle (redis_master1, redis_master2, ...).
+    #   2) An example key for each of those master nodes (redis_key_in_master1, redis_key_in_master2, ...).
     INDEX=1
-    while read line; do
+    while read LINE; do
         CONTEXT="\
             $CONTEXT \
-            -Dmaster${INDEX}=$(echo $line | cut -f 2 -d ' ') \
-            -Dkey_in_master${INDEX}=$(grep "^$(echo $line | cut -f 9 -d ' ' | cut -f 1 -d '-'): " tests/hashslot_keys.txt | cut -f 2 -d ' ')"
+            -Dredis_master${INDEX}=$(echo $LINE | cut -f 2 -d ' ') \
+            -Dredis_key_in_master${INDEX}=$(grep "^$(echo $LINE | cut -f 9 -d ' ' | cut -f 1 -d '-'): " tests/hashslot-keys.txt | cut -f 2 -d ' ')"
         INDEX=$(( INDEX + 1 ))
     done <<< "$(redis-cli -p $((REDIS_CLUSTER_START_PORT+1)) CLUSTER NODES | grep master | sort -k 9 -n)"
 fi
