@@ -86,6 +86,7 @@ elif [[ $2 =~ ^.*clustered[0-9]{2}\.vtc$ ]] && hash redis-trib.rb 2>/dev/null; t
         cluster-node-timeout 5000
         cluster-slave-validity-factor 0
         cluster-require-full-coverage yes
+        dir $TMP
 EOF
         redis-server "$TMP/redis-cserver$INDEX.conf"
         CONTEXT="\
@@ -94,7 +95,23 @@ EOF
             -Dredis_cserver${INDEX}_socket=$TMP/redis-cserver$INDEX.sock"
         CSERVERS="$CSERVERS 127.0.0.1:$((REDIS_CLUSTER_START_PORT+INDEX))"
     done
+
     yes yes | redis-trib.rb create --replicas $REDIS_CLUSTER_REPLICAS $CSERVERS > /dev/null
+
+    # Wait at least half of NODE_TIMEOUT for all nodes to get the new configuration.
+    sleep 3
+
+    # Add to context:
+    #   1) All master nodes' addresses ordered by the slots they handle (redis_master1, redis_master2, ...).
+    #   2) An example key for each of those master nodes (redis_key_in_master1, redis_key_in_master2, ...).
+    INDEX=1
+    while read LINE; do
+        CONTEXT="\
+            $CONTEXT \
+            -Dredis_master${INDEX}=$(echo $LINE | cut -f 2 -d ' ') \
+            -Dredis_key_in_master${INDEX}=$(grep "^$(echo $LINE | cut -f 9 -d ' ' | cut -f 1 -d '-'): " tests/hashslot-keys.txt | cut -f 2 -d ' ')"
+        INDEX=$(( INDEX + 1 ))
+    done <<< "$(redis-cli -p $((REDIS_CLUSTER_START_PORT+1)) CLUSTER NODES | grep master | sort -k 9 -n)"
 fi
 
 ##
