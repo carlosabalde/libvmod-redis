@@ -1,0 +1,214 @@
+varnishtest "Tests handling of MOVED reply messages"
+
+server s1 {
+   rxreq
+   txresp
+} -repeat 3 -start
+
+varnish v1 -vcl+backend {
+    import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
+
+    sub vcl_init {
+        redis.init("cluster", "${redis_master1}", 500, 0, 0, 16, 0, true, 32);
+        redis.add_cserver("${redis_master2}");
+        redis.add_cserver("${redis_master3}");
+    }
+
+    sub vcl_deliver {
+        # Set key in master1.
+        redis.command("SET");
+        redis.push("${redis_key_in_master1}");
+        redis.push("hello");
+        redis.execute();
+        if (redis.reply_is_status()) {
+            set resp.http.Reply-1 = redis.get_status_reply();
+        }
+    }
+
+    sub vcl_fini {
+        redis.fini();
+    }
+} -start
+
+client c1 {
+    txreq
+    rxresp
+
+    expect resp.http.Reply-1 == "OK"
+} -run
+
+varnish v2 -vcl+backend {
+    import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
+
+    sub vcl_init {
+        redis.init("master1", "${redis_master1}", 500, 0, 0, 16, 0, true, 32);
+        redis.add_server("master2", "${redis_master2}", 500, 0);
+    }
+
+    sub vcl_deliver {
+        # Get the key's containing slot.
+        redis.command("CLUSTER");
+        redis.push("KEYSLOT");
+        redis.push("${redis_key_in_master1}");
+        redis.execute();
+        if (redis.reply_is_integer()) {
+            set resp.http.Slot = redis.get_integer_reply();
+        }
+
+        # Get the ID for the original node (master1).
+        redis.command("CLUSTER");
+        redis.push("NODES");
+        redis.execute();
+        if (redis.reply_is_string()) {
+            set resp.http.NodeOrig = regsub(redis.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master1} .*$", "\1");
+            if (resp.http.NodeOrig !~ "[0-9a-f]+") {
+                unset resp.http.NodeOrig;
+            }
+        }
+
+        # Get the ID for the destination node (master2).
+        redis.command("CLUSTER");
+        redis.push("NODES");
+        redis.execute();
+        if (redis.reply_is_string()) {
+            set resp.http.NodeDest = regsub(redis.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master2} .*$", "\1");
+            if (resp.http.NodeDest !~ "[0-9a-f]+") {
+                unset resp.http.NodeDest;
+            }
+        }
+
+        # Mark the destination node as IMPORTING.
+        redis.command("CLUSTER");
+        redis.server("master2");
+        redis.push("SETSLOT");
+        redis.push(resp.http.Slot);
+        redis.push("IMPORTING");
+        redis.push(resp.http.NodeOrig);
+        redis.execute();
+        if (redis.reply_is_status()) {
+            set resp.http.Reply-4 = redis.get_status_reply();
+        }
+
+        # Mark the original node as MIGRATING.
+        redis.command("CLUSTER");
+        redis.server("master1");
+        redis.push("SETSLOT");
+        redis.push(resp.http.Slot);
+        redis.push("MIGRATING");
+        redis.push(resp.http.NodeDest);
+        redis.execute();
+        if (redis.reply_is_status()) {
+            set resp.http.Reply-5 = redis.get_status_reply();
+        }
+
+        # Migrate key.
+        redis.command("MIGRATE");
+        redis.server("master1");
+        redis.push(regsub("${redis_master2}", "([\d\.]*):([\d]*)", "\1"));
+        redis.push(regsub("${redis_master2}", "([\d\.]*):([\d]*)", "\2"));
+        redis.push("${redis_key_in_master1}");
+        redis.push("0");
+        redis.push("0");
+        redis.execute();
+        if (redis.reply_is_status()) {
+            set resp.http.Reply-6 = redis.get_status_reply();
+        }
+
+        # Assign the containing slot to the destination node in both nodes.
+
+        redis.command("CLUSTER");
+        redis.server("master1");
+        redis.push("SETSLOT");
+        redis.push(resp.http.Slot);
+        redis.push("NODE");
+        redis.push(resp.http.NodeDest);
+        redis.execute();
+        if (redis.reply_is_status()) {
+            set resp.http.Reply-7 = redis.get_status_reply();
+        }
+
+        redis.command("CLUSTER");
+        redis.server("master2");
+        redis.push("SETSLOT");
+        redis.push(resp.http.Slot);
+        redis.push("NODE");
+        redis.push(resp.http.NodeDest);
+        redis.execute();
+        if (redis.reply_is_status()) {
+            set resp.http.Reply-8 = redis.get_status_reply();
+        }
+
+        # Check that the original node replies with a MOVED redirection.
+        redis.command("GET");
+        redis.server("master1");
+        redis.push("${redis_key_in_master1}");
+        redis.execute();
+        if (redis.reply_is_error()) {
+            if (redis.get_error_reply() ~ "^MOVED ") {
+                set resp.http.Reply-9 = "MOVED";
+            }
+        }
+    }
+
+    sub vcl_fini {
+        redis.fini();
+    }
+} -start
+
+client c2 -connect ${v2_sock} {
+    txreq
+    rxresp
+
+    expect resp.http.Slot != <undef>
+
+    expect resp.http.NodeOrig != <undef>
+
+    expect resp.http.NodeDest != <undef>
+
+    expect resp.http.Reply-4 == "OK"
+
+    expect resp.http.Reply-5 == "OK"
+
+    expect resp.http.Reply-6 == "OK"
+
+    expect resp.http.Reply-7 == "OK"
+
+    expect resp.http.Reply-8 == "OK"
+
+    expect resp.http.Reply-9 == "MOVED"
+} -run
+
+varnish v3 -vcl+backend {
+    import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
+
+    sub vcl_init {
+        redis.init("cluster", "${redis_master1}", 500, 0, 0, 16, 0, true, 32);
+        redis.add_cserver("${redis_master2}");
+        redis.add_cserver("${redis_master3}");
+    }
+
+    sub vcl_deliver {
+        # Get the key (should internally handle the MOVED redirection).
+        redis.command("GET");
+        redis.push("${redis_key_in_master1}");
+        redis.execute();
+        if (redis.reply_is_string()) {
+            set resp.http.Reply-10 = redis.get_string_reply();
+        }
+    }
+
+    sub vcl_fini {
+        redis.fini();
+    }
+} -start
+
+client c3 -connect ${v3_sock} {
+    txreq
+    rxresp
+
+    expect resp.http.Reply-10 == "hello"
+} -run
+
+varnish v1 -expect client_req == 1
+varnish v2 -expect client_req == 1
+varnish v3 -expect client_req == 1
