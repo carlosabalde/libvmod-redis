@@ -7,8 +7,8 @@ Varnish Redis Module
 --------------------
 
 :Author: Carlos Abalde
-:Date: 2015-05-26
-:Version: 0.2.6
+:Date: 2015-06-08
+:Version: 0.2.7
 :Manual section: 3
 
 SYNOPSIS
@@ -244,7 +244,7 @@ Description
 
     Use this feature (1) when using master-slave replication; or (2) when using multiple independent servers; or (3) when using some kind of proxy assisted partitioning (e.g. https://github.com/twitter/twemproxy) and more than one proxy is available.
 
-    When a command is submitted using ``redis.execute()`` and more that one Redis server is available, the destination server is selected according with the tag specified with `redis.server()`. If not specified and Redis Cluster support hasn't been enabled, a randomly selected connection will be used (if the worker thread / corresponding pool already has any Redis connection established and available), or a new connection to a randomly selected server will be established.
+    When a command is submitted using ``redis.execute()`` and more than one Redis server is available, the destination server is selected according with the tag specified with `redis.server()`. If not specified and Redis Cluster support hasn't been enabled, a randomly selected connection will be used (if the worker thread / corresponding pool already has any Redis connection established and available), or a new connection to a randomly selected server will be established.
 
 add_cserver
 -----------
@@ -325,7 +325,7 @@ Arguments
 Return value
     VOID
 Description
-    Executes an argument of a previously enqueued Redis command.
+    Provides an argument to a previously enqueued Redis command.
 
 execute
 -------
