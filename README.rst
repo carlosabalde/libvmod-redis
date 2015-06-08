@@ -7,8 +7,8 @@ Varnish Redis Module
 --------------------
 
 :Author: Carlos Abalde
-:Date: 2015-05-26
-:Version: 0.2.6
+:Date: 2015-06-08
+:Version: 0.2.7
 :Manual section: 3
 
 SYNOPSIS
