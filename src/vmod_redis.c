@@ -508,18 +508,16 @@ vmod_fini(struct sess *sp, struct vmod_priv *vcl_priv)
         // Release all contexts (both free an busy; this method is assumed
         // to be called during vcl_fini).
         ipool->ncontexts = 0;
+        redis_context_t *icontext;
         while (!VTAILQ_EMPTY(&ipool->free_contexts)) {
-            redis_context_t *icontext;
-            while (!VTAILQ_EMPTY(&ipool->free_contexts)) {
-                icontext = VTAILQ_FIRST(&ipool->free_contexts);
-                VTAILQ_REMOVE(&ipool->free_contexts, icontext, list);
-                free_redis_context(icontext);
-            }
-            while (!VTAILQ_EMPTY(&ipool->busy_contexts)) {
-                icontext = VTAILQ_FIRST(&ipool->busy_contexts);
-                VTAILQ_REMOVE(&ipool->busy_contexts, icontext, list);
-                free_redis_context(icontext);
-            }
+            icontext = VTAILQ_FIRST(&ipool->free_contexts);
+            VTAILQ_REMOVE(&ipool->free_contexts, icontext, list);
+            free_redis_context(icontext);
+        }
+        while (!VTAILQ_EMPTY(&ipool->busy_contexts)) {
+            icontext = VTAILQ_FIRST(&ipool->busy_contexts);
+            VTAILQ_REMOVE(&ipool->busy_contexts, icontext, list);
+            free_redis_context(icontext);
         }
 
         // Release pool lock.
@@ -550,6 +548,7 @@ get_thread_state(struct sess *sp, unsigned flush)
 
     // Drop previously stored Redis command?
     if (flush) {
+        result->timeout = (struct timeval){ 0 };
         result->tag = NULL;
         result->argc = 0;
         if (result->reply != NULL) {

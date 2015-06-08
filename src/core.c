@@ -265,6 +265,7 @@ new_thread_state()
 
     result->ncontexts = 0;
     VTAILQ_INIT(&result->contexts);
+    result->timeout = (struct timeval){ 0 };
     result->tag = NULL;
     result->argc = 0;
     result->reply = NULL;
