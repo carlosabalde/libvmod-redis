@@ -13,6 +13,7 @@ dist_man_MANS = vmod_redis.3
 MAINTAINERCLEANFILES = $(dist_man_MANS)
 
 vmod_redis.3: README.rst
+#vmod_redis.3: src/vmod_redis.man.rst
 
 %.1 %.2 %.3 %.4 %.5 %.6 %.7 %.8 %.9:
 if HAVE_RST2MAN
