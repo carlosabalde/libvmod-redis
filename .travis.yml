@@ -15,7 +15,7 @@ before_install:
   - sudo ldconfig
   - sudo cp src/redis-trib.rb /usr/local/bin
   - cd ..
-  - wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.13.1.zip -O hiredis-0.13.1.zip
+  - wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.13.2.zip -O hiredis-0.13.2.zip
   - unzip hiredis-*.zip
   - cd hiredis-*
   - make
