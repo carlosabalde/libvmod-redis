@@ -151,10 +151,6 @@ varnish v1 -vcl+backend {
             set resp.http.Reply-13 = redis.get_string_reply();
         }
     }
-
-    sub vcl_fini {
-        redis.fini();
-    }
 } -start
 
 client c1 {

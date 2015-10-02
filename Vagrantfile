@@ -15,7 +15,7 @@ $script = <<SCRIPT
 
   # Varnish Cache.
   curl https://repo.varnish-cache.org/debian/GPG-key.txt | apt-key add -
-  echo "deb https://repo.varnish-cache.org/ubuntu/ trusty varnish-4.0" > /etc/apt/sources.list.d/varnish-cache.list
+  echo "deb https://repo.varnish-cache.org/ubuntu/ trusty varnish-4.1" > /etc/apt/sources.list.d/varnish-cache.list
   apt-get update -q
   apt-get install -qq varnish libvarnishapi-dev
   sudo cp /usr/local/share/aclocal/varnish.m4 /usr/share/aclocal/
@@ -118,7 +118,7 @@ Vagrant.configure('2') do |config|
     ]
   end
 
-  config.vm.define :v4 do |machine|
+  config.vm.define :v41 do |machine|
     machine.vm.box = 'ubuntu/trusty64'
     machine.vm.box_version = '=14.04'
     machine.vm.box_check_update = true
@@ -126,7 +126,7 @@ Vagrant.configure('2') do |config|
     machine.vm.provider :virtualbox do |vb|
       vb.customize [
         'modifyvm', :id,
-        '--name', 'libvmod-redis (Varnish 4.x)',
+        '--name', 'libvmod-redis (Varnish 4.1.x)',
       ]
     end
   end

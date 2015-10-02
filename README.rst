@@ -58,7 +58,6 @@ import redis;
 
     # Other.
     Function VOID free()
-    Function VOID fini()
 
 DESCRIPTION
 ===========
@@ -179,10 +178,6 @@ Clustered setup
         redis.push("foo");
         redis.execute();
         set req.http.X-Foo = redis.get_string_reply();
-    }
-
-    sub vcl_fini {
-        redis.fini();
     }
 
 
@@ -598,20 +593,6 @@ Return value
 Description
     Frees memory internally used by Redis commands an replies.
     It's recommended to use this function, but if not called this will be handled automatically during the next call to ``redis.command()``.
-
-fini
-----
-
-Prototype
-        ::
-
-                fini()
-Return value
-    VOID
-Description
-    Closes all established Redis connections in shared pools.
-    Must be used during the ``vcl_fini`` phase.
-    It's recommended to use this function, but if not called this will be handled automatically during the unload of the VCL using the VMOD.
 
 INSTALLATION
 ============

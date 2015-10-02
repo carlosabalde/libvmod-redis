@@ -12,7 +12,7 @@ DESCRIPTION
 
 VMOD using the synchronous hiredis library API to access Redis servers from VCL.
 
-$Init init_function
+$Event init_function
 
 ###############################################################################
 ## Configuration.
@@ -66,4 +66,3 @@ $Function STRING get_array_reply_value(INT)
 ###############################################################################
 
 $Function VOID free()
-$Function VOID fini(PRIV_VCL)

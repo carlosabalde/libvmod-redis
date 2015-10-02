@@ -13,10 +13,6 @@ varnish v1 -vcl+backend {
         redis.add_cserver("${redis_master2}");
         redis.add_cserver("${redis_master3}");
     }
-
-    sub vcl_fini {
-        redis.fini();
-    }
 } -start
 
 client c1 {

@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <hiredis/hiredis.h>
 
+#include "vcl.h"
 #include "vrt.h"
 #include "cache/cache.h"
 #include "vcc_if.h"
@@ -23,45 +24,58 @@ static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_once_t thread_once = PTHREAD_ONCE_INIT;
 static pthread_key_t thread_key;
 
-static thread_state_t *get_thread_state(const struct vrt_ctx *ctx, unsigned drop_reply);
+static thread_state_t *get_thread_state(VRT_CTX, unsigned drop_reply);
 static void make_thread_key();
 
 static redis_server_t *unsafe_add_redis_server(
-    const struct vrt_ctx *ctx, vcl_priv_t *config,
+    VRT_CTX, vcl_priv_t *config,
     const char *tag, const char *location, struct timeval connection_timeout, unsigned context_ttl);
 
-static const char *get_reply(const struct vrt_ctx *ctx, redisReply *reply);
+static const char *get_reply(VRT_CTX, redisReply *reply);
+
+static void fini(vcl_priv_t *config);
 
 /******************************************************************************
  * VMOD INITIALIZATION.
  *****************************************************************************/
 
 int
-init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
+init_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
 {
-    // Initialize global state shared with all VCLs. This code *is
-    // required* to be thread safe.
-    //   - Initialize (once) the key required to store thread-specific data.
-    //   - Increase (every time the VMOD is initialized) the global version.
-    //     This will be used to reestablish Redis connections binded to
-    //     worker threads during reloads. Pooled connections shared between
-    //     threads are stored in the local VCL data structure, which is
-    //     regenerated every time the VMOD is initialized.
-    AZ(pthread_once(&thread_once, make_thread_key));
-    AZ(pthread_mutex_lock(&mutex));
-    version++;
-    AZ(pthread_mutex_unlock(&mutex));
+    // Check event.
+    switch (e) {
+        case VCL_EVENT_LOAD:
+            // Initialize (once) the key required to store thread-specific data.
+            AZ(pthread_once(&thread_once, make_thread_key));
 
-    // Initialize the local VCL data structure and set its free function.
-    // Code initializing / freeing the VCL private data structure *is
-    // not required* to be thread safe.
-    if (vcl_priv->priv == NULL) {
-        vcl_priv->priv = new_vcl_priv(
-            (struct timeval){ 0 },
-            DEFAULT_RETRIES,
-            DEFAULT_SHARED_CONTEXTS,
-            DEFAULT_MAX_CONTEXTS);
-        vcl_priv->free = (vmod_priv_free_f *)free_vcl_priv;
+            // Initialize the local VCL data structure and set its free function.
+            // Code initializing / freeing the VCL private data structure *is
+            // not required* to be thread safe.
+            vcl_priv->priv = new_vcl_priv(
+                (struct timeval){ 0 },
+                DEFAULT_RETRIES,
+                DEFAULT_SHARED_CONTEXTS,
+                DEFAULT_MAX_CONTEXTS);
+            vcl_priv->free = (vmod_priv_free_f *)free_vcl_priv;
+            break;
+
+        case VCL_EVENT_USE:
+            // Every time the VMOD is used by some VCL increase the global
+            // version. This will be used to (1) reestablish Redis connections
+            // binded to worker threads; and (2) regenerate pooled connections
+            // shared between threads (and stored in the local VCL data
+            // structure) every time the VCL is reloaded.
+            AZ(pthread_mutex_lock(&mutex));
+            version++;
+            AZ(pthread_mutex_unlock(&mutex));
+            break;
+
+        case VCL_EVENT_COLD:
+            fini(vcl_priv->priv);
+            break;
+
+        default:
+            break;
     }
 
     // Done!
@@ -74,7 +88,7 @@ init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
 
 VCL_VOID
 vmod_init(
-    const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv,
+    VRT_CTX, struct vmod_priv *vcl_priv,
     VCL_STRING tag, VCL_STRING location, VCL_INT connection_timeout, VCL_INT context_ttl,
     VCL_INT command_timeout, VCL_INT max_cluster_hops,
     VCL_INT retries, VCL_BOOL shared_contexts, VCL_INT max_contexts)
@@ -126,7 +140,7 @@ vmod_init(
 
 VCL_VOID
 vmod_add_server(
-    const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv,
+    VRT_CTX, struct vmod_priv *vcl_priv,
     VCL_STRING tag, VCL_STRING location, VCL_INT connection_timeout, VCL_INT context_ttl)
 {
     // Check input.
@@ -165,7 +179,7 @@ vmod_add_server(
  *****************************************************************************/
 
 VCL_VOID
-vmod_add_cserver(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, VCL_STRING location)
+vmod_add_cserver(VRT_CTX, struct vmod_priv *vcl_priv, VCL_STRING location)
 {
     // Check input.
     if ((location != NULL) && (strlen(location) > 0)) {
@@ -198,7 +212,7 @@ vmod_add_cserver(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, VCL_STRI
  *****************************************************************************/
 
 VCL_VOID
-vmod_command(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, VCL_STRING name)
+vmod_command(VRT_CTX, struct vmod_priv *vcl_priv, VCL_STRING name)
 {
     // Check input.
     if ((name != NULL) && (strlen(name) > 0)) {
@@ -221,7 +235,7 @@ vmod_command(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv, VCL_STRING n
  *****************************************************************************/
 
 VCL_VOID
-vmod_server(const struct vrt_ctx *ctx, VCL_STRING tag)
+vmod_server(VRT_CTX, VCL_STRING tag)
 {
     // Check input.
     if ((tag != NULL) && (strlen(tag) > 0)) {
@@ -242,7 +256,7 @@ vmod_server(const struct vrt_ctx *ctx, VCL_STRING tag)
  *****************************************************************************/
 
 VCL_VOID
-vmod_timeout(const struct vrt_ctx *ctx, VCL_INT command_timeout)
+vmod_timeout(VRT_CTX, VCL_INT command_timeout)
 {
     // Fetch local thread state.
     thread_state_t *state = get_thread_state(ctx, 0);
@@ -260,7 +274,7 @@ vmod_timeout(const struct vrt_ctx *ctx, VCL_INT command_timeout)
  *****************************************************************************/
 
 VCL_VOID
-vmod_push(const struct vrt_ctx *ctx, VCL_STRING arg)
+vmod_push(VRT_CTX, VCL_STRING arg)
 {
     // Fetch local thread state.
     thread_state_t *state = get_thread_state(ctx, 0);
@@ -287,7 +301,7 @@ vmod_push(const struct vrt_ctx *ctx, VCL_STRING arg)
  *****************************************************************************/
 
 VCL_VOID
-vmod_execute(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
+vmod_execute(VRT_CTX, struct vmod_priv *vcl_priv)
 {
     // Initializations.
     vcl_priv_t *config = vcl_priv->priv;
@@ -329,7 +343,7 @@ vmod_execute(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
  *****************************************************************************/
 
 VCL_BOOL
-vmod_replied(const struct vrt_ctx *ctx)
+vmod_replied(VRT_CTX)
 {
     thread_state_t *state = get_thread_state(ctx, 0);
     return (state->reply != NULL);
@@ -346,7 +360,7 @@ vmod_replied(const struct vrt_ctx *ctx)
 
 #define VMOD_REPLY_IS_FOO(lower, upper) \
 VCL_BOOL \
-vmod_reply_is_ ## lower(const struct vrt_ctx *ctx) \
+vmod_reply_is_ ## lower(VRT_CTX) \
 { \
     thread_state_t *state = get_thread_state(ctx, 0); \
     return \
@@ -366,7 +380,7 @@ VMOD_REPLY_IS_FOO(array, ARRAY)
  *****************************************************************************/
 
 VCL_STRING
-vmod_get_reply(const struct vrt_ctx *ctx)
+vmod_get_reply(VRT_CTX)
 {
     thread_state_t *state = get_thread_state(ctx, 0);
     if (state->reply != NULL) {
@@ -384,7 +398,7 @@ vmod_get_reply(const struct vrt_ctx *ctx)
  *****************************************************************************/
 
 VCL_INT
-vmod_get_integer_reply(const struct vrt_ctx *ctx)
+vmod_get_integer_reply(VRT_CTX)
 {
     thread_state_t *state = get_thread_state(ctx, 0);
     if ((state->reply != NULL) &&
@@ -397,7 +411,7 @@ vmod_get_integer_reply(const struct vrt_ctx *ctx)
 
 #define VMOD_GET_FOO_REPLY(lower, upper) \
 VCL_STRING \
-vmod_get_ ## lower ## _reply(const struct vrt_ctx *ctx) \
+vmod_get_ ## lower ## _reply(VRT_CTX) \
 { \
     thread_state_t *state = get_thread_state(ctx, 0); \
     if ((state->reply != NULL) && \
@@ -419,7 +433,7 @@ VMOD_GET_FOO_REPLY(string, STRING)
  *****************************************************************************/
 
 VCL_INT
-vmod_get_array_reply_length(const struct vrt_ctx *ctx)
+vmod_get_array_reply_length(VRT_CTX)
 {
     thread_state_t *state = get_thread_state(ctx, 0);
     if ((state->reply != NULL) &&
@@ -441,7 +455,7 @@ vmod_get_array_reply_length(const struct vrt_ctx *ctx)
 
 #define VMOD_ARRAY_REPLY_IS_FOO(lower, upper) \
 VCL_BOOL \
-vmod_array_reply_is_ ## lower(const struct vrt_ctx *ctx, VCL_INT index) \
+vmod_array_reply_is_ ## lower(VRT_CTX, VCL_INT index) \
 { \
     thread_state_t *state = get_thread_state(ctx, 0); \
     return \
@@ -463,7 +477,7 @@ VMOD_ARRAY_REPLY_IS_FOO(array, ARRAY)
  *****************************************************************************/
 
 VCL_STRING
-vmod_get_array_reply_value(const struct vrt_ctx *ctx, VCL_INT index)
+vmod_get_array_reply_value(VRT_CTX, VCL_INT index)
 {
     thread_state_t *state = get_thread_state(ctx, 0);
     if ((state->reply != NULL) &&
@@ -480,51 +494,9 @@ vmod_get_array_reply_value(const struct vrt_ctx *ctx, VCL_INT index)
  *****************************************************************************/
 
 VCL_VOID
-vmod_free(const struct vrt_ctx *ctx)
+vmod_free(VRT_CTX)
 {
     get_thread_state(ctx, 1);
-}
-
-/******************************************************************************
- * redis.fini();
- *****************************************************************************/
-
-VCL_VOID
-vmod_fini(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
-{
-    // Initializations.
-    vcl_priv_t *config = vcl_priv->priv;
-
-    // Get config lock.
-    AZ(pthread_mutex_lock(&config->mutex));
-
-    // Release contexts in all pools.
-    redis_context_pool_t *ipool;
-    VTAILQ_FOREACH(ipool, &config->pools, list) {
-        // Get pool lock.
-        AZ(pthread_mutex_lock(&ipool->mutex));
-
-        // Release all contexts (both free an busy; this method is assumed
-        // to be called during vcl_fini).
-        ipool->ncontexts = 0;
-        redis_context_t *icontext;
-        while (!VTAILQ_EMPTY(&ipool->free_contexts)) {
-            icontext = VTAILQ_FIRST(&ipool->free_contexts);
-            VTAILQ_REMOVE(&ipool->free_contexts, icontext, list);
-            free_redis_context(icontext);
-        }
-        while (!VTAILQ_EMPTY(&ipool->busy_contexts)) {
-            icontext = VTAILQ_FIRST(&ipool->busy_contexts);
-            VTAILQ_REMOVE(&ipool->busy_contexts, icontext, list);
-            free_redis_context(icontext);
-        }
-
-        // Release pool lock.
-        AZ(pthread_mutex_lock(&ipool->mutex));
-    }
-
-    // Release config lock.
-    AZ(pthread_mutex_unlock(&config->mutex));
 }
 
 /******************************************************************************
@@ -532,7 +504,7 @@ vmod_fini(const struct vrt_ctx *ctx, struct vmod_priv *vcl_priv)
  *****************************************************************************/
 
 static thread_state_t *
-get_thread_state(const struct vrt_ctx *ctx, unsigned flush)
+get_thread_state(VRT_CTX, unsigned flush)
 {
     // Initializations.
     thread_state_t *result = pthread_getspecific(thread_key);
@@ -568,7 +540,7 @@ make_thread_key()
 
 static redis_server_t *
 unsafe_add_redis_server(
-    const struct vrt_ctx *ctx, vcl_priv_t *config,
+    VRT_CTX, vcl_priv_t *config,
     const char *tag, const char *location, struct timeval connection_timeout, unsigned context_ttl)
 {
     // Initializations.
@@ -596,7 +568,7 @@ unsafe_add_redis_server(
 }
 
 static const char *
-get_reply(const struct vrt_ctx *ctx, redisReply *reply)
+get_reply(VRT_CTX, redisReply *reply)
 {
     // Default result.
     const char *result = NULL;
@@ -626,4 +598,38 @@ get_reply(const struct vrt_ctx *ctx, redisReply *reply)
 
     // Done!
     return result;
+}
+
+static void
+fini(vcl_priv_t *config)
+{
+    // Get config lock.
+    AZ(pthread_mutex_lock(&config->mutex));
+
+    // Release contexts in all pools.
+    redis_context_pool_t *ipool;
+    VTAILQ_FOREACH(ipool, &config->pools, list) {
+        // Get pool lock.
+        AZ(pthread_mutex_lock(&ipool->mutex));
+
+        // Release all contexts.
+        ipool->ncontexts = 0;
+        redis_context_t *icontext;
+        while (!VTAILQ_EMPTY(&ipool->free_contexts)) {
+            icontext = VTAILQ_FIRST(&ipool->free_contexts);
+            VTAILQ_REMOVE(&ipool->free_contexts, icontext, list);
+            free_redis_context(icontext);
+        }
+        while (!VTAILQ_EMPTY(&ipool->busy_contexts)) {
+            icontext = VTAILQ_FIRST(&ipool->busy_contexts);
+            VTAILQ_REMOVE(&ipool->busy_contexts, icontext, list);
+            free_redis_context(icontext);
+        }
+
+        // Release pool lock.
+        AZ(pthread_mutex_lock(&ipool->mutex));
+    }
+
+    // Release config lock.
+    AZ(pthread_mutex_unlock(&config->mutex));
 }
