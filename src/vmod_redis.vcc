@@ -26,43 +26,43 @@ $Function VOID add_cserver(PRIV_VCL, STRING)
 ## Command execution.
 ###############################################################################
 
-$Function VOID command(PRIV_VCL, STRING)
-$Function VOID server(STRING)
-$Function VOID timeout(INT)
-$Function VOID push(STRING)
-$Function VOID execute(PRIV_VCL)
+$Function VOID command(PRIV_VCL, PRIV_TASK, STRING)
+$Function VOID server(PRIV_TASK, STRING)
+$Function VOID timeout(PRIV_TASK, INT)
+$Function VOID push(PRIV_TASK, STRING)
+$Function VOID execute(PRIV_VCL, PRIV_TASK)
 
 ###############################################################################
 ## Access to replies.
 ###############################################################################
 
-$Function BOOL replied()
+$Function BOOL replied(PRIV_TASK)
 
-$Function BOOL reply_is_error()
-$Function BOOL reply_is_nil()
-$Function BOOL reply_is_status()
-$Function BOOL reply_is_integer()
-$Function BOOL reply_is_string()
-$Function BOOL reply_is_array()
+$Function BOOL reply_is_error(PRIV_TASK)
+$Function BOOL reply_is_nil(PRIV_TASK)
+$Function BOOL reply_is_status(PRIV_TASK)
+$Function BOOL reply_is_integer(PRIV_TASK)
+$Function BOOL reply_is_string(PRIV_TASK)
+$Function BOOL reply_is_array(PRIV_TASK)
 
-$Function STRING get_reply()
+$Function STRING get_reply(PRIV_TASK)
 
-$Function STRING get_error_reply()
-$Function STRING get_status_reply()
-$Function INT get_integer_reply()
-$Function STRING get_string_reply()
+$Function STRING get_error_reply(PRIV_TASK)
+$Function STRING get_status_reply(PRIV_TASK)
+$Function INT get_integer_reply(PRIV_TASK)
+$Function STRING get_string_reply(PRIV_TASK)
 
-$Function INT get_array_reply_length()
-$Function BOOL array_reply_is_error(INT)
-$Function BOOL array_reply_is_nil(INT)
-$Function BOOL array_reply_is_status(INT)
-$Function BOOL array_reply_is_integer(INT)
-$Function BOOL array_reply_is_string(INT)
-$Function BOOL array_reply_is_array(INT)
-$Function STRING get_array_reply_value(INT)
+$Function INT get_array_reply_length(PRIV_TASK)
+$Function BOOL array_reply_is_error(PRIV_TASK, INT)
+$Function BOOL array_reply_is_nil(PRIV_TASK, INT)
+$Function BOOL array_reply_is_status(PRIV_TASK, INT)
+$Function BOOL array_reply_is_integer(PRIV_TASK, INT)
+$Function BOOL array_reply_is_string(PRIV_TASK, INT)
+$Function BOOL array_reply_is_array(PRIV_TASK, INT)
+$Function STRING get_array_reply_value(PRIV_TASK, INT)
 
 ###############################################################################
 ## Other.
 ###############################################################################
 
-$Function VOID free()
+$Function VOID free(PRIV_TASK)

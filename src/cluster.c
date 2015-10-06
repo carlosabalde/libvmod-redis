@@ -36,7 +36,7 @@ discover_cluster_slots(const struct vrt_ctx *ctx, vcl_priv_t *config)
 
 redisReply *
 cluster_execute(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, thread_state_t *state,
+    const struct vrt_ctx *ctx, vcl_priv_t *config, task_priv_t *state,
     unsigned version, struct timeval timeout, unsigned argc, const char *argv[])
 {
     // Initializations.

@@ -21,11 +21,8 @@ static unsigned version = 0;
 
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static pthread_once_t thread_once = PTHREAD_ONCE_INIT;
-static pthread_key_t thread_key;
-
-static thread_state_t *get_thread_state(VRT_CTX, unsigned drop_reply);
-static void make_thread_key();
+static task_priv_t *get_task_priv(
+    VRT_CTX, struct vmod_priv *task_priv, unsigned drop_reply);
 
 static redis_server_t *unsafe_add_redis_server(
     VRT_CTX, vcl_priv_t *config,
@@ -45,9 +42,6 @@ init_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
     // Check event.
     switch (e) {
         case VCL_EVENT_LOAD:
-            // Initialize (once) the key required to store thread-specific data.
-            AZ(pthread_once(&thread_once, make_thread_key));
-
             // Initialize the local VCL data structure and set its free function.
             // Code initializing / freeing the VCL private data structure *is
             // not required* to be thread safe.
@@ -212,7 +206,9 @@ vmod_add_cserver(VRT_CTX, struct vmod_priv *vcl_priv, VCL_STRING location)
  *****************************************************************************/
 
 VCL_VOID
-vmod_command(VRT_CTX, struct vmod_priv *vcl_priv, VCL_STRING name)
+vmod_command(
+    VRT_CTX, struct vmod_priv *vcl_priv, struct vmod_priv *task_priv,
+    VCL_STRING name)
 {
     // Check input.
     if ((name != NULL) && (strlen(name) > 0)) {
@@ -220,7 +216,7 @@ vmod_command(VRT_CTX, struct vmod_priv *vcl_priv, VCL_STRING name)
         vcl_priv_t *config = vcl_priv->priv;
 
         // Fetch local thread state & flush previous command.
-        thread_state_t *state = get_thread_state(ctx, 1);
+        task_priv_t *state = get_task_priv(ctx, task_priv, 1);
 
         // Initialize.
         state->timeout = config->command_timeout;
@@ -235,12 +231,12 @@ vmod_command(VRT_CTX, struct vmod_priv *vcl_priv, VCL_STRING name)
  *****************************************************************************/
 
 VCL_VOID
-vmod_server(VRT_CTX, VCL_STRING tag)
+vmod_server(VRT_CTX, struct vmod_priv *task_priv, VCL_STRING tag)
 {
     // Check input.
     if ((tag != NULL) && (strlen(tag) > 0)) {
         // Fetch local thread state.
-        thread_state_t *state = get_thread_state(ctx, 0);
+        task_priv_t *state = get_task_priv(ctx, task_priv, 0);
 
         // Do not continue if the initial call to redis.command() was not
         // executed.
@@ -256,10 +252,10 @@ vmod_server(VRT_CTX, VCL_STRING tag)
  *****************************************************************************/
 
 VCL_VOID
-vmod_timeout(VRT_CTX, VCL_INT command_timeout)
+vmod_timeout(VRT_CTX, struct vmod_priv *task_priv, VCL_INT command_timeout)
 {
     // Fetch local thread state.
-    thread_state_t *state = get_thread_state(ctx, 0);
+    task_priv_t *state = get_task_priv(ctx, task_priv, 0);
 
     // Do not continue if the initial call to redis.command() was not
     // executed.
@@ -274,10 +270,10 @@ vmod_timeout(VRT_CTX, VCL_INT command_timeout)
  *****************************************************************************/
 
 VCL_VOID
-vmod_push(VRT_CTX, VCL_STRING arg)
+vmod_push(VRT_CTX, struct vmod_priv *task_priv, VCL_STRING arg)
 {
     // Fetch local thread state.
-    thread_state_t *state = get_thread_state(ctx, 0);
+    task_priv_t *state = get_task_priv(ctx, task_priv, 0);
 
     // Do not continue if the maximum number of allowed arguments has been
     // reached or if the initial call to redis.command() was not executed.
@@ -301,11 +297,11 @@ vmod_push(VRT_CTX, VCL_STRING arg)
  *****************************************************************************/
 
 VCL_VOID
-vmod_execute(VRT_CTX, struct vmod_priv *vcl_priv)
+vmod_execute(VRT_CTX, struct vmod_priv *vcl_priv, struct vmod_priv *task_priv)
 {
     // Initializations.
     vcl_priv_t *config = vcl_priv->priv;
-    thread_state_t *state = get_thread_state(ctx, 0);
+    task_priv_t *state = get_task_priv(ctx, task_priv, 0);
 
     // Do not continue if the initial call to redis.command() was not
     // executed.
@@ -343,9 +339,9 @@ vmod_execute(VRT_CTX, struct vmod_priv *vcl_priv)
  *****************************************************************************/
 
 VCL_BOOL
-vmod_replied(VRT_CTX)
+vmod_replied(VRT_CTX, struct vmod_priv *task_priv)
 {
-    thread_state_t *state = get_thread_state(ctx, 0);
+    task_priv_t *state = get_task_priv(ctx, task_priv, 0);
     return (state->reply != NULL);
 }
 
@@ -360,9 +356,9 @@ vmod_replied(VRT_CTX)
 
 #define VMOD_REPLY_IS_FOO(lower, upper) \
 VCL_BOOL \
-vmod_reply_is_ ## lower(VRT_CTX) \
+vmod_reply_is_ ## lower(VRT_CTX, struct vmod_priv *task_priv) \
 { \
-    thread_state_t *state = get_thread_state(ctx, 0); \
+    task_priv_t *state = get_task_priv(ctx, task_priv, 0); \
     return \
         (state->reply != NULL) && \
         (state->reply->type == REDIS_REPLY_ ## upper); \
@@ -380,9 +376,9 @@ VMOD_REPLY_IS_FOO(array, ARRAY)
  *****************************************************************************/
 
 VCL_STRING
-vmod_get_reply(VRT_CTX)
+vmod_get_reply(VRT_CTX, struct vmod_priv *task_priv)
 {
-    thread_state_t *state = get_thread_state(ctx, 0);
+    task_priv_t *state = get_task_priv(ctx, task_priv, 0);
     if (state->reply != NULL) {
         return get_reply(ctx, state->reply);
     } else {
@@ -398,9 +394,9 @@ vmod_get_reply(VRT_CTX)
  *****************************************************************************/
 
 VCL_INT
-vmod_get_integer_reply(VRT_CTX)
+vmod_get_integer_reply(VRT_CTX, struct vmod_priv *task_priv)
 {
-    thread_state_t *state = get_thread_state(ctx, 0);
+    task_priv_t *state = get_task_priv(ctx, task_priv, 0);
     if ((state->reply != NULL) &&
         (state->reply->type == REDIS_REPLY_INTEGER)) {
         return state->reply->integer;
@@ -411,9 +407,9 @@ vmod_get_integer_reply(VRT_CTX)
 
 #define VMOD_GET_FOO_REPLY(lower, upper) \
 VCL_STRING \
-vmod_get_ ## lower ## _reply(VRT_CTX) \
+vmod_get_ ## lower ## _reply(VRT_CTX, struct vmod_priv *task_priv) \
 { \
-    thread_state_t *state = get_thread_state(ctx, 0); \
+    task_priv_t *state = get_task_priv(ctx, task_priv, 0); \
     if ((state->reply != NULL) && \
         (state->reply->type == REDIS_REPLY_ ## upper)) { \
         char *result = WS_Copy(ctx->ws, state->reply->str, state->reply->len + 1); \
@@ -433,9 +429,9 @@ VMOD_GET_FOO_REPLY(string, STRING)
  *****************************************************************************/
 
 VCL_INT
-vmod_get_array_reply_length(VRT_CTX)
+vmod_get_array_reply_length(VRT_CTX, struct vmod_priv *task_priv)
 {
-    thread_state_t *state = get_thread_state(ctx, 0);
+    task_priv_t *state = get_task_priv(ctx, task_priv, 0);
     if ((state->reply != NULL) &&
         (state->reply->type == REDIS_REPLY_ARRAY)) {
         return state->reply->elements;
@@ -455,9 +451,9 @@ vmod_get_array_reply_length(VRT_CTX)
 
 #define VMOD_ARRAY_REPLY_IS_FOO(lower, upper) \
 VCL_BOOL \
-vmod_array_reply_is_ ## lower(VRT_CTX, VCL_INT index) \
+vmod_array_reply_is_ ## lower(VRT_CTX, struct vmod_priv *task_priv, VCL_INT index) \
 { \
-    thread_state_t *state = get_thread_state(ctx, 0); \
+    task_priv_t *state = get_task_priv(ctx, task_priv, 0); \
     return \
         (state->reply != NULL) && \
         (state->reply->type == REDIS_REPLY_ARRAY) && \
@@ -477,9 +473,9 @@ VMOD_ARRAY_REPLY_IS_FOO(array, ARRAY)
  *****************************************************************************/
 
 VCL_STRING
-vmod_get_array_reply_value(VRT_CTX, VCL_INT index)
+vmod_get_array_reply_value(VRT_CTX, struct vmod_priv *task_priv, VCL_INT index)
 {
-    thread_state_t *state = get_thread_state(ctx, 0);
+    task_priv_t *state = get_task_priv(ctx, task_priv, 0);
     if ((state->reply != NULL) &&
         (state->reply->type == REDIS_REPLY_ARRAY) &&
         (index < state->reply->elements)) {
@@ -494,27 +490,29 @@ vmod_get_array_reply_value(VRT_CTX, VCL_INT index)
  *****************************************************************************/
 
 VCL_VOID
-vmod_free(VRT_CTX)
+vmod_free(VRT_CTX, struct vmod_priv *task_priv)
 {
-    get_thread_state(ctx, 1);
+    get_task_priv(ctx, task_priv, 1);
 }
 
 /******************************************************************************
  * UTILITIES.
  *****************************************************************************/
 
-static thread_state_t *
-get_thread_state(VRT_CTX, unsigned flush)
+static task_priv_t *
+get_task_priv(VRT_CTX, struct vmod_priv *task_priv, unsigned flush)
 {
     // Initializations.
-    thread_state_t *result = pthread_getspecific(thread_key);
+    task_priv_t *result = NULL;
 
     // Create thread state if not created yet.
-    if (result == NULL) {
-        result = new_thread_state();
-        pthread_setspecific(thread_key, result);
+    if (task_priv->priv == NULL) {
+        task_priv->priv = new_task_priv();
+        task_priv->free = (vmod_priv_free_f *)free_task_priv;
+        result = task_priv->priv;
     } else {
-        CHECK_OBJ(result, THREAD_STATE_MAGIC);
+        result = task_priv->priv;
+        CHECK_OBJ(result, TASK_PRIV_MAGIC);
     }
 
     // Drop previously stored Redis command?
@@ -530,12 +528,6 @@ get_thread_state(VRT_CTX, unsigned flush)
 
     // Done!
     return result;
-}
-
-static void
-make_thread_key()
-{
-    AZ(pthread_key_create(&thread_key, (void *) free_thread_state));
 }
 
 static redis_server_t *

@@ -110,9 +110,9 @@ typedef struct vcl_priv {
     VTAILQ_HEAD(,redis_context_pool) pools;
 } vcl_priv_t;
 
-typedef struct thread_state {
+typedef struct task_priv {
     // Object marker.
-#define THREAD_STATE_MAGIC 0xa6bc103e
+#define TASK_PRIV_MAGIC 0xa6bc103e
     unsigned magic;
 
     // Private contexts (allocated in the heap).
@@ -129,7 +129,7 @@ typedef struct thread_state {
     unsigned argc;
     const char *argv[MAX_REDIS_COMMAND_ARGS];
     redisReply *reply;
-} thread_state_t;
+} task_priv_t;
 
 #define REDIS_LOG(ctx, message, ...) \
     do { \
@@ -160,14 +160,14 @@ vcl_priv_t *new_vcl_priv(
     struct timeval command_timeout, unsigned retries, unsigned shared_pool, unsigned max_pool_size);
 void free_vcl_priv(vcl_priv_t *priv);
 
-thread_state_t *new_thread_state();
-void free_thread_state(thread_state_t *state);
+task_priv_t *new_task_priv();
+void free_task_priv(task_priv_t *state);
 
 redis_server_t *unsafe_get_redis_server(vcl_priv_t *config, const char *tag);
 redis_context_pool_t *unsafe_get_context_pool(vcl_priv_t *config, const char *tag);
 
 redisReply *redis_execute(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, thread_state_t *state,
+    const struct vrt_ctx *ctx, vcl_priv_t *config, task_priv_t *state,
     const char *tag, unsigned version, struct timeval timeout, unsigned argc, const char *argv[],
     unsigned asking);
 

@@ -13,11 +13,11 @@
 #include "core.h"
 
 static redis_context_t *lock_redis_context(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, thread_state_t *state,
+    const struct vrt_ctx *ctx, vcl_priv_t *config, task_priv_t *state,
     const char *tag, unsigned version);
 
 static void unlock_redis_context(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, thread_state_t *state,
+    const struct vrt_ctx *ctx, vcl_priv_t *config, task_priv_t *state,
     redis_context_t *context);
 
 static redisReply *get_redis_repy(
@@ -255,11 +255,11 @@ free_vcl_priv(vcl_priv_t *priv)
     FREE_OBJ(priv);
 }
 
-thread_state_t *
-new_thread_state()
+task_priv_t *
+new_task_priv()
 {
-    thread_state_t *result;
-    ALLOC_OBJ(result, THREAD_STATE_MAGIC);
+    task_priv_t *result;
+    ALLOC_OBJ(result, TASK_PRIV_MAGIC);
     AN(result);
 
     result->ncontexts = 0;
@@ -273,7 +273,7 @@ new_thread_state()
 }
 
 void
-free_thread_state(thread_state_t *state)
+free_task_priv(task_priv_t *state)
 {
     state->ncontexts = 0;
     redis_context_t *icontext;
@@ -337,7 +337,7 @@ unsafe_get_context_pool(vcl_priv_t *config, const char *tag)
 
 redisReply *
 redis_execute(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, thread_state_t *state,
+    const struct vrt_ctx *ctx, vcl_priv_t *config, task_priv_t *state,
     const char *tag, unsigned version, struct timeval timeout, unsigned argc, const char *argv[],
     unsigned asking)
 {
@@ -564,7 +564,7 @@ new_rcontext(
 
 static redis_context_t *
 lock_private_redis_context(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, thread_state_t *state,
+    const struct vrt_ctx *ctx, vcl_priv_t *config, task_priv_t *state,
     const char *tag, unsigned version)
 {
     redis_context_t *icontext;
@@ -640,7 +640,7 @@ lock_private_redis_context(
 
 static redis_context_t *
 lock_shared_redis_context(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, thread_state_t *state,
+    const struct vrt_ctx *ctx, vcl_priv_t *config, task_priv_t *state,
     const char *tag, unsigned version)
 {
     redis_context_t *icontext;
@@ -740,7 +740,7 @@ retry:
 
 static redis_context_t *
 lock_redis_context(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, thread_state_t *state,
+    const struct vrt_ctx *ctx, vcl_priv_t *config, task_priv_t *state,
     const char *tag, unsigned version)
 {
     if (config->shared_contexts) {
@@ -774,7 +774,7 @@ unlock_shared_redis_context(
 
 static void
 unlock_redis_context(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, thread_state_t *state,
+    const struct vrt_ctx *ctx, vcl_priv_t *config, task_priv_t *state,
     redis_context_t *context)
 {
     if (config->shared_contexts) {
