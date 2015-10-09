@@ -292,8 +292,6 @@ Description
 
 $Function VOID fini(PRIV_VCL)
 
-Return value
-    VOID
 Description
     Closes all established Redis connections in shared pools. Must be used during
     the ``vcl_fini`` phase. It's recommended to use this function, but if not
