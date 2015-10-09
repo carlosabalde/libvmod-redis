@@ -55,8 +55,6 @@ Arguments
     when Redis Cluster support is enabled, each server is the cluster is
     internally labeled by the VMOD with a different tag (i.e. each server in
     the cluster has its own pool of Redis connections).
-Return value
-    VOID
 Description
     Initializes the Redis module. Must be called during the ``vcl_init`` phase.
 
@@ -76,8 +74,6 @@ Arguments
     the TTL of a connection is consumed, the module transparently reestablishes
     it. See "Client timeouts" in http://redis.io/topics/clients for extra
     information.
-Return value
-    VOID
 Description
     Adds an extra Redis server. Must be used during the ``vcl_init`` phase.
 
@@ -98,8 +94,6 @@ $Function VOID add_cserver(PRIV_VCL, STRING)
 
 Arguments
     location: Redis connection string. Only host + port format is allowed.
-Return value
-    VOID
 Description
     Adds an extra Redis Cluster server. Must be used during the ``vcl_init`` phase.
 
@@ -113,8 +107,6 @@ $Function VOID command(PRIV_VCL, PRIV_TASK, STRING)
 
 Arguments
     name: name of the Redis command to be executed.
-Return value
-    VOID
 Description
     Enqueues a Redis command (only the name of the command) for further
     execution. Arguments should be enqueued separately calling one or more times
@@ -129,8 +121,6 @@ $Function VOID server(PRIV_TASK, STRING)
 Arguments
     tag: tag of the Redis server a previously enqueued Redis command will be
     delivered to (e.g. ``main``, ``master``, ``slave``, ``cluster``, etc.).
-Return value
-    VOID
 Description
     Selects the type of Redis server a previously enqueued Redis command will
     be delivered to.
@@ -144,8 +134,6 @@ $Function VOID timeout(PRIV_TASK, INT)
 Arguments
     command_timeout: command timeout (milliseconds; 0 means no timeout) to be
     used when executing a specific Redis command.
-Return value
-    VOID
 Description
     Allows overriding the default command timeout provided when calling
     ``redis.init()``.
@@ -154,8 +142,6 @@ $Function VOID push(PRIV_TASK, STRING)
 
 Arguments
     name: argument of a previously enqueued Redis command.
-Return value
-    VOID
 Description
     Provides an argument to a previously enqueued Redis command.
 
@@ -169,90 +155,69 @@ Description
 $Function BOOL replied(PRIV_TASK)
 
 Return value
-    BOOL
-Description
-    Returns TRUE if a previously executed Redis command using
+    TRUE if a previously executed Redis command using
     ``redis.execute()`` returned any reply. Not returning a reply usually means
     a failed connection, a connection timeout, etc.
 
 $Function BOOL reply_is_error(PRIV_TASK)
 
 Return value
-    BOOL
-Description
-    Returns TRUE if a previously executed Redis command using
+    TRUE if a previously executed Redis command using
     ``redis.execute()`` returned an error reply.
 
 $Function BOOL reply_is_nil(PRIV_TASK)
 
 Return value
-    BOOL
-Description
-    Returns TRUE if a previously executed Redis command using
+    TRUE if a previously executed Redis command using
     ``redis.execute()`` returned a nil reply.
 
 $Function BOOL reply_is_status(PRIV_TASK)
 
 Return value
-    BOOL
-Description
-    Returns TRUE if a previously executed Redis command using
+    TRUE if a previously executed Redis command using
     ``redis.execute()`` returned a status reply.
 
 $Function BOOL reply_is_integer(PRIV_TASK)
 
 Return value
-    BOOL
-Description
-    Returns TRUE if a previously executed Redis command
+    TRUE if a previously executed Redis command
     ``redis.execute()`` returned an integer reply.
 
 $Function BOOL reply_is_string(PRIV_TASK)
 
 Return value
-    BOOL
-Description
-    Returns TRUE if a previously executed Redis command
+    TRUE if a previously executed Redis command
     ``redis.execute()`` returned a string reply.
 
 $Function BOOL reply_is_array(PRIV_TASK)
 
 Return value
-    BOOL
-Description
-    Returns TRUE if a previously executed Redis command using
+    TRUE if a previously executed Redis command using
     ``redis.execute()`` returned an array reply.
 
 $Function STRING get_reply(PRIV_TASK)
 
 Return value
-    STRING
+    A string representation of the reply of a previously executed
+    Redis command using ``redis.execute()``.
 Description
-    Returns a string representation of the reply of a previously executed
-    Redis command using ``redis.execute()``. Do not use this function to access
-    to array replies.
+    Do not use this function to access to array replies.
 
 $Function STRING get_error_reply(PRIV_TASK)
 
 Return value
-    STRING
-Description
     If a previously executed Redis command using ``redis.execute()`` returned an
     error reply, this function returns a string representation of that reply.
 
 $Function STRING get_status_reply(PRIV_TASK)
 
 Return value
-    STRING
-Description
     If a previously executed Redis command using ``redis.execute()`` returned a
     status reply, this function returns a string representation of that reply.
 
 $Function INT get_integer_reply(PRIV_TASK)
 
 Return value
-    INT
-Description
     If a previously executed Redis command using ``redis.execute()`` returned
     an integer reply, this function returns an integer representation of that
     reply.
@@ -260,24 +225,18 @@ Description
 $Function STRING get_string_reply(PRIV_TASK)
 
 Return value
-    STRING
-Description
     If a previously executed Redis command using ``redis.execute()`` returned
     string reply, this function returns a string representation of that reply.
 
 $Function INT get_array_reply_length(PRIV_TASK)
 
 Return value
-    INT
-Description
     If a previously executed Redis command using ``redis.execute()`` returned
     an array reply, this function returns the number of elements in that reply.
 
 $Function BOOL array_reply_is_error(PRIV_TASK, INT)
 
 Return value
-    BOOL
-Description
     If a previously executed Redis command using ``redis.execute()`` returned
     an array reply, this function returns TRUE if the nth element in that reply
     is an error reply (nested arrays are not supported).
@@ -285,8 +244,6 @@ Description
 $Function BOOL array_reply_is_nil(PRIV_TASK, INT)
 
 Return value
-    BOOL
-Description
     If a previously executed Redis command using ``redis.execute()`` returned an
     array reply, this function returns TRUE if the nth element in that reply is
     a nil reply (nested arrays are not supported).
@@ -294,8 +251,6 @@ Description
 $Function BOOL array_reply_is_status(PRIV_TASK, INT)
 
 Return value
-    BOOL
-Description
     If a previously executed Redis command using ``redis.execute()`` returned an
     array reply, this function returns TRUE if the nth element in that reply is a
     status reply (nested arrays are not supported).
@@ -303,8 +258,6 @@ Description
 $Function BOOL array_reply_is_integer(PRIV_TASK, INT)
 
 Return value
-    BOOL
-Description
     If a previously executed Redis command using ``redis.execute()`` returned an
     array reply, this function returns TRUE if the nth element in that reply is
     an integer reply (nested arrays are not supported).
@@ -312,8 +265,6 @@ Description
 $Function BOOL array_reply_is_string(PRIV_TASK, INT)
 
 Return value
-    BOOL
-Description
     If a previously executed Redis command using ``redis.execute()`` returned an
     array reply, this function returns TRUE if the nth element in that reply is
     a string reply (nested arrays are not supported).
@@ -321,8 +272,6 @@ Description
 $Function BOOL array_reply_is_array(PRIV_TASK, INT)
 
 Return value
-    BOOL
-Description
     If a previously executed Redis command using ``redis.execute()`` returned an
     array reply, this function returns TRUE if the nth element in that reply is
     an array reply (nested arrays are not supported).
@@ -330,16 +279,12 @@ Description
 $Function STRING get_array_reply_value(PRIV_TASK, INT)
 
 Return value
-    STRING
-Description
     If a previously executed Redis command using ``redis.execute()`` returned an
     array reply, this function returns a string representation of the nth element
     in that reply (nested arrays are not supported).
 
 $Function VOID free(PRIV_TASK)
 
-Return value
-    VOID
 Description
     Frees memory internally used by Redis commands an replies. It's recommended to
     use this function, but if not called this will be handled automatically during
