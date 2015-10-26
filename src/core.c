@@ -13,18 +13,18 @@
 #include "core.h"
 
 static redis_context_t *lock_redis_context(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, task_priv_t *state,
+    VRT_CTX, vcl_priv_t *config, task_priv_t *state,
     const char *tag, unsigned version);
 
 static void unlock_redis_context(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, task_priv_t *state,
+    VRT_CTX, vcl_priv_t *config, task_priv_t *state,
     redis_context_t *context);
 
 static redisReply *get_redis_repy(
-    const struct vrt_ctx *ctx, redis_context_t *context,
+    VRT_CTX, redis_context_t *context,
     struct timeval timeout, unsigned argc, const char *argv[], unsigned asking);
 
-static const char *sha1(const struct vrt_ctx *ctx, const char *script);
+static const char *sha1(VRT_CTX, const char *script);
 
 const char *
 new_clustered_redis_server_tag(const char *location)
@@ -337,7 +337,7 @@ unsafe_get_context_pool(vcl_priv_t *config, const char *tag)
 
 redisReply *
 redis_execute(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, task_priv_t *state,
+    VRT_CTX, vcl_priv_t *config, task_priv_t *state,
     const char *tag, unsigned version, struct timeval timeout, unsigned argc, const char *argv[],
     unsigned asking)
 {
@@ -354,9 +354,17 @@ redis_execute(
         if ((strcasecmp(argv[0], "EVAL") == 0) && (argc >= 2)) {
             // Replace EVAL with EVALSHA.
             argv[0] = WS_Copy(ctx->ws, "EVALSHA", -1);
-            AN(argv[0]);
+            if (argv[0] == NULL) {
+                REDIS_LOG(ctx,
+                    "Failed to allocate memory in workspace (%p)",
+                    ctx->ws);
+                return NULL;
+            }
             const char *script = argv[1];
             argv[1] = sha1(ctx, script);
+            if (argv[1] == NULL) {
+                return NULL;
+            }
 
             // Execute the EVALSHA command.
             result = get_redis_repy(ctx, context, timeout, argc, argv, asking);
@@ -370,7 +378,12 @@ redis_execute(
                 (strncmp(result->str, "NOSCRIPT", 8) == 0)) {
                 // Replace EVALSHA with EVAL.
                 argv[0] = WS_Copy(ctx->ws, "EVAL", -1);
-                AN(argv[0]);
+                if (argv[0] == NULL) {
+                    REDIS_LOG(ctx,
+                        "Failed to allocate memory in workspace (%p)",
+                        ctx->ws);
+                    return NULL;
+                }
                 argv[1] = script;
 
                 // Release previous reply object.
@@ -498,7 +511,7 @@ unsafe_pick_context_pool(vcl_priv_t *config, const char *tag)
 
 static redisContext *
 new_rcontext(
-    const struct vrt_ctx *ctx, redis_server_t * server,
+    VRT_CTX, redis_server_t * server,
     unsigned version, time_t now)
 {
     redisContext *result;
@@ -564,7 +577,7 @@ new_rcontext(
 
 static redis_context_t *
 lock_private_redis_context(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, task_priv_t *state,
+    VRT_CTX, vcl_priv_t *config, task_priv_t *state,
     const char *tag, unsigned version)
 {
     redis_context_t *icontext;
@@ -640,7 +653,7 @@ lock_private_redis_context(
 
 static redis_context_t *
 lock_shared_redis_context(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, task_priv_t *state,
+    VRT_CTX, vcl_priv_t *config, task_priv_t *state,
     const char *tag, unsigned version)
 {
     redis_context_t *icontext;
@@ -740,7 +753,7 @@ retry:
 
 static redis_context_t *
 lock_redis_context(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, task_priv_t *state,
+    VRT_CTX, vcl_priv_t *config, task_priv_t *state,
     const char *tag, unsigned version)
 {
     if (config->shared_contexts) {
@@ -752,7 +765,7 @@ lock_redis_context(
 
 static void
 unlock_shared_redis_context(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, redis_context_t *context)
+    VRT_CTX, vcl_priv_t *config, redis_context_t *context)
 {
     // Check input.
     CHECK_OBJ_NOTNULL(context, REDIS_CONTEXT_MAGIC);
@@ -774,7 +787,7 @@ unlock_shared_redis_context(
 
 static void
 unlock_redis_context(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, task_priv_t *state,
+    VRT_CTX, vcl_priv_t *config, task_priv_t *state,
     redis_context_t *context)
 {
     if (config->shared_contexts) {
@@ -784,7 +797,7 @@ unlock_redis_context(
 
 static redisReply *
 get_redis_repy(
-    const struct vrt_ctx *ctx, redis_context_t *context,
+    VRT_CTX, redis_context_t *context,
     struct timeval timeout, unsigned argc, const char *argv[], unsigned asking)
 {
     redisReply *reply;
@@ -817,7 +830,7 @@ get_redis_repy(
 }
 
 static const char *
-sha1(const struct vrt_ctx *ctx, const char *script)
+sha1(VRT_CTX, const char *script)
 {
     // Hash.
     unsigned char buffer[20];
@@ -828,11 +841,16 @@ sha1(const struct vrt_ctx *ctx, const char *script)
 
     // Encode.
     char *result = WS_Alloc(ctx->ws, 41);;
-    AN(result);
-    char *ptr = result;
-    for (int i = 0; i < 20; i++) {
-        sprintf(ptr, "%02x", buffer[i]);
-        ptr += 2;
+    if (result != NULL) {
+        char *ptr = result;
+        for (int i = 0; i < 20; i++) {
+            sprintf(ptr, "%02x", buffer[i]);
+            ptr += 2;
+        }
+    } else {
+        REDIS_LOG(ctx,
+            "Failed to allocate memory in workspace (%p)",
+            ctx->ws);
     }
 
     // Done!

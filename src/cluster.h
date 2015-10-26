@@ -5,10 +5,10 @@
 
 #include "core.h"
 
-void discover_cluster_slots(const struct vrt_ctx *ctx, vcl_priv_t *config);
+void discover_cluster_slots(VRT_CTX, vcl_priv_t *config);
 
 redisReply *cluster_execute(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, task_priv_t *state,
+    VRT_CTX, vcl_priv_t *config, task_priv_t *state,
     unsigned version, struct timeval timeout, unsigned argc, const char *argv[]);
 
 #endif

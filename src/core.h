@@ -167,7 +167,7 @@ redis_server_t *unsafe_get_redis_server(vcl_priv_t *config, const char *tag);
 redis_context_pool_t *unsafe_get_context_pool(vcl_priv_t *config, const char *tag);
 
 redisReply *redis_execute(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, task_priv_t *state,
+    VRT_CTX, vcl_priv_t *config, task_priv_t *state,
     const char *tag, unsigned version, struct timeval timeout, unsigned argc, const char *argv[],
     unsigned asking);
 

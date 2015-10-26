@@ -19,7 +19,7 @@ static redis_server_t * unsafe_add_redis_server(
     vcl_priv_t *config, const char *location);
 
 static void unsafe_discover_slots(
-    const struct vrt_ctx *ctx, vcl_priv_t *config);
+    VRT_CTX, vcl_priv_t *config);
 
 static const char *unsafe_get_cluster_tag(vcl_priv_t *config, const char *key);
 static const char *unsafe_get_random_cluster_tag(vcl_priv_t *config);
@@ -27,7 +27,7 @@ static const char *unsafe_get_random_cluster_tag(vcl_priv_t *config);
 static int get_key_index(const char *command);
 
 void
-discover_cluster_slots(const struct vrt_ctx *ctx, vcl_priv_t *config)
+discover_cluster_slots(VRT_CTX, vcl_priv_t *config)
 {
     AZ(pthread_mutex_lock(&config->mutex));
     unsafe_discover_slots(ctx, config);
@@ -36,7 +36,7 @@ discover_cluster_slots(const struct vrt_ctx *ctx, vcl_priv_t *config)
 
 redisReply *
 cluster_execute(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, task_priv_t *state,
+    VRT_CTX, vcl_priv_t *config, task_priv_t *state,
     unsigned version, struct timeval timeout, unsigned argc, const char *argv[])
 {
     // Initializations.
@@ -204,7 +204,7 @@ unsafe_add_slot(
 }
 
 static void
-unsafe_discover_slots(const struct vrt_ctx *ctx, vcl_priv_t *config)
+unsafe_discover_slots(VRT_CTX, vcl_priv_t *config)
 {
     // Initializations.
     int i;

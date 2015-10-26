@@ -24,6 +24,8 @@ static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static task_priv_t *get_task_priv(
     VRT_CTX, struct vmod_priv *task_priv, unsigned drop_reply);
 
+static void flush_task_priv(task_priv_t *state);
+
 static redis_server_t *unsafe_add_redis_server(
     VRT_CTX, vcl_priv_t *config,
     const char *tag, const char *location, struct timeval connection_timeout, unsigned context_ttl);
@@ -222,7 +224,12 @@ vmod_command(
         state->timeout = config->command_timeout;
         state->argc = 1;
         state->argv[0] = WS_Copy(ctx->ws, name, -1);
-        AN(state->argv[0]);
+        if (state->argv[0] == NULL) {
+            REDIS_LOG(ctx,
+                "Failed to allocate memory in workspace (%p)",
+                ctx->ws);
+            flush_task_priv(state);
+        }
     }
 }
 
@@ -242,7 +249,12 @@ vmod_server(VRT_CTX, struct vmod_priv *task_priv, VCL_STRING tag)
         // executed.
         if (state->argc >= 1) {
             state->tag = WS_Copy(ctx->ws, tag, -1);
-            AN(state->tag);
+            if (state->tag == NULL) {
+                REDIS_LOG(ctx,
+                    "Failed to allocate memory in workspace (%p)",
+                    ctx->ws);
+                flush_task_priv(state);
+            }
         }
     }
 }
@@ -284,7 +296,12 @@ vmod_push(VRT_CTX, struct vmod_priv *task_priv, VCL_STRING arg)
         } else {
             state->argv[state->argc++] = WS_Copy(ctx->ws, "", -1);
         }
-        AN(state->argv[state->argc - 1]);
+        if (state->argv[state->argc - 1] == NULL) {
+            REDIS_LOG(ctx,
+                "Failed to allocate memory in workspace (%p)",
+                ctx->ws);
+            flush_task_priv(state);
+        }
     } else {
         REDIS_LOG(ctx,
             "Failed to push Redis argument (limit is %d)",
@@ -304,8 +321,8 @@ vmod_execute(VRT_CTX, struct vmod_priv *vcl_priv, struct vmod_priv *task_priv)
     task_priv_t *state = get_task_priv(ctx, task_priv, 0);
 
     // Do not continue if the initial call to redis.command() was not
-    // executed.
-    if (state->argc >= 1) {
+    // executed or if the workspace is already overflowed.
+    if ((state->argc >= 1) && (!WS_Overflowed(ctx->ws))) {
         // Clustered vs. classic execution.
         if ((config->clustered) &&
             ((state->tag == NULL) ||
@@ -315,7 +332,9 @@ vmod_execute(VRT_CTX, struct vmod_priv *vcl_priv, struct vmod_priv *task_priv)
                 version, state->timeout, state->argc, state->argv);
         } else {
             int tries = 1 + config->retries;
-            while ((tries > 0) && (state->reply == NULL)) {
+            while ((tries > 0) &&
+                   (state->reply == NULL) &&
+                   (!WS_Overflowed(ctx->ws))) {
                 state->reply = redis_execute(
                     ctx, config, state,
                     state->tag, version, state->timeout, state->argc, state->argv, 0);
@@ -413,7 +432,11 @@ vmod_get_ ## lower ## _reply(VRT_CTX, struct vmod_priv *task_priv) \
     if ((state->reply != NULL) && \
         (state->reply->type == REDIS_REPLY_ ## upper)) { \
         char *result = WS_Copy(ctx->ws, state->reply->str, state->reply->len + 1); \
-        AN(result); \
+        if (result == NULL) { \
+            REDIS_LOG(ctx, \
+                "Failed to allocate memory in workspace (%p)", \
+                ctx->ws); \
+        } \
         return result; \
     } else { \
         return NULL; \
@@ -517,17 +540,23 @@ get_task_priv(VRT_CTX, struct vmod_priv *task_priv, unsigned flush)
 
     // Drop previously stored Redis command?
     if (flush) {
-        result->timeout = (struct timeval){ 0 };
-        result->tag = NULL;
-        result->argc = 0;
-        if (result->reply != NULL) {
-            freeReplyObject(result->reply);
-            result->reply = NULL;
-        }
+        flush_task_priv(result);
     }
 
     // Done!
     return result;
+}
+
+static void
+flush_task_priv(task_priv_t *state)
+{
+    state->timeout = (struct timeval){ 0 };
+    state->tag = NULL;
+    state->argc = 0;
+    if (state->reply != NULL) {
+        freeReplyObject(state->reply);
+        state->reply = NULL;
+    }
 }
 
 static redis_server_t *
@@ -571,12 +600,20 @@ get_reply(VRT_CTX, redisReply *reply)
         case REDIS_REPLY_STATUS:
         case REDIS_REPLY_STRING:
             result = WS_Copy(ctx->ws, reply->str, reply->len + 1);
-            AN(result);
+            if (result == NULL) {
+                REDIS_LOG(ctx,
+                    "Failed to allocate memory in workspace (%p)",
+                    ctx->ws);
+            }
             break;
 
         case REDIS_REPLY_INTEGER:
             result = WS_Printf(ctx->ws, "%lld", reply->integer);
-            AN(result);
+            if (result == NULL) {
+                REDIS_LOG(ctx,
+                    "Failed to allocate memory in workspace (%p)",
+                    ctx->ws);
+            }
             break;
 
         case REDIS_REPLY_ARRAY:
