@@ -17,10 +17,12 @@ static unsigned version = 0;
 
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static task_priv_t *get_task_priv(
-    VRT_CTX, struct vmod_priv *task_priv, unsigned flush);
+static pthread_once_t thread_once = PTHREAD_ONCE_INIT;
+static pthread_key_t thread_key;
 
-static void flush_task_priv(task_priv_t *state);
+static thread_state_t *get_thread_state(VRT_CTX, unsigned flush);
+static void flush_thread_state(thread_state_t *state);
+static void make_thread_key();
 
 static redis_server_t *unsafe_add_redis_server(
     VRT_CTX, struct vmod_redis_db *db, const char *tag, const char *location,
@@ -38,6 +40,9 @@ init_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
     // Check event.
     switch (e) {
         case VCL_EVENT_LOAD:
+            // Initialize (once) the key required to store thread-specific data.
+            AZ(pthread_once(&thread_once, make_thread_key));
+
             // Initialize the local VCL data structure and set its free function.
             // Code initializing / freeing the VCL private data structure *is
             // not required* to be thread safe.
@@ -219,14 +224,12 @@ vmod_db_add_cserver(
  *****************************************************************************/
 
 VCL_VOID
-vmod_db_command(
-    VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *task_priv,
-    VCL_STRING name)
+vmod_db_command(VRT_CTX, struct vmod_redis_db *db, VCL_STRING name)
 {
     // Check input.
     if ((name != NULL) && (strlen(name) > 0)) {
         // Fetch local thread state & flush previous command.
-        task_priv_t *state = get_task_priv(ctx, task_priv, 1);
+        thread_state_t *state = get_thread_state(ctx, 1);
 
         // Initialize.
         state->command.db = db;
@@ -237,7 +240,7 @@ vmod_db_command(
             REDIS_LOG(ctx,
                 "Failed to allocate memory in workspace (%p)",
                 ctx->ws);
-            flush_task_priv(state);
+            flush_thread_state(state);
         }
     }
 }
@@ -247,14 +250,12 @@ vmod_db_command(
  *****************************************************************************/
 
 VCL_VOID
-vmod_db_server(
-    VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *task_priv,
-    VCL_STRING tag)
+vmod_db_server(VRT_CTX, struct vmod_redis_db *db, VCL_STRING tag)
 {
     // Check input.
     if ((tag != NULL) && (strlen(tag) > 0)) {
         // Fetch local thread state.
-        task_priv_t *state = get_task_priv(ctx, task_priv, 0);
+        thread_state_t *state = get_thread_state(ctx, 0);
 
         // Do not continue if the initial call to .command() was not executed
         // or if running this in a different database.
@@ -264,7 +265,7 @@ vmod_db_server(
                 REDIS_LOG(ctx,
                     "Failed to allocate memory in workspace (%p)",
                     ctx->ws);
-                flush_task_priv(state);
+                flush_thread_state(state);
             }
         }
     }
@@ -275,12 +276,10 @@ vmod_db_server(
  *****************************************************************************/
 
 VCL_VOID
-vmod_db_timeout(
-    VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *task_priv,
-    VCL_INT command_timeout)
+vmod_db_timeout(VRT_CTX, struct vmod_redis_db *db, VCL_INT command_timeout)
 {
     // Fetch local thread state.
-    task_priv_t *state = get_task_priv(ctx, task_priv, 0);
+    thread_state_t *state = get_thread_state(ctx, 0);
 
     // Do not continue if the initial call to .command() was not executed.
     // or if running this in a different database.
@@ -295,12 +294,10 @@ vmod_db_timeout(
  *****************************************************************************/
 
 VCL_VOID
-vmod_db_push(
-    VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *task_priv,
-    VCL_STRING arg)
+vmod_db_push(VRT_CTX, struct vmod_redis_db *db, VCL_STRING arg)
 {
     // Fetch local thread state.
-    task_priv_t *state = get_task_priv(ctx, task_priv, 0);
+    thread_state_t *state = get_thread_state(ctx, 0);
 
     // Do not continue if the maximum number of allowed arguments has been
     // reached or if the initial call to .command() was not executed or
@@ -318,7 +315,7 @@ vmod_db_push(
             REDIS_LOG(ctx,
                 "Failed to allocate memory in workspace (%p)",
                 ctx->ws);
-            flush_task_priv(state);
+            flush_thread_state(state);
         }
     } else {
         REDIS_LOG(ctx,
@@ -332,10 +329,10 @@ vmod_db_push(
  *****************************************************************************/
 
 VCL_VOID
-vmod_db_execute(VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *task_priv)
+vmod_db_execute(VRT_CTX, struct vmod_redis_db *db)
 {
     // Fetch local thread state.
-    task_priv_t *state = get_task_priv(ctx, task_priv, 0);
+    thread_state_t *state = get_thread_state(ctx, 0);
 
     // Do not continue if the initial call to redis.command() was not executed
     // or if running this in a different database or if the workspace is
@@ -379,9 +376,9 @@ vmod_db_execute(VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *task_priv)
  *****************************************************************************/
 
 VCL_BOOL
-vmod_db_replied(VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *task_priv)
+vmod_db_replied(VRT_CTX, struct vmod_redis_db *db)
 {
-    task_priv_t *state = get_task_priv(ctx, task_priv, 0);
+    thread_state_t *state = get_thread_state(ctx, 0);
     return (state->command.db == db) && (state->command.reply != NULL);
 }
 
@@ -396,9 +393,9 @@ vmod_db_replied(VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *task_priv)
 
 #define VMOD_STORAGE_REPLY_IS_FOO(lower, upper) \
 VCL_BOOL \
-vmod_db_reply_is_ ## lower(VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *task_priv) \
+vmod_db_reply_is_ ## lower(VRT_CTX, struct vmod_redis_db *db) \
 { \
-    task_priv_t *state = get_task_priv(ctx, task_priv, 0); \
+    thread_state_t *state = get_thread_state(ctx, 0); \
     return \
         (state->command.db == db) && \
         (state->command.reply != NULL) && \
@@ -418,9 +415,9 @@ VMOD_STORAGE_REPLY_IS_FOO(array, ARRAY)
 
 VCL_STRING
 vmod_db_get_reply(
-    VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *task_priv)
+    VRT_CTX, struct vmod_redis_db *db)
 {
-    task_priv_t *state = get_task_priv(ctx, task_priv, 0);
+    thread_state_t *state = get_thread_state(ctx, 0);
     if ((state->command.db == db) &&
         (state->command.reply != NULL)) {
         return get_reply(ctx, state->command.reply);
@@ -438,9 +435,9 @@ vmod_db_get_reply(
 
 VCL_INT
 vmod_db_get_integer_reply(
-    VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *task_priv)
+    VRT_CTX, struct vmod_redis_db *db)
 {
-    task_priv_t *state = get_task_priv(ctx, task_priv, 0);
+    thread_state_t *state = get_thread_state(ctx, 0);
     if ((state->command.db == db) &&
         (state->command.reply != NULL) &&
         (state->command.reply->type == REDIS_REPLY_INTEGER)) {
@@ -452,9 +449,9 @@ vmod_db_get_integer_reply(
 
 #define VMOD_STORAGE_GET_FOO_REPLY(lower, upper) \
 VCL_STRING \
-vmod_db_get_ ## lower ## _reply(VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *task_priv) \
+vmod_db_get_ ## lower ## _reply(VRT_CTX, struct vmod_redis_db *db) \
 { \
-    task_priv_t *state = get_task_priv(ctx, task_priv, 0); \
+    thread_state_t *state = get_thread_state(ctx, 0); \
     if ((state->command.db == db) && \
         (state->command.reply != NULL) && \
         (state->command.reply->type == REDIS_REPLY_ ## upper)) { \
@@ -479,10 +476,9 @@ VMOD_STORAGE_GET_FOO_REPLY(string, STRING)
  *****************************************************************************/
 
 VCL_INT
-vmod_db_get_array_reply_length(
-    VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *task_priv)
+vmod_db_get_array_reply_length(VRT_CTX, struct vmod_redis_db *db)
 {
-    task_priv_t *state = get_task_priv(ctx, task_priv, 0);
+    thread_state_t *state = get_thread_state(ctx, 0);
     if ((state->command.db == db) &&
         (state->command.reply != NULL) &&
         (state->command.reply->type == REDIS_REPLY_ARRAY)) {
@@ -503,9 +499,9 @@ vmod_db_get_array_reply_length(
 
 #define VMOD_STORAGE_ARRAY_REPLY_IS_FOO(lower, upper) \
 VCL_BOOL \
-vmod_db_array_reply_is_ ## lower(VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *task_priv, VCL_INT index) \
+vmod_db_array_reply_is_ ## lower(VRT_CTX, struct vmod_redis_db *db, VCL_INT index) \
 { \
-    task_priv_t *state = get_task_priv(ctx, task_priv, 0); \
+    thread_state_t *state = get_thread_state(ctx, 0); \
     return \
         (state->command.db == db) && \
         (state->command.reply != NULL) && \
@@ -526,10 +522,9 @@ VMOD_STORAGE_ARRAY_REPLY_IS_FOO(array, ARRAY)
  *****************************************************************************/
 
 VCL_STRING
-vmod_db_get_array_reply_value(
-    VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *task_priv, VCL_INT index)
+vmod_db_get_array_reply_value(VRT_CTX, struct vmod_redis_db *db, VCL_INT index)
 {
-    task_priv_t *state = get_task_priv(ctx, task_priv, 0);
+    thread_state_t *state = get_thread_state(ctx, 0);
     if ((state->command.db == db) &&
         (state->command.reply != NULL) &&
         (state->command.reply->type == REDIS_REPLY_ARRAY) &&
@@ -545,9 +540,9 @@ vmod_db_get_array_reply_value(
  *****************************************************************************/
 
 VCL_VOID
-vmod_db_free(VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *task_priv)
+vmod_db_free(VRT_CTX, struct vmod_redis_db *db)
 {
-    get_task_priv(ctx, task_priv, 1);
+    get_thread_state(ctx, 1);
 }
 
 /******************************************************************************
@@ -593,25 +588,23 @@ vmod_db_fini(VRT_CTX, struct vmod_redis_db *db)
  * UTILITIES.
  *****************************************************************************/
 
-static task_priv_t *
-get_task_priv(VRT_CTX, struct vmod_priv *task_priv, unsigned flush)
+static thread_state_t *
+get_thread_state(VRT_CTX, unsigned flush)
 {
     // Initializations.
-    task_priv_t *result = NULL;
+    thread_state_t *result = pthread_getspecific(thread_key);
 
     // Create thread state if not created yet.
-    if (task_priv->priv == NULL) {
-        task_priv->priv = new_task_priv();
-        task_priv->free = (vmod_priv_free_f *)free_task_priv;
-        result = task_priv->priv;
+    if (result == NULL) {
+        result = new_thread_state();
+        pthread_setspecific(thread_key, result);
     } else {
-        result = task_priv->priv;
-        CHECK_OBJ(result, TASK_PRIV_MAGIC);
+        CHECK_OBJ(result, THREAD_STATE_MAGIC);
     }
 
     // Flush enqueued command?
     if (flush) {
-        flush_task_priv(result);
+        flush_thread_state(result);
     }
 
     // Done!
@@ -619,7 +612,7 @@ get_task_priv(VRT_CTX, struct vmod_priv *task_priv, unsigned flush)
 }
 
 static void
-flush_task_priv(task_priv_t *state)
+flush_thread_state(thread_state_t *state)
 {
     state->command.db = NULL;
     state->command.timeout = (struct timeval){ 0 };
@@ -629,6 +622,12 @@ flush_task_priv(task_priv_t *state)
         freeReplyObject(state->command.reply);
         state->command.reply = NULL;
     }
+}
+
+static void
+make_thread_key()
+{
+    AZ(pthread_key_create(&thread_key, (void *) free_thread_state));
 }
 
 static redis_server_t *

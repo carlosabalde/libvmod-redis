@@ -105,7 +105,7 @@ Description
     more cluster servers during startup increases the chances of discover the
     cluster topology if some server is failing.
 
-$Method VOID .command(PRIV_TASK, STRING)
+$Method VOID .command(STRING)
 
 Arguments
     name: name of the Redis command to be executed.
@@ -118,7 +118,7 @@ Description
     commands, which fallback to the original ``EVAL`` command if the Redis
     server returns a ``NOSCRIPT`` error (see http://redis.io/commands/eval).
 
-$Method VOID .server(PRIV_TASK, STRING)
+$Method VOID .server(STRING)
 
 Arguments
     tag: tag of the Redis server a previously enqueued Redis command will be
@@ -131,7 +131,7 @@ Description
     selected connection / server will be used (see ``.add_server()`` for
     extra information).
 
-$Method VOID .timeout(PRIV_TASK, INT)
+$Method VOID .timeout(INT)
 
 Arguments
     command_timeout: command timeout (milliseconds; 0 means no timeout) to be
@@ -140,64 +140,64 @@ Description
     Allows overriding the default command timeout provided when calling
     ``redis.db()``.
 
-$Method VOID .push(PRIV_TASK, STRING)
+$Method VOID .push(STRING)
 
 Arguments
     name: argument of a previously enqueued Redis command.
 Description
     Provides an argument to a previously enqueued Redis command.
 
-$Method VOID .execute(PRIV_TASK)
+$Method VOID .execute()
 
 Return value
     VOID
 Description
     Executes a previously enqueued Redis command.
 
-$Method BOOL .replied(PRIV_TASK)
+$Method BOOL .replied()
 
 Return value
     TRUE if a previously executed Redis command using
     ``.execute()`` returned any reply. Not returning a reply usually means
     a failed connection, a connection timeout, etc.
 
-$Method BOOL .reply_is_error(PRIV_TASK)
+$Method BOOL .reply_is_error()
 
 Return value
     TRUE if a previously executed Redis command using
     ``.execute()`` returned an error reply.
 
-$Method BOOL .reply_is_nil(PRIV_TASK)
+$Method BOOL .reply_is_nil()
 
 Return value
     TRUE if a previously executed Redis command using
     ``.execute()`` returned a nil reply.
 
-$Method BOOL .reply_is_status(PRIV_TASK)
+$Method BOOL .reply_is_status()
 
 Return value
     TRUE if a previously executed Redis command using
     ``.execute()`` returned a status reply.
 
-$Method BOOL .reply_is_integer(PRIV_TASK)
+$Method BOOL .reply_is_integer()
 
 Return value
     TRUE if a previously executed Redis command
     ``.execute()`` returned an integer reply.
 
-$Method BOOL .reply_is_string(PRIV_TASK)
+$Method BOOL .reply_is_string()
 
 Return value
     TRUE if a previously executed Redis command
     ``.execute()`` returned a string reply.
 
-$Method BOOL .reply_is_array(PRIV_TASK)
+$Method BOOL .reply_is_array()
 
 Return value
     TRUE if a previously executed Redis command using
     ``.execute()`` returned an array reply.
 
-$Method STRING .get_reply(PRIV_TASK)
+$Method STRING .get_reply()
 
 Return value
     A string representation of the reply of a previously executed
@@ -205,87 +205,87 @@ Return value
 Description
     Do not use this function to access to array replies.
 
-$Method STRING .get_error_reply(PRIV_TASK)
+$Method STRING .get_error_reply()
 
 Return value
     If a previously executed Redis command using ``.execute()`` returned an
     error reply, this function returns a string representation of that reply.
 
-$Method STRING .get_status_reply(PRIV_TASK)
+$Method STRING .get_status_reply()
 
 Return value
     If a previously executed Redis command using ``.execute()`` returned a
     status reply, this function returns a string representation of that reply.
 
-$Method INT .get_integer_reply(PRIV_TASK)
+$Method INT .get_integer_reply()
 
 Return value
     If a previously executed Redis command using ``.execute()`` returned
     an integer reply, this function returns an integer representation of that
     reply.
 
-$Method STRING .get_string_reply(PRIV_TASK)
+$Method STRING .get_string_reply()
 
 Return value
     If a previously executed Redis command using ``.execute()`` returned
     string reply, this function returns a string representation of that reply.
 
-$Method INT .get_array_reply_length(PRIV_TASK)
+$Method INT .get_array_reply_length()
 
 Return value
     If a previously executed Redis command using ``.execute()`` returned
     an array reply, this function returns the number of elements in that reply.
 
-$Method BOOL .array_reply_is_error(PRIV_TASK, INT)
+$Method BOOL .array_reply_is_error(INT)
 
 Return value
     If a previously executed Redis command using ``.execute()`` returned
     an array reply, this function returns TRUE if the nth element in that reply
     is an error reply (nested arrays are not supported).
 
-$Method BOOL .array_reply_is_nil(PRIV_TASK, INT)
+$Method BOOL .array_reply_is_nil(INT)
 
 Return value
     If a previously executed Redis command using ``.execute()`` returned an
     array reply, this function returns TRUE if the nth element in that reply is
     a nil reply (nested arrays are not supported).
 
-$Method BOOL .array_reply_is_status(PRIV_TASK, INT)
+$Method BOOL .array_reply_is_status(INT)
 
 Return value
     If a previously executed Redis command using ``.execute()`` returned an
     array reply, this function returns TRUE if the nth element in that reply is
     a nil reply (nested arrays are not supported).
 
-$Method BOOL .array_reply_is_integer(PRIV_TASK, INT)
+$Method BOOL .array_reply_is_integer(INT)
 
 Return value
     If a previously executed Redis command using ``.execute()`` returned an
     array reply, this function returns TRUE if the nth element in that reply is
     an integer reply (nested arrays are not supported).
 
-$Method BOOL .array_reply_is_string(PRIV_TASK, INT)
+$Method BOOL .array_reply_is_string(INT)
 
 Return value
     If a previously executed Redis command using ``.execute()`` returned an
     array reply, this function returns TRUE if the nth element in that reply is
     a string reply (nested arrays are not supported).
 
-$Method BOOL .array_reply_is_array(PRIV_TASK, INT)
+$Method BOOL .array_reply_is_array(INT)
 
 Return value
     If a previously executed Redis command using ``.execute()`` returned an
     array reply, this function returns TRUE if the nth element in that reply is
     an array reply (nested arrays are not supported).
 
-$Method STRING .get_array_reply_value(PRIV_TASK, INT)
+$Method STRING .get_array_reply_value(INT)
 
 Return value
     If a previously executed Redis command using ``.execute()`` returned an
     array reply, this function returns a string representation of the nth element
     in that reply (nested arrays are not supported).
 
-$Method VOID .free(PRIV_TASK)
+$Method VOID .free()
 
 Description
     Frees memory internally used by Redis commands an replies. It's recommended to

@@ -13,11 +13,11 @@
 #include "core.h"
 
 static redis_context_t *lock_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, task_priv_t *state,
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
     const char *tag, unsigned version);
 
 static void unlock_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, task_priv_t *state,
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
     redis_context_t *context);
 
 static redisReply *get_redis_repy(
@@ -274,11 +274,11 @@ free_vmod_redis_db(struct vmod_redis_db *db)
     FREE_OBJ(db);
 }
 
-task_priv_t *
-new_task_priv()
+thread_state_t *
+new_thread_state()
 {
-    task_priv_t *result;
-    ALLOC_OBJ(result, TASK_PRIV_MAGIC);
+    thread_state_t *result;
+    ALLOC_OBJ(result, THREAD_STATE_MAGIC);
     AN(result);
 
     result->ncontexts = 0;
@@ -294,7 +294,7 @@ new_task_priv()
 }
 
 void
-free_task_priv(task_priv_t *state)
+free_thread_state(thread_state_t *state)
 {
     state->ncontexts = 0;
     redis_context_t *icontext;
@@ -359,7 +359,7 @@ unsafe_get_context_pool(struct vmod_redis_db *db, const char *tag)
 
 redisReply *
 redis_execute(
-    VRT_CTX, struct vmod_redis_db *db, task_priv_t *state,
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
     const char *tag, unsigned version, struct timeval timeout, unsigned argc,
     const char *argv[], unsigned asking)
 {
@@ -597,7 +597,7 @@ new_rcontext(VRT_CTX, redis_server_t * server, unsigned version, time_t now)
 
 static redis_context_t *
 lock_private_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, task_priv_t *state,
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
     const char *tag, unsigned version)
 {
     redis_context_t *icontext;
@@ -674,7 +674,7 @@ lock_private_redis_context(
 
 static redis_context_t *
 lock_shared_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, task_priv_t *state,
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
     const char *tag, unsigned version)
 {
     redis_context_t *icontext;
@@ -774,7 +774,7 @@ retry:
 
 static redis_context_t *
 lock_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, task_priv_t *state,
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
     const char *tag, unsigned version)
 {
     if (db->shared_contexts) {
@@ -808,7 +808,7 @@ unlock_shared_redis_context(
 
 static void
 unlock_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, task_priv_t *state,
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
     redis_context_t *context)
 {
     if (db->shared_contexts) {
