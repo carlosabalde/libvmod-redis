@@ -8,7 +8,6 @@
 
 #include "vrt.h"
 #include "bin/varnishd/cache.h"
-#include "vcc_if.h"
 
 #include "crc16.h"
 #include "core.h"
