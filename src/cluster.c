@@ -8,7 +8,6 @@
 
 #include "vrt.h"
 #include "cache/cache.h"
-#include "vcc_if.h"
 
 #include "crc16.h"
 #include "core.h"
@@ -16,29 +15,28 @@
 
 #define DISCOVERY_COMMAND "CLUSTER SLOTS"
 
-static redis_server_t * unsafe_add_redis_server(
-    vcl_priv_t *config, const char *location);
+static redis_server_t * unsafe_add_redis_server(struct vmod_redis_db *db, const char *location);
 
-static void unsafe_discover_slots(
-    const struct vrt_ctx *ctx, vcl_priv_t *config);
+static void unsafe_discover_slots(VRT_CTX, struct vmod_redis_db *db);
 
-static const char *unsafe_get_cluster_tag(vcl_priv_t *config, const char *key);
-static const char *unsafe_get_random_cluster_tag(vcl_priv_t *config);
+static const char *unsafe_get_cluster_tag(struct vmod_redis_db *db, const char *key);
+static const char *unsafe_get_random_cluster_tag(struct vmod_redis_db *db);
 
 static int get_key_index(const char *command);
 
 void
-discover_cluster_slots(const struct vrt_ctx *ctx, vcl_priv_t *config)
+discover_cluster_slots(
+    VRT_CTX, struct vmod_redis_db *db)
 {
-    AZ(pthread_mutex_lock(&config->mutex));
-    unsafe_discover_slots(ctx, config);
-    AZ(pthread_mutex_unlock(&config->mutex));
+    AZ(pthread_mutex_lock(&db->mutex));
+    unsafe_discover_slots(ctx, db);
+    AZ(pthread_mutex_unlock(&db->mutex));
 }
 
 redisReply *
 cluster_execute(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, thread_state_t *state,
-    unsigned version, struct timeval timeout, unsigned argc, const char *argv[])
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, unsigned version,
+    struct timeval timeout, unsigned retries, unsigned argc, const char *argv[])
 {
     // Initializations.
     redisReply *result = NULL;
@@ -47,8 +45,8 @@ cluster_execute(
     int index = get_key_index(argv[0]);
     if ((index > 0) && (index < argc)) {
         // Initializations.
-        int hops = config->max_cluster_hops > 0 ? config->max_cluster_hops : UINT_MAX;
-        int tries = 1 + config->retries;
+        int hops = db->cluster.max_hops > 0 ? db->cluster.max_hops : UINT_MAX;
+        int tries = 1 + retries;
         const char *tag = NULL;
         unsigned asking = 0;
         unsigned random = 0;
@@ -62,21 +60,21 @@ cluster_execute(
             // running in clustered mode (servers are never deleted; at least one
             // clustered server must exist).
             if (!asking) {
-                AZ(pthread_mutex_lock(&config->mutex));
+                AZ(pthread_mutex_lock(&db->mutex));
                 if (!random) {
-                    tag = unsafe_get_cluster_tag(config, argv[index]);
+                    tag = unsafe_get_cluster_tag(db, argv[index]);
                     if (tag == NULL) {
-                        tag = unsafe_get_random_cluster_tag(config);
+                        tag = unsafe_get_random_cluster_tag(db);
                     }
                 } else {
-                    tag = unsafe_get_random_cluster_tag(config);
+                    tag = unsafe_get_random_cluster_tag(db);
                 }
-                AZ(pthread_mutex_unlock(&config->mutex));
+                AZ(pthread_mutex_unlock(&db->mutex));
             }
             AN(tag);
 
             // Execute command.
-            result = redis_execute(ctx, config, state, tag, version, timeout, argc, argv, asking);
+            result = redis_execute(ctx, db, state, tag, version, timeout, argc, argv, asking);
 
             // Reset flags.
             tag = NULL;
@@ -90,13 +88,13 @@ cluster_execute(
                     ((strncmp(result->str, "MOVED", 5) == 0) ||
                      (strncmp(result->str, "ASK", 3) == 0))) {
                     // ASK vs. MOVED.
-                    AZ(pthread_mutex_lock(&config->mutex));
+                    AZ(pthread_mutex_lock(&db->mutex));
                     if (strncmp(result->str, "MOVED", 3) == 0) {
                         // Ignore reply and rediscover the cluster topology.
                         // XXX: at the moment this implementation may result in
                         // multiple threads executing multiple -serialized-
                         // cluster discoveries.
-                        unsafe_discover_slots(ctx, config);
+                        unsafe_discover_slots(ctx, db);
                     } else {
                         // Extract location (e.g. ASK 3999 127.0.0.1:6381).
                         char *ptr = strchr(result->str, ' ');
@@ -110,10 +108,10 @@ cluster_execute(
 
                         // Add server and use its tag.
                         redis_server_t *server = unsafe_add_redis_server(
-                            config, location);
+                            db, location);
                         tag = server->tag;
                     }
-                    AZ(pthread_mutex_unlock(&config->mutex));
+                    AZ(pthread_mutex_unlock(&db->mutex));
 
                     // Release reply object.
                     freeReplyObject(result);
@@ -156,25 +154,26 @@ cluster_execute(
  *****************************************************************************/
 
 static redis_server_t *
-unsafe_add_redis_server(vcl_priv_t *config, const char *location)
+unsafe_add_redis_server(struct vmod_redis_db *db, const char *location)
 {
     // Initializations.
     redis_server_t *result = NULL;
     const char *tag = new_clustered_redis_server_tag(location);
 
     // Register new server & slot if required.
-    result = unsafe_get_redis_server(config, tag);
+    result = unsafe_get_redis_server(db, tag);
     if (result == NULL) {
         // Add new server.
         result = new_redis_server(
-            CLUSTERED_REDIS_SERVER_TAG, location, config->connection_timeout, config->context_ttl);
+            db, NULL, location, 1,
+            db->cluster.connection_timeout, db->cluster.context_ttl);
         AN(result);
-        VTAILQ_INSERT_TAIL(&config->servers, result, list);
+        VTAILQ_INSERT_TAIL(&db->servers, result, list);
 
         // If required, add new pool.
-        if (unsafe_get_context_pool(config, result->tag) == NULL) {
+        if (unsafe_get_context_pool(db, result->tag) == NULL) {
             redis_context_pool_t *pool = new_redis_context_pool(result->tag);
-            VTAILQ_INSERT_TAIL(&config->pools, pool, list);
+            VTAILQ_INSERT_TAIL(&db->pools, pool, list);
         }
     }
 
@@ -187,25 +186,25 @@ unsafe_add_redis_server(vcl_priv_t *config, const char *location)
 
 static const char *
 unsafe_add_slot(
-    vcl_priv_t *config,
+    struct vmod_redis_db *db,
     unsigned start, unsigned stop, const char *location)
 {
     // Register new server & slot if required.
-    redis_server_t *server = unsafe_add_redis_server(config, location);
+    redis_server_t *server = unsafe_add_redis_server(db, location);
 
     // Add new slot (and release previous one, if required).
-    if (config->slots[stop] != NULL) {
-        free((void *) (config->slots[stop]));
+    if (db->cluster.slots[stop] != NULL) {
+        free((void *) (db->cluster.slots[stop]));
     }
-    config->slots[stop] = strdup(server->tag);
-    AN(config->slots[stop]);
+    db->cluster.slots[stop] = strdup(server->tag);
+    AN(db->cluster.slots[stop]);
 
     // Done!
-    return config->slots[stop];
+    return db->cluster.slots[stop];
 }
 
 static void
-unsafe_discover_slots(const struct vrt_ctx *ctx, vcl_priv_t *config)
+unsafe_discover_slots(VRT_CTX, struct vmod_redis_db *db)
 {
     // Initializations.
     int i;
@@ -214,14 +213,17 @@ unsafe_discover_slots(const struct vrt_ctx *ctx, vcl_priv_t *config)
 
     // Reset previous slots.
     for (i = 0; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
-        config->slots[i] = NULL;
+        db->cluster.slots[i] = NULL;
     }
 
     // Contact already known clustered servers and try to fetch the
-    // slots-servers mapping.
+    // slots-servers mapping: the current implementation does not allow
+    // mixing in a database clustered and standalone servers. All servers
+    // in the list will be clustered (i.e. the iserver->db->cluster.enabled
+    // check is not really useful).
     redis_server_t *iserver;
-    VTAILQ_FOREACH(iserver, &config->servers, list) {
-        if (iserver->clustered) {
+    VTAILQ_FOREACH(iserver, &db->servers, list) {
+        if (iserver->db->cluster.enabled) {
             // Check server.
             CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
             assert(iserver->type == REDIS_SERVER_HOST_TYPE);
@@ -243,7 +245,7 @@ unsafe_discover_slots(const struct vrt_ctx *ctx, vcl_priv_t *config)
             // Check context.
             if (!rcontext->err) {
                 // Set command execution timeout.
-                int tr = redisSetTimeout(rcontext, config->command_timeout);
+                int tr = redisSetTimeout(rcontext, db->command_timeout);
                 if (tr != REDIS_OK) {
                     REDIS_LOG(ctx, "Failed to set command execution timeout (%d)", tr);
                 }
@@ -273,7 +275,7 @@ unsafe_discover_slots(const struct vrt_ctx *ctx, vcl_priv_t *config)
                                 snprintf(
                                     location, sizeof(location),
                                     "%s:%d", host, port);
-                                unsafe_add_slot(config, start, end, location);
+                                unsafe_add_slot(db, start, end, location);
                             }
                         }
                     }
@@ -366,7 +368,7 @@ get_cluster_slot(const char *key)
 }
 
 static const char *
-unsafe_get_cluster_tag(vcl_priv_t *config, const char *key)
+unsafe_get_cluster_tag(struct vmod_redis_db *db, const char *key)
 {
     // Initializations.
     const char *result = NULL;
@@ -374,8 +376,8 @@ unsafe_get_cluster_tag(vcl_priv_t *config, const char *key)
     // Select a tag according with the current slots-tags mapping.
     unsigned slot = get_cluster_slot(key);
     for (int i = slot; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
-        if (config->slots[i] != NULL) {
-            result = config->slots[i];
+        if (db->cluster.slots[i] != NULL) {
+            result = db->cluster.slots[i];
             break;
         }
     }
@@ -385,23 +387,26 @@ unsafe_get_cluster_tag(vcl_priv_t *config, const char *key)
 }
 
 static const char *
-unsafe_get_random_cluster_tag(vcl_priv_t *config)
+unsafe_get_random_cluster_tag(struct vmod_redis_db *db)
 {
     // Initializations.
     const char *result = NULL;
 
-    // Look for a clustered server.
+    // Look for a clustered server: the current implementation does not allow
+    // mixing in a database clustered and standalone servers. The first server
+    // in the list will always be clustered (i.e. the iserver->db->cluster.enabled
+    // is not really useful).
     redis_server_t *iserver;
-    VTAILQ_FOREACH(iserver, &config->servers, list) {
-        if (iserver->clustered) {
+    VTAILQ_FOREACH(iserver, &db->servers, list) {
+        if (iserver->db->cluster.enabled) {
             // Found!
             CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
             result = iserver->tag;
 
             // Move the server to the end of the list (this ensures a nice
             // distribution of load between all available servers).
-            VTAILQ_REMOVE(&config->servers, iserver, list);
-            VTAILQ_INSERT_TAIL(&config->servers, iserver, list);
+            VTAILQ_REMOVE(&db->servers, iserver, list);
+            VTAILQ_INSERT_TAIL(&db->servers, iserver, list);
 
             // Done!
             break;

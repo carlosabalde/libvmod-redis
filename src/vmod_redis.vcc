@@ -13,57 +13,306 @@ DESCRIPTION
 VMOD using the synchronous hiredis library API to access Redis servers from VCL.
 
 $Init init_function
+$Object db(STRING, STRING, INT, INT, INT, INT, INT, BOOL, INT)
 
-###############################################################################
-## Configuration.
-###############################################################################
+Arguments
+    tag: name tagging the Redis server in some category (e.g. ``main``,
+    ``master``, ``slave``, etc.). When using the reserved tag ``cluster`` the
+    VMOD internally enables the Redis Cluster support, automatically discovering
+    other servers in the cluster using the command ``CLUSTER SLOTS``.
 
-$Function VOID init(PRIV_VCL, STRING, STRING, INT, INT, INT, INT, INT, BOOL, INT)
-$Function VOID add_server(PRIV_VCL, STRING, STRING, INT, INT)
-$Function VOID add_cserver(PRIV_VCL, STRING)
+    location: Redis connection string. Both host + port and UNIX sockets are
+    supported. If this is a Redis Cluster server only host + port format is
+    allowed.
 
-###############################################################################
-## Command execution.
-###############################################################################
+    connection_timeout: connection timeout (milliseconds; 0 means no timeout)
+    to the Redis server. If Redis Cluster support has been enabled all servers
+    in the cluster will use this timeout.
 
-$Function VOID command(PRIV_VCL, STRING)
-$Function VOID server(STRING)
-$Function VOID timeout(INT)
-$Function VOID push(STRING)
-$Function VOID execute(PRIV_VCL)
+    connection_ttl: TTL (seconds) of Redis connections (0 means no TTL). Once
+    the TTL of a connection is consumed, the module transparently reestablishes
+    it. See "Client timeouts" in http://redis.io/topics/clients for extra
+    information. If Redis Cluster support has been enabled all servers in the
+    cluster will use this TTL.
 
-###############################################################################
-## Access to replies.
-###############################################################################
+    command_timeout: command timeout (milliseconds; 0 means no timeout) when
+    executing a Redis command. If Redis Cluster support has been enabled this
+    value will be used for all command executions (unless something different
+    is specified with ``.timeout()``).
 
-$Function BOOL replied()
+    command_retries: number of retries to be executed after a failed command
+    execution. If Redis Cluster support has been enabled this value will be
+    used for all command executions (unless something different is specified
+    with ``.retries()``).
 
-$Function BOOL reply_is_error()
-$Function BOOL reply_is_nil()
-$Function BOOL reply_is_status()
-$Function BOOL reply_is_integer()
-$Function BOOL reply_is_string()
-$Function BOOL reply_is_array()
+    max_cluster_hops: maximum number of redirections (0 means no limit) when
+    executing a command and Redis Cluster support has been enabled.
 
-$Function STRING get_reply()
+    shared_contexts: if enabled, Redis connections are not local to Varnish
+    worker threads, but shared by all threads using one or more pools.
 
-$Function STRING get_error_reply()
-$Function STRING get_status_reply()
-$Function INT get_integer_reply()
-$Function STRING get_string_reply()
+    max_contexts:
+        When ``shared_contexts`` is enabled, the VMOD creates one pool of
+        Redis connections per tag and database instance. This option sets the
+        maximum number of connections in each pool. All Varnish worker threads
+        using the same database instance will share connections in these pools.
+        Pools are not shared between database instances.
 
-$Function INT get_array_reply_length()
-$Function BOOL array_reply_is_error(INT)
-$Function BOOL array_reply_is_nil(INT)
-$Function BOOL array_reply_is_status(INT)
-$Function BOOL array_reply_is_integer(INT)
-$Function BOOL array_reply_is_string(INT)
-$Function BOOL array_reply_is_array(INT)
-$Function STRING get_array_reply_value(INT)
+        Note that when Redis Cluster support is enabled for a database, each
+        server is the cluster is internally labeled by the VMOD with a different
+        tag.
 
-###############################################################################
-## Other.
-###############################################################################
+        When ``shared_contexts`` is disabled, Redis connections are local to
+        each Varnish worker thread. This option sets the maximum number of Redis
+        connections per Varnish worker thread. Each thread keeps up to one
+        connection per tag and database instance. If more than one (database,
+        tag) pair is available, incrementing this limit allows recycling of
+        Redis connections.
 
-$Function VOID free()
-$Function VOID fini(PRIV_VCL)
+        WARNING: when creating multiple database instances, always use the same
+        value in all instances using private contexts. Otherwise you may
+        experience inconsistent behavior.
+Description
+    Creates a new database instance.
+
+$Method VOID .add_server(STRING, STRING, INT, INT)
+
+Arguments
+    tag: name tagging the Redis server in some category (e.g. ``main``,
+    ``master``, ``slave``, etc.). Using the reserved tag ``cluster`` is not
+    allowed.
+
+    location: Redis connection string. Both host + port and UNIX sockets are
+    supported.
+
+    connection_timeout: connection timeout (milliseconds) to the Redis server.
+
+    connection_ttl: TTL (seconds) of Redis connections (0 means no TTL). Once
+    the TTL of a connection is consumed, the module transparently reestablishes
+    it. See "Client timeouts" in http://redis.io/topics/clients for extra
+    information.
+Description
+    Adds an extra Redis server.
+
+    This feature is only available if Redis Custer support has not been enabled
+    when calling ``redis.db()``. Use this feature (1) when using master-slave
+    replication; or (2) when using multiple independent servers; or (3) when
+    using some kind of proxy assisted partitioning
+    (e.g. https://github.com/twitter/twemproxy) and more than one proxy is
+    available.
+
+    When a command is submitted using ``.execute()`` and more than one Redis
+    server is available, the destination server is selected according with the tag
+    specified with ``.server()``. If not specified a randomly selected connection
+    will be used (if the worker thread / corresponding pool already has any
+    Redis connection established and available), or a new connection to a
+    randomly selected server will be established.
+
+$Method VOID .add_cserver(STRING)
+
+Arguments
+    location: Redis connection string. Only host + port format is allowed.
+Description
+    Adds an extra Redis Cluster server.
+
+    This feature is only available once Redis Custer support has been enabled
+    when calling ``redis.db()``. Other servers in the cluster are automatically
+    discovered by the VMOD using the ``CLUSTER SLOTS`` commands. Anyway, knowing
+    more cluster servers during startup increases the chances of discover the
+    cluster topology if some server is failing.
+
+$Method VOID .command(STRING)
+
+Arguments
+    name: name of the Redis command to be executed.
+Description
+    Enqueues a Redis command (only the name of the command) for further
+    execution. Arguments should be enqueued separately calling one or more times
+    to the ``.push()`` method.
+
+    On execution time, ``EVAL`` commands are internally replace by ``EVALSHA``
+    commands, which fallback to the original ``EVAL`` command if the Redis
+    server returns a ``NOSCRIPT`` error (see http://redis.io/commands/eval).
+
+$Method VOID .server(STRING)
+
+Arguments
+    tag: tag of the Redis server a previously enqueued Redis command will be
+    delivered to (e.g. ``main``, ``master``, ``slave``, ``cluster``, etc.).
+Description
+    Selects the type of Redis server a previously enqueued Redis command will
+    be delivered to.
+
+    If not specified and Redis Cluster support hasn't been enabled, a randomly
+    selected connection / server will be used (see ``.add_server()`` for
+    extra information).
+
+$Method VOID .timeout(INT)
+
+Arguments
+    command_timeout: command timeout (milliseconds; 0 means no timeout) to be
+    used when executing a specific Redis command.
+Description
+    Allows overriding the default command timeout provided when calling
+    ``redis.db()``.
+
+$Method VOID .retries(INT)
+
+Arguments
+    command_retries: number of retries to be executed after a failed command
+    execution.
+Description
+    Allows overriding the default number of retries provided when calling
+    ``redis.db()``.
+
+$Method VOID .push(STRING)
+
+Arguments
+    name: argument of a previously enqueued Redis command.
+Description
+    Provides an argument to a previously enqueued Redis command.
+
+$Method VOID .execute()
+
+Return value
+    VOID
+Description
+    Executes a previously enqueued Redis command.
+
+$Method BOOL .replied()
+
+Return value
+    TRUE if a previously executed Redis command using
+    ``.execute()`` returned any reply. Not returning a reply usually means
+    a failed connection, a connection timeout, etc.
+
+$Method BOOL .reply_is_error()
+
+Return value
+    TRUE if a previously executed Redis command using
+    ``.execute()`` returned an error reply.
+
+$Method BOOL .reply_is_nil()
+
+Return value
+    TRUE if a previously executed Redis command using
+    ``.execute()`` returned a nil reply.
+
+$Method BOOL .reply_is_status()
+
+Return value
+    TRUE if a previously executed Redis command using
+    ``.execute()`` returned a status reply.
+
+$Method BOOL .reply_is_integer()
+
+Return value
+    TRUE if a previously executed Redis command
+    ``.execute()`` returned an integer reply.
+
+$Method BOOL .reply_is_string()
+
+Return value
+    TRUE if a previously executed Redis command
+    ``.execute()`` returned a string reply.
+
+$Method BOOL .reply_is_array()
+
+Return value
+    TRUE if a previously executed Redis command using
+    ``.execute()`` returned an array reply.
+
+$Method STRING .get_reply()
+
+Return value
+    A string representation of the reply of a previously executed
+    Redis command using ``.execute()``.
+Description
+    Do not use this function to access to array replies.
+
+$Method STRING .get_error_reply()
+
+Return value
+    If a previously executed Redis command using ``.execute()`` returned an
+    error reply, this function returns a string representation of that reply.
+
+$Method STRING .get_status_reply()
+
+Return value
+    If a previously executed Redis command using ``.execute()`` returned a
+    status reply, this function returns a string representation of that reply.
+
+$Method INT .get_integer_reply()
+
+Return value
+    If a previously executed Redis command using ``.execute()`` returned
+    an integer reply, this function returns an integer representation of that
+    reply.
+
+$Method STRING .get_string_reply()
+
+Return value
+    If a previously executed Redis command using ``.execute()`` returned
+    string reply, this function returns a string representation of that reply.
+
+$Method INT .get_array_reply_length()
+
+Return value
+    If a previously executed Redis command using ``.execute()`` returned
+    an array reply, this function returns the number of elements in that reply.
+
+$Method BOOL .array_reply_is_error(INT)
+
+Return value
+    If a previously executed Redis command using ``.execute()`` returned
+    an array reply, this function returns TRUE if the nth element in that reply
+    is an error reply (nested arrays are not supported).
+
+$Method BOOL .array_reply_is_nil(INT)
+
+Return value
+    If a previously executed Redis command using ``.execute()`` returned an
+    array reply, this function returns TRUE if the nth element in that reply is
+    a nil reply (nested arrays are not supported).
+
+$Method BOOL .array_reply_is_status(INT)
+
+Return value
+    If a previously executed Redis command using ``.execute()`` returned an
+    array reply, this function returns TRUE if the nth element in that reply is
+    a nil reply (nested arrays are not supported).
+
+$Method BOOL .array_reply_is_integer(INT)
+
+Return value
+    If a previously executed Redis command using ``.execute()`` returned an
+    array reply, this function returns TRUE if the nth element in that reply is
+    an integer reply (nested arrays are not supported).
+
+$Method BOOL .array_reply_is_string(INT)
+
+Return value
+    If a previously executed Redis command using ``.execute()`` returned an
+    array reply, this function returns TRUE if the nth element in that reply is
+    a string reply (nested arrays are not supported).
+
+$Method BOOL .array_reply_is_array(INT)
+
+Return value
+    If a previously executed Redis command using ``.execute()`` returned an
+    array reply, this function returns TRUE if the nth element in that reply is
+    an array reply (nested arrays are not supported).
+
+$Method STRING .get_array_reply_value(INT)
+
+Return value
+    If a previously executed Redis command using ``.execute()`` returned an
+    array reply, this function returns a string representation of the nth element
+    in that reply (nested arrays are not supported).
+
+$Method VOID .free()
+
+Description
+    Frees memory internally used by Redis commands an replies. It's recommended to
+    use this function, but if not called this will be handled automatically during
+    the next call to ``.command()`` using the same object.
