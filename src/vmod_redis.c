@@ -487,48 +487,6 @@ vmod_free(struct sess *sp)
 }
 
 /******************************************************************************
- * redis.fini();
- *****************************************************************************/
-
-void
-vmod_fini(struct sess *sp, struct vmod_priv *vcl_priv)
-{
-    // Initializations.
-    vcl_priv_t *config = vcl_priv->priv;
-
-    // Get config lock.
-    AZ(pthread_mutex_lock(&config->mutex));
-
-    // Release contexts in all pools.
-    redis_context_pool_t *ipool;
-    VTAILQ_FOREACH(ipool, &config->pools, list) {
-        // Get pool lock.
-        AZ(pthread_mutex_lock(&ipool->mutex));
-
-        // Release all contexts (both free an busy; this method is assumed
-        // to be called during vcl_fini).
-        ipool->ncontexts = 0;
-        redis_context_t *icontext;
-        while (!VTAILQ_EMPTY(&ipool->free_contexts)) {
-            icontext = VTAILQ_FIRST(&ipool->free_contexts);
-            VTAILQ_REMOVE(&ipool->free_contexts, icontext, list);
-            free_redis_context(icontext);
-        }
-        while (!VTAILQ_EMPTY(&ipool->busy_contexts)) {
-            icontext = VTAILQ_FIRST(&ipool->busy_contexts);
-            VTAILQ_REMOVE(&ipool->busy_contexts, icontext, list);
-            free_redis_context(icontext);
-        }
-
-        // Release pool lock.
-        AZ(pthread_mutex_unlock(&ipool->mutex));
-    }
-
-    // Release config lock.
-    AZ(pthread_mutex_unlock(&config->mutex));
-}
-
-/******************************************************************************
  * UTILITIES.
  *****************************************************************************/
 
