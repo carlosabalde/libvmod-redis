@@ -35,8 +35,8 @@ discover_cluster_slots(
 
 redisReply *
 cluster_execute(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    unsigned version, struct timeval timeout, unsigned argc, const char *argv[])
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, unsigned version,
+    struct timeval timeout, unsigned retries, unsigned argc, const char *argv[])
 {
     // Initializations.
     redisReply *result = NULL;
@@ -46,7 +46,7 @@ cluster_execute(
     if ((index > 0) && (index < argc)) {
         // Initializations.
         int hops = db->cluster.max_hops > 0 ? db->cluster.max_hops : UINT_MAX;
-        int tries = 1 + db->retries;
+        int tries = 1 + retries;
         const char *tag = NULL;
         unsigned asking = 0;
         unsigned random = 0;

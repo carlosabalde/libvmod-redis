@@ -68,8 +68,8 @@ VCL_VOID
 vmod_db__init(
     VRT_CTX, struct vmod_redis_db **db, const char *vcl_name,
     VCL_STRING tag, VCL_STRING location, VCL_INT connection_timeout,
-    VCL_INT context_ttl, VCL_INT command_timeout, VCL_INT max_cluster_hops,
-    VCL_INT retries, VCL_BOOL shared_contexts, VCL_INT max_contexts)
+    VCL_INT context_ttl, VCL_INT command_timeout, VCL_INT command_retries,
+    VCL_INT max_cluster_hops, VCL_BOOL shared_contexts, VCL_INT max_contexts)
 {
     // Assert input.
     CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
@@ -91,7 +91,7 @@ vmod_db__init(
 
         // Create new database instance.
         struct vmod_redis_db *instance = new_vmod_redis_db(
-            command_timeout_tv, retries, shared_contexts, max_contexts);
+            command_timeout_tv, command_retries, shared_contexts, max_contexts);
 
         // Add initial server.
         redis_server_t *server = unsafe_add_redis_server(
@@ -222,6 +222,7 @@ vmod_db_command(VRT_CTX, struct vmod_redis_db *db, VCL_STRING name)
         // Initialize.
         state->command.db = db;
         state->command.timeout = db->command_timeout;
+        state->command.retries = db->command_retries;
         state->command.argc = 1;
         state->command.argv[0] = WS_Copy(ctx->ws, name, -1);
         AN(state->command.argv[0]);
@@ -264,6 +265,23 @@ vmod_db_timeout(VRT_CTX, struct vmod_redis_db *db, VCL_INT command_timeout)
     if ((state->command.argc >= 1) && (state->command.db == db)) {
         state->command.timeout.tv_sec = command_timeout / 1000;
         state->command.timeout.tv_usec = (command_timeout % 1000) * 1000;
+    }
+}
+
+/******************************************************************************
+ * .retries();
+ *****************************************************************************/
+
+VCL_VOID
+vmod_db_retries(VRT_CTX, struct vmod_redis_db *db, VCL_INT command_retries)
+{
+    // Fetch local thread state.
+    thread_state_t *state = get_thread_state(ctx, 0);
+
+    // Do not continue if the initial call to .command() was not executed
+    // or if running this in a different database.
+    if ((state->command.argc >= 1) && (state->command.db == db)) {
+        state->command.retries = command_retries;
     }
 }
 
@@ -315,11 +333,18 @@ vmod_db_execute(VRT_CTX, struct vmod_redis_db *db)
             ((state->command.tag == NULL) ||
              (strcmp(state->command.tag, CLUSTERED_REDIS_SERVER_TAG) == 0))) {
             state->command.reply = cluster_execute(
-                ctx, db, state, version, state->command.timeout,
+                ctx, db, state, version, state->command.timeout, state->command.retries,
                 state->command.argc, state->command.argv);
         } else {
+<<<<<<< HEAD
             int tries = 1 + db->retries;
             while ((tries > 0) && (state->command.reply == NULL)) {
+=======
+            int tries = 1 + state->command.retries;
+            while ((tries > 0) &&
+                   (state->command.reply == NULL) &&
+                   (!WS_Overflowed(ctx->ws))) {
+>>>>>>> 3e11e10... Added .retries() + misc minor improvements
                 state->command.reply = redis_execute(
                     ctx, db, state, state->command.tag, version, state->command.timeout,
                     state->command.argc, state->command.argv, 0);
@@ -569,6 +594,7 @@ get_thread_state(VRT_CTX, unsigned flush)
     if (flush) {
         result->command.db = NULL;
         result->command.timeout = (struct timeval){ 0 };
+        result->command.retries = 0;
         result->command.tag = NULL;
         result->command.argc = 0;
         if (result->command.reply != NULL) {
