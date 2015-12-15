@@ -63,10 +63,6 @@ varnish v1 -vcl+backend {
         set resp.http.Replied-6 = db.replied();
         set resp.http.Reply-6 = db.get_reply();
     }
-
-    sub vcl_fini {
-        db.fini();
-    }
 } -start
 
 client c1 {

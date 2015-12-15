@@ -24,10 +24,6 @@ varnish v1 -vcl+backend {
             set resp.http.Reply-1 = db.get_status_reply();
         }
     }
-
-    sub vcl_fini {
-        db.fini();
-    }
 } -start
 
 client c1 {
@@ -149,10 +145,6 @@ varnish v2 -vcl+backend {
             }
         }
     }
-
-    sub vcl_fini {
-        db.fini();
-    }
 } -start
 
 client c2 -connect ${v2_sock} {
@@ -195,10 +187,6 @@ varnish v3 -vcl+backend {
         if (db.reply_is_string()) {
             set resp.http.Reply-10 = db.get_string_reply();
         }
-    }
-
-    sub vcl_fini {
-        db.fini();
     }
 } -start
 

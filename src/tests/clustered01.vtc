@@ -13,10 +13,6 @@ varnish v1 -vcl+backend {
         db.add_cserver("${redis_master2}");
         db.add_cserver("${redis_master3}");
     }
-
-    sub vcl_fini {
-        db.fini();
-    }
 } -start
 
 client c1 {

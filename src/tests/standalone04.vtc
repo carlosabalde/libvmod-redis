@@ -52,10 +52,6 @@ varnish v1 -vcl+backend {
         db.execute();
         set resp.http.Reply-4 = db.get_reply();
     }
-
-    sub vcl_fini {
-        db.fini();
-    }
 } -start
 
 client c1 {
@@ -109,11 +105,6 @@ varnish v2 -vcl+backend {
         db1.push("bar");
         db1.execute();
         set resp.http.Reply-4 = db1.get_reply();
-    }
-
-    sub vcl_fini {
-        db1.fini();
-        db2.fini();
     }
 } -start
 
