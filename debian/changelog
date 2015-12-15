@@ -1,3 +1,12 @@
+libvmod-redis (0.3.0-1) unstable; urgency=low
+
+  * Added support for multiple clusters
+  * Added .retries()
+  * Removed redis.fini()
+  * Improved manual page
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Tue, 15 Dec 2015 16:00:00 +0100
+
 libvmod-redis (0.2.7-1) unstable; urgency=low
 
   * Fixed memory leak during redis.fini()
