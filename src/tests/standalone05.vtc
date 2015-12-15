@@ -9,59 +9,59 @@ varnish v1 -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
-        redis.init("main", "${redis_master1_address}", 500, 0, 0, 0, 0, false, 1);
+        new db = redis.db("main", "${redis_master1_address}", 500, 0, 0, 0, 0, false, 1);
     }
 
     sub vcl_deliver {
         # Fast command (no timeout).
-        redis.command("SET");
-        redis.push("foo");
-        redis.push("hello");
-        redis.execute();
-        set resp.http.Replied-1 = redis.replied();
-        set resp.http.Reply-1 = redis.get_reply();
+        db.command("SET");
+        db.push("foo");
+        db.push("hello");
+        db.execute();
+        set resp.http.Replied-1 = db.replied();
+        set resp.http.Reply-1 = db.get_reply();
 
         # Slow command (no timeout).
-        redis.command("DEBUG");
-        redis.push("sleep");
-        redis.push("3");
-        redis.execute();
-        set resp.http.Replied-2 = redis.replied();
-        set resp.http.Reply-2 = redis.get_reply();
+        db.command("DEBUG");
+        db.push("sleep");
+        db.push("3");
+        db.execute();
+        set resp.http.Replied-2 = db.replied();
+        set resp.http.Reply-2 = db.get_reply();
 
         # Fast command (1000 ms timeout).
-        redis.command("SET");
-        redis.push("foo");
-        redis.push("hello");
-        redis.timeout(1000);
-        redis.execute();
-        set resp.http.Replied-3 = redis.replied();
-        set resp.http.Reply-3 = redis.get_reply();
+        db.command("SET");
+        db.push("foo");
+        db.push("hello");
+        db.timeout(1000);
+        db.execute();
+        set resp.http.Replied-3 = db.replied();
+        set resp.http.Reply-3 = db.get_reply();
 
         # Slow command (1000 ms timeout).
-        redis.command("DEBUG");
-        redis.push("sleep");
-        redis.push("3");
-        redis.timeout(1000);
-        redis.execute();
-        set resp.http.Replied-4 = redis.replied();
-        set resp.http.Reply-4 = redis.get_reply();
+        db.command("DEBUG");
+        db.push("sleep");
+        db.push("3");
+        db.timeout(1000);
+        db.execute();
+        set resp.http.Replied-4 = db.replied();
+        set resp.http.Reply-4 = db.get_reply();
 
         # Fast command (no timeout).
-        redis.command("SET");
-        redis.push("foo");
-        redis.push("hello");
-        redis.execute();
-        set resp.http.Replied-5 = redis.replied();
-        set resp.http.Reply-5 = redis.get_reply();
+        db.command("SET");
+        db.push("foo");
+        db.push("hello");
+        db.execute();
+        set resp.http.Replied-5 = db.replied();
+        set resp.http.Reply-5 = db.get_reply();
 
         # Slow command (no timeout).
-        redis.command("DEBUG");
-        redis.push("sleep");
-        redis.push("3");
-        redis.execute();
-        set resp.http.Replied-6 = redis.replied();
-        set resp.http.Reply-6 = redis.get_reply();
+        db.command("DEBUG");
+        db.push("sleep");
+        db.push("3");
+        db.execute();
+        set resp.http.Replied-6 = db.replied();
+        set resp.http.Reply-6 = db.get_reply();
     }
 } -start
 

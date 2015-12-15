@@ -1,0 +1,17 @@
+Source: libvmod-redis
+Section: web
+Priority: extra
+Maintainer: Carlos Abalde <carlos.abalde@gmail.com>
+Build-Depends: debhelper (>= 7),
+ build-essential,
+ pkg-config,
+ python-docutils,
+ varnish (>= 4.1.0),
+ libvarnishapi-dev (>= 4.1.0),
+ libhiredis-dev (>= 0.11.0)
+Standards-Version: 3.8.1
+
+Package: libvmod-redis
+Architecture: any
+Depends: varnish (>= 4.1.0), libhiredis0.10 (>= 0.11.0), ${shlibs:Depends}, ${misc:Depends}, ${Varnish:ABI}
+Description: Redis VMOD for Varnish

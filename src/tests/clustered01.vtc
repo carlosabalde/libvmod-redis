@@ -9,9 +9,9 @@ varnish v1 -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
-        redis.init("cluster", "${redis_master1}", 500, 0, 0, 16, 0, true, 32);
-        redis.add_cserver("${redis_master2}");
-        redis.add_cserver("${redis_master3}");
+        new db = redis.db("cluster", "${redis_master1}", 500, 0, 0, 0, 16, true, 32);
+        db.add_cserver("${redis_master2}");
+        db.add_cserver("${redis_master3}");
     }
 } -start
 
