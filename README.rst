@@ -65,7 +65,6 @@ import redis;
 
     # Other.
     Method VOID .free()
-    Method VOID .fini()
 
 EXAMPLES
 ========
@@ -112,10 +111,6 @@ Single server
         }
     }
 
-    sub vcl_fini {
-        db.fini();
-    }
-
 Multiple servers
 ----------------
 
@@ -147,10 +142,6 @@ Multiple servers
         set req.http.X-Foo = db.get_string_reply();
     }
 
-    sub vcl_fini {
-        db.fini();
-    }
-
 Clustered setup
 ---------------
 
@@ -177,10 +168,6 @@ Clustered setup
         db.push("foo");
         db.execute();
         set req.http.X-Foo = db.get_string_reply();
-    }
-
-    sub vcl_fini {
-        db.fini();
     }
 
 INSTALLATION

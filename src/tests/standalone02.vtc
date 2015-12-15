@@ -124,10 +124,6 @@ varnish v1 -vcl+backend {
             set resp.http.Reply-11 = db.get_string_reply();
         }
     }
-
-    sub vcl_fini {
-        db.fini();
-    }
 } -start
 
 client c1 {

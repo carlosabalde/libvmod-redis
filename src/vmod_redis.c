@@ -50,18 +50,18 @@ event_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
             vcl_priv->free = (vmod_priv_free_f *)free_vcl_priv;
             break;
 
-        case VCL_EVENT_USE:
-            // Every time the VMOD is used by some VCL increase the global
-            // version. This will be used to (1) reestablish Redis connections
-            // binded to worker threads; and (2) regenerate pooled connections
-            // shared between threads (and stored in the local VCL data
-            // structure) every time the VCL is reloaded.
+        case VCL_EVENT_WARM:
+            // Increase the global version. This will be used to (1) reestablish
+            // Redis connections binded to worker threads; and (2) regenerate
+            // pooled connections shared between threads.
             AZ(pthread_mutex_lock(&mutex));
             version++;
             AZ(pthread_mutex_unlock(&mutex));
             break;
 
         case VCL_EVENT_COLD:
+            // XXX: how to get the full list of database instances in order to
+            // close pooled connections shared between threads?
             break;
 
         default:
@@ -592,7 +592,7 @@ vmod_db_fini(VRT_CTX, struct vmod_redis_db *db)
         }
 
         // Release pool lock.
-        AZ(pthread_mutex_lock(&ipool->mutex));
+        AZ(pthread_mutex_unlock(&ipool->mutex));
     }
 
     // Release database lock.
