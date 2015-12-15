@@ -336,15 +336,8 @@ vmod_db_execute(VRT_CTX, struct vmod_redis_db *db)
                 ctx, db, state, version, state->command.timeout, state->command.retries,
                 state->command.argc, state->command.argv);
         } else {
-<<<<<<< HEAD
-            int tries = 1 + db->retries;
-            while ((tries > 0) && (state->command.reply == NULL)) {
-=======
             int tries = 1 + state->command.retries;
-            while ((tries > 0) &&
-                   (state->command.reply == NULL) &&
-                   (!WS_Overflowed(ctx->ws))) {
->>>>>>> 3e11e10... Added .retries() + misc minor improvements
+            while ((tries > 0) && (state->command.reply == NULL)) {
                 state->command.reply = redis_execute(
                     ctx, db, state, state->command.tag, version, state->command.timeout,
                     state->command.argc, state->command.argv, 0);
