@@ -25,45 +25,46 @@ import redis;
 ::
 
     # Configuration.
-    Function VOID init(TAG, LOCATION, CONNECTION_TIMEOUT, CONNECTION_TTL, COMMAND_TIMEOUT, MAX_CLUSTER_HOPS, RETRIES, SHARED_CONTEXTS, MAX_CONTEXTS)
-    Function VOID add_server(TAG, LOCATION, CONNECTION_TIMEOUT, CONNECTION_TTL)
-    Function VOID add_cserver(LOCATION)
+    Object db(TAG, LOCATION, CONNECTION_TIMEOUT, CONNECTION_TTL, COMMAND_TIMEOUT, MAX_CLUSTER_HOPS, RETRIES, SHARED_CONTEXTS, MAX_CONTEXTS)
+    Method VOID add_server(TAG, LOCATION, CONNECTION_TIMEOUT, CONNECTION_TTL)
+    Method VOID add_cserver(LOCATION)
 
     # Command execution.
-    Function VOID command(COMMAND)
-    Function VOID server(TAG)
-    Function VOID timeout(COMMAND_TIMEOUT)
-    Function VOID push(ARGUMENT)
-    Function VOID execute()
+    Method VOID .command(COMMAND)
+    Method VOID .server(TAG)
+    Method VOID .timeout(COMMAND_TIMEOUT)
+    Method VOID .push(ARGUMENT)
+    Method VOID .execute()
 
     # Access to replies.
-    Function BOOL replied()
+    Method BOOL .replied()
 
-    Function BOOL reply_is_error()
-    Function BOOL reply_is_nil()
-    Function BOOL reply_is_status()
-    Function BOOL reply_is_integer()
-    Function BOOL reply_is_string()
-    Function BOOL reply_is_array()
+    Method BOOL .reply_is_error()
+    Method BOOL .reply_is_nil()
+    Method BOOL .reply_is_status()
+    Method BOOL .reply_is_integer()
+    Method BOOL .reply_is_string()
+    Method BOOL .reply_is_array()
 
-    Function STRING get_reply()
+    Method STRING .get_reply()
 
-    Function STRING get_error_reply()
-    Function STRING get_status_reply()
-    Function INT get_integer_reply()
-    Function STRING get_string_reply()
+    Method STRING .get_error_reply()
+    Method STRING .get_status_reply()
+    Method INT .get_integer_reply()
+    Method STRING .get_string_reply()
 
-    Function INT get_array_reply_length()
-    Function BOOL array_reply_is_error(INDEX)
-    Function BOOL array_reply_is_nil(INDEX)
-    Function BOOL array_reply_is_status(INDEX)
-    Function BOOL array_reply_is_integer(INDEX)
-    Function BOOL array_reply_is_string(INDEX)
-    Function BOOL array_reply_is_array(INDEX)
-    Function STRING get_array_reply_value(INDEX)
+    Method INT .get_array_reply_length()
+    Method BOOL .array_reply_is_error(INDEX)
+    Method BOOL .array_reply_is_nil(INDEX)
+    Method BOOL .array_reply_is_status(INDEX)
+    Method BOOL .array_reply_is_integer(INDEX)
+    Method BOOL .array_reply_is_string(INDEX)
+    Method BOOL .array_reply_is_array(INDEX)
+    Method STRING .get_array_reply_value(INDEX)
 
     # Other.
-    Function VOID free()
+    Method VOID .free()
+    Method VOID .fini()
 
 EXAMPLES
 ========
@@ -76,38 +77,42 @@ Single server
     sub vcl_init {
         # VMOD configuration: simple case, keeping up to one Redis connection
         # per Varnish worker thread.
-        redis.init("main", "192.168.1.100:6379", 500, 0, 0, 0, 0, false, 1);
+        new db = redis.db("main", "192.168.1.100:6379", 500, 0, 0, 0, 0, false, 1);
     }
 
     sub vcl_deliver {
         # Simple command execution.
-        redis.command("SET");
-        redis.push("foo");
-        redis.push("Hello world!");
-        redis.execute();
+        db.command("SET");
+        db.push("foo");
+        db.push("Hello world!");
+        db.execute();
 
         # LUA scripting.
-        redis.command("EVAL");
-        redis.push({"
+        db.command("EVAL");
+        db.push({"
             redis.call('SET', KEYS[1], ARGV[1]);
             redis.call('SET', KEYS[2], ARGV[1]);
         "});
-        redis.push("2");
-        redis.push("foo");
-        redis.push("bar");
-        redis.push("Atomic hello world!");
-        redis.execute();
+        db.push("2");
+        db.push("foo");
+        db.push("bar");
+        db.push("Atomic hello world!");
+        db.execute();
 
         # Array replies, checking & accessing to reply.
-        redis.command("MGET");
-        redis.push("foo");
-        redis.push("bar");
-        redis.execute();
-        if ((redis.reply_is_array()) &&
-            (redis.get_array_reply_length() == 2)) {
-            set resp.http.X-Foo = redis.get_array_reply_value(0);
-            set resp.http.X-Bar = redis.get_array_reply_value(1);
+        db.command("MGET");
+        db.push("foo");
+        db.push("bar");
+        db.execute();
+        if ((db.reply_is_array()) &&
+            (db.get_array_reply_length() == 2)) {
+            set resp.http.X-Foo = db.get_array_reply_value(0);
+            set resp.http.X-Bar = db.get_array_reply_value(1);
         }
+    }
+
+    sub vcl_fini {
+        db.fini();
     }
 
 Multiple servers
@@ -119,26 +124,30 @@ Multiple servers
         # VMOD configuration: master-slave replication, keeping up to two
         # Redis connections per Varnish worker thread (up to one to the master
         # server & up to one to a randomly selected slave server).
-        redis.init("master", "192.168.1.100:6379", 500, 0, 0, 0, 0, false, 2);
-        redis.add_server("slave", "192.168.1.101:6379", 500, 0);
-        redis.add_server("slave", "192.168.1.102:6379", 500, 0);
-        redis.add_server("slave", "192.168.1.103:6379", 500, 0);
+        new db = redis.db("master", "192.168.1.100:6379", 500, 0, 0, 0, 0, false, 2);
+        db.add_server("slave", "192.168.1.101:6379", 500, 0);
+        db.add_server("slave", "192.168.1.102:6379", 500, 0);
+        db.add_server("slave", "192.168.1.103:6379", 500, 0);
     }
 
     sub vcl_deliver {
         # SET submitted to the master server.
-        redis.command("SET");
-        redis.server("master");
-        redis.push("foo");
-        redis.push("Hello world!");
-        redis.execute();
+        db.command("SET");
+        db.server("master");
+        db.push("foo");
+        db.push("Hello world!");
+        db.execute();
 
         # GET submitted to one of the slave servers.
-        redis.command("GET");
-        redis.server("slave");
-        redis.push("foo");
-        redis.execute();
-        set req.http.X-Foo = redis.get_string_reply();
+        db.command("GET");
+        db.server("slave");
+        db.push("foo");
+        db.execute();
+        set req.http.X-Foo = db.get_string_reply();
+    }
+
+    sub vcl_fini {
+        db.fini();
     }
 
 Clustered setup
@@ -151,22 +160,26 @@ Clustered setup
         # connections per server, all shared between all Varnish worker threads.
         # Two initial cluster servers are provided; remaining servers are
         # automatically discovered.
-        redis.init("cluster", "192.168.1.100:6379", 500, 0, 0, 16, 0, true, 100);
-        redis.add_cserver("192.168.1.101:6379");
+        new db = redis.db("cluster", "192.168.1.100:6379", 500, 0, 0, 16, 0, true, 100, true, 100);
+        db.add_cserver("192.168.1.101:6379");
     }
 
     sub vcl_deliver {
         # SET internally routed to the destination server.
-        redis.command("SET");
-        redis.push("foo");
-        redis.push("Hello world!");
-        redis.execute();
+        db.command("SET");
+        db.push("foo");
+        db.push("Hello world!");
+        db.execute();
 
         # GET internally routed to the destination server.
-        redis.command("GET");
-        redis.push("foo");
-        redis.execute();
-        set req.http.X-Foo = redis.get_string_reply();
+        db.command("GET");
+        db.push("foo");
+        db.execute();
+        set req.http.X-Foo = db.get_string_reply();
+    }
+
+    sub vcl_fini {
+        db.fini();
     }
 
 INSTALLATION

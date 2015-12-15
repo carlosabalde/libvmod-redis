@@ -1,56 +1,60 @@
-varnishtest "Tests multiples servers (shared pool)"
+varnishtest "Tests multiple servers (shared pool)"
 
 server s1 {
    rxreq
    txresp
-} -repeat 1 -start
+} -repeat 2 -start
 
 varnish v1 -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
-        redis.init("s1", "${redis_master1_address}", 500, 0, 0, 0, 0, true, 2);
-        redis.add_server("s2", "${redis_master2_socket}", 500, 0);
+        new db = redis.db("s1", "${redis_master1_address}", 500, 0, 0, 0, 0, true, 2);
+        db.add_server("s2", "${redis_master2_socket}", 500, 0);
     }
 
     sub vcl_deliver {
         # SET (s1) -> GET (s1) -> GET (s2).
-        redis.command("SET");
-        redis.server("s1");
-        redis.push("foo");
-        redis.push("Hello world!");
-        redis.execute();
+        db.command("SET");
+        db.server("s1");
+        db.push("foo");
+        db.push("Hello world!");
+        db.execute();
 
-        redis.command("GET");
-        redis.server("s1");
-        redis.push("foo");
-        redis.execute();
-        set resp.http.Reply-1 = redis.get_reply();
+        db.command("GET");
+        db.server("s1");
+        db.push("foo");
+        db.execute();
+        set resp.http.Reply-1 = db.get_reply();
 
-        redis.command("GET");
-        redis.server("s2");
-        redis.push("foo");
-        redis.execute();
-        set resp.http.Reply-2 = redis.get_reply();
+        db.command("GET");
+        db.server("s2");
+        db.push("foo");
+        db.execute();
+        set resp.http.Reply-2 = db.get_reply();
 
         # SET (s2) -> GET (s2) -> GET (s1).
-        redis.command("SET");
-        redis.server("s2");
-        redis.push("bar");
-        redis.push("Hello world!");
-        redis.execute();
+        db.command("SET");
+        db.server("s2");
+        db.push("bar");
+        db.push("Hello world!");
+        db.execute();
 
-        redis.command("GET");
-        redis.server("s2");
-        redis.push("bar");
-        redis.execute();
-        set resp.http.Reply-3 = redis.get_reply();
+        db.command("GET");
+        db.server("s2");
+        db.push("bar");
+        db.execute();
+        set resp.http.Reply-3 = db.get_reply();
 
-        redis.command("GET");
-        redis.server("s1");
-        redis.push("bar");
-        redis.execute();
-        set resp.http.Reply-4 = redis.get_reply();
+        db.command("GET");
+        db.server("s1");
+        db.push("bar");
+        db.execute();
+        set resp.http.Reply-4 = db.get_reply();
+    }
+
+    sub vcl_fini {
+        db.fini();
     }
 } -start
 
@@ -65,4 +69,64 @@ client c1 {
     expect resp.http.Reply-4 == ""
 } -run
 
+varnish v2 -vcl+backend {
+    import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
+
+    sub vcl_init {
+        new db1 = redis.db("foo", "${redis_master1_address}", 500, 0, 0, 0, 0, true, 1);
+        new db2 = redis.db("foo", "${redis_master2_address}", 500, 0, 0, 0, 0, true, 1);
+    }
+
+    sub vcl_deliver {
+        # SET (db1) -> GET (db1) -> GET (db2).
+        db1.command("SET");
+        db1.push("foo");
+        db1.push("Hello world!");
+        db1.execute();
+
+        db1.command("GET");
+        db1.push("foo");
+        db1.execute();
+        set resp.http.Reply-1 = db1.get_reply();
+
+        db2.command("GET");
+        db2.push("foo");
+        db2.execute();
+        set resp.http.Reply-2 = db2.get_reply();
+
+        # SET (db2) -> GET (db2) -> GET (db1).
+        db2.command("SET");
+        db2.push("bar");
+        db2.push("Hello world!");
+        db2.execute();
+
+        db2.command("GET");
+        db2.push("bar");
+        db2.execute();
+        set resp.http.Reply-3 = db2.get_reply();
+
+        db1.command("GET");
+        db1.push("bar");
+        db1.execute();
+        set resp.http.Reply-4 = db1.get_reply();
+    }
+
+    sub vcl_fini {
+        db1.fini();
+        db2.fini();
+    }
+} -start
+
+client c2 -connect ${v2_sock} {
+    txreq
+    rxresp
+
+    expect resp.http.Reply-1 == "Hello world!"
+    expect resp.http.Reply-2 == ""
+
+    expect resp.http.Reply-3 == "Hello world!"
+    expect resp.http.Reply-4 == ""
+} -run
+
 varnish v1 -expect client_req == 1
+varnish v2 -expect client_req == 1

@@ -13,7 +13,7 @@ DESCRIPTION
 VMOD using the synchronous hiredis library API to access Redis servers from VCL.
 
 $Event init_function
-$Function VOID init(PRIV_VCL, STRING, STRING, INT, INT, INT, INT, INT, BOOL, INT)
+$Object db(STRING, STRING, INT, INT, INT, INT, INT, BOOL, INT)
 
 Arguments
     tag: name tagging the Redis server in some category (e.g. ``main``,
@@ -47,18 +47,19 @@ Arguments
     worker threads, but shared by all threads using one or more pools.
 
     max_contexts: when ``shared_contexts`` is disabled, this option sets the
-    maximum number of Redis connections per Varnish worker thread. Each thread
-    keeps up to one connection per tag. If more than one tag is available,
-    incrementing this limit allows recycling of Redis connections. When
-    ``shared_contexts`` is enabled, the VMOD created one pool per tag; this
-    option sets the maximum number of Redis connections per pool. Note that
-    when Redis Cluster support is enabled, each server is the cluster is
-    internally labeled by the VMOD with a different tag (i.e. each server in
-    the cluster has its own pool of Redis connections).
+    maximum number of Redis connections per Varnish worker thread and database
+    instance. Each thread and database object keeps up to one connection per
+    tag. If more than one tag is available, incrementing this limit allows
+    recycling of Redis connections. When ``shared_contexts`` is enabled,
+    the VMOD creates one pool per tag and database instance; this option sets
+    the maximum number of Redis connections per pool. Note that when Redis
+    Cluster support is enabled for a database, each server is the cluster
+    is internally labeled by the VMOD with a different tag (i.e. each server
+    in the cluster has its own pool of Redis connections).
 Description
-    Initializes the Redis module. Must be called during the ``vcl_init`` phase.
+    Creates a new database instance.
 
-$Function VOID add_server(PRIV_VCL, STRING, STRING, INT, INT)
+$Method VOID .add_server(STRING, STRING, INT, INT)
 
 Arguments
     tag: name tagging the Redis server in some category (e.g. ``main``,
@@ -75,48 +76,49 @@ Arguments
     it. See "Client timeouts" in http://redis.io/topics/clients for extra
     information.
 Description
-    Adds an extra Redis server. Must be used during the ``vcl_init`` phase.
+    Adds an extra Redis server.
 
-    Use this feature (1) when using master-slave replication; or (2) when using
-    multiple independent servers; or (3) when using some kind of proxy assisted
-    partitioning (e.g. https://github.com/twitter/twemproxy) and more than one
-    proxy is available.
+    This feature is only available if Redis Custer support has not been enabled
+    when calling ``redis.db()``. Use this feature (1) when using master-slave
+    replication; or (2) when using multiple independent servers; or (3) when
+    using some kind of proxy assisted partitioning
+    (e.g. https://github.com/twitter/twemproxy) and more than one proxy is
+    available.
 
-    When a command is submitted using ``redis.execute()`` and more than one Redis
+    When a command is submitted using ``.execute()`` and more than one Redis
     server is available, the destination server is selected according with the tag
-    specified with `redis.server()`. If not specified and Redis Cluster support
-    hasn't been enabled, a randomly selected connection will be used (if the
-    worker thread / corresponding pool already has any Redis connection
-    established and available), or a new connection to a randomly selected
-    server will be established.
+    specified with ``.server()``. If not specified a randomly selected connection
+    will be used (if the worker thread / corresponding pool already has any
+    Redis connection established and available), or a new connection to a
+    randomly selected server will be established.
 
-$Function VOID add_cserver(PRIV_VCL, STRING)
+$Method VOID .add_cserver(STRING)
 
 Arguments
     location: Redis connection string. Only host + port format is allowed.
 Description
-    Adds an extra Redis Cluster server. Must be used during the ``vcl_init`` phase.
+    Adds an extra Redis Cluster server.
 
     This feature is only available once Redis Custer support has been enabled
-    when calling ``redis.init()``. Other servers in the cluster are automatically
+    when calling ``redis.db()``. Other servers in the cluster are automatically
     discovered by the VMOD using the ``CLUSTER SLOTS`` commands. Anyway, knowing
     more cluster servers during startup increases the chances of discover the
     cluster topology if some server is failing.
 
-$Function VOID command(PRIV_VCL, PRIV_TASK, STRING)
+$Method VOID .command(PRIV_TASK, STRING)
 
 Arguments
     name: name of the Redis command to be executed.
 Description
     Enqueues a Redis command (only the name of the command) for further
     execution. Arguments should be enqueued separately calling one or more times
-    to the ``redis.push()`` function.
+    to the ``.push()`` method.
 
     On execution time, ``EVAL`` commands are internally replace by ``EVALSHA``
     commands, which fallback to the original ``EVAL`` command if the Redis
     server returns a ``NOSCRIPT`` error (see http://redis.io/commands/eval).
 
-$Function VOID server(PRIV_TASK, STRING)
+$Method VOID .server(PRIV_TASK, STRING)
 
 Arguments
     tag: tag of the Redis server a previously enqueued Redis command will be
@@ -126,166 +128,174 @@ Description
     be delivered to.
 
     If not specified and Redis Cluster support hasn't been enabled, a randomly
-    selected connection / server will be used (see ``redis.add_server()`` for
+    selected connection / server will be used (see ``.add_server()`` for
     extra information).
 
-$Function VOID timeout(PRIV_TASK, INT)
+$Method VOID .timeout(PRIV_TASK, INT)
 
 Arguments
     command_timeout: command timeout (milliseconds; 0 means no timeout) to be
     used when executing a specific Redis command.
 Description
     Allows overriding the default command timeout provided when calling
-    ``redis.init()``.
+    ``redis.db()``.
 
-$Function VOID push(PRIV_TASK, STRING)
+$Method VOID .push(PRIV_TASK, STRING)
 
 Arguments
     name: argument of a previously enqueued Redis command.
 Description
     Provides an argument to a previously enqueued Redis command.
 
-$Function VOID execute(PRIV_VCL, PRIV_TASK)
+$Method VOID .execute(PRIV_TASK)
 
 Return value
     VOID
 Description
     Executes a previously enqueued Redis command.
 
-$Function BOOL replied(PRIV_TASK)
+$Method BOOL .replied(PRIV_TASK)
 
 Return value
     TRUE if a previously executed Redis command using
-    ``redis.execute()`` returned any reply. Not returning a reply usually means
+    ``.execute()`` returned any reply. Not returning a reply usually means
     a failed connection, a connection timeout, etc.
 
-$Function BOOL reply_is_error(PRIV_TASK)
+$Method BOOL .reply_is_error(PRIV_TASK)
 
 Return value
     TRUE if a previously executed Redis command using
-    ``redis.execute()`` returned an error reply.
+    ``.execute()`` returned an error reply.
 
-$Function BOOL reply_is_nil(PRIV_TASK)
-
-Return value
-    TRUE if a previously executed Redis command using
-    ``redis.execute()`` returned a nil reply.
-
-$Function BOOL reply_is_status(PRIV_TASK)
+$Method BOOL .reply_is_nil(PRIV_TASK)
 
 Return value
     TRUE if a previously executed Redis command using
-    ``redis.execute()`` returned a status reply.
+    ``.execute()`` returned a nil reply.
 
-$Function BOOL reply_is_integer(PRIV_TASK)
+$Method BOOL .reply_is_status(PRIV_TASK)
+
+Return value
+    TRUE if a previously executed Redis command using
+    ``.execute()`` returned a status reply.
+
+$Method BOOL .reply_is_integer(PRIV_TASK)
 
 Return value
     TRUE if a previously executed Redis command
-    ``redis.execute()`` returned an integer reply.
+    ``.execute()`` returned an integer reply.
 
-$Function BOOL reply_is_string(PRIV_TASK)
+$Method BOOL .reply_is_string(PRIV_TASK)
 
 Return value
     TRUE if a previously executed Redis command
-    ``redis.execute()`` returned a string reply.
+    ``.execute()`` returned a string reply.
 
-$Function BOOL reply_is_array(PRIV_TASK)
+$Method BOOL .reply_is_array(PRIV_TASK)
 
 Return value
     TRUE if a previously executed Redis command using
-    ``redis.execute()`` returned an array reply.
+    ``.execute()`` returned an array reply.
 
-$Function STRING get_reply(PRIV_TASK)
+$Method STRING .get_reply(PRIV_TASK)
 
 Return value
     A string representation of the reply of a previously executed
-    Redis command using ``redis.execute()``.
+    Redis command using ``.execute()``.
 Description
     Do not use this function to access to array replies.
 
-$Function STRING get_error_reply(PRIV_TASK)
+$Method STRING .get_error_reply(PRIV_TASK)
 
 Return value
-    If a previously executed Redis command using ``redis.execute()`` returned an
+    If a previously executed Redis command using ``.execute()`` returned an
     error reply, this function returns a string representation of that reply.
 
-$Function STRING get_status_reply(PRIV_TASK)
+$Method STRING .get_status_reply(PRIV_TASK)
 
 Return value
-    If a previously executed Redis command using ``redis.execute()`` returned a
+    If a previously executed Redis command using ``.execute()`` returned a
     status reply, this function returns a string representation of that reply.
 
-$Function INT get_integer_reply(PRIV_TASK)
+$Method INT .get_integer_reply(PRIV_TASK)
 
 Return value
-    If a previously executed Redis command using ``redis.execute()`` returned
+    If a previously executed Redis command using ``.execute()`` returned
     an integer reply, this function returns an integer representation of that
     reply.
 
-$Function STRING get_string_reply(PRIV_TASK)
+$Method STRING .get_string_reply(PRIV_TASK)
 
 Return value
-    If a previously executed Redis command using ``redis.execute()`` returned
+    If a previously executed Redis command using ``.execute()`` returned
     string reply, this function returns a string representation of that reply.
 
-$Function INT get_array_reply_length(PRIV_TASK)
+$Method INT .get_array_reply_length(PRIV_TASK)
 
 Return value
-    If a previously executed Redis command using ``redis.execute()`` returned
+    If a previously executed Redis command using ``.execute()`` returned
     an array reply, this function returns the number of elements in that reply.
 
-$Function BOOL array_reply_is_error(PRIV_TASK, INT)
+$Method BOOL .array_reply_is_error(PRIV_TASK, INT)
 
 Return value
-    If a previously executed Redis command using ``redis.execute()`` returned
+    If a previously executed Redis command using ``.execute()`` returned
     an array reply, this function returns TRUE if the nth element in that reply
     is an error reply (nested arrays are not supported).
 
-$Function BOOL array_reply_is_nil(PRIV_TASK, INT)
+$Method BOOL .array_reply_is_nil(PRIV_TASK, INT)
 
 Return value
-    If a previously executed Redis command using ``redis.execute()`` returned an
+    If a previously executed Redis command using ``.execute()`` returned an
     array reply, this function returns TRUE if the nth element in that reply is
     a nil reply (nested arrays are not supported).
 
-$Function BOOL array_reply_is_status(PRIV_TASK, INT)
+$Method BOOL .array_reply_is_status(PRIV_TASK, INT)
 
 Return value
-    If a previously executed Redis command using ``redis.execute()`` returned an
-    array reply, this function returns TRUE if the nth element in that reply is a
-    status reply (nested arrays are not supported).
+    If a previously executed Redis command using ``.execute()`` returned an
+    array reply, this function returns TRUE if the nth element in that reply is
+    a nil reply (nested arrays are not supported).
 
-$Function BOOL array_reply_is_integer(PRIV_TASK, INT)
+$Method BOOL .array_reply_is_integer(PRIV_TASK, INT)
 
 Return value
-    If a previously executed Redis command using ``redis.execute()`` returned an
+    If a previously executed Redis command using ``.execute()`` returned an
     array reply, this function returns TRUE if the nth element in that reply is
     an integer reply (nested arrays are not supported).
 
-$Function BOOL array_reply_is_string(PRIV_TASK, INT)
+$Method BOOL .array_reply_is_string(PRIV_TASK, INT)
 
 Return value
-    If a previously executed Redis command using ``redis.execute()`` returned an
+    If a previously executed Redis command using ``.execute()`` returned an
     array reply, this function returns TRUE if the nth element in that reply is
     a string reply (nested arrays are not supported).
 
-$Function BOOL array_reply_is_array(PRIV_TASK, INT)
+$Method BOOL .array_reply_is_array(PRIV_TASK, INT)
 
 Return value
-    If a previously executed Redis command using ``redis.execute()`` returned an
+    If a previously executed Redis command using ``.execute()`` returned an
     array reply, this function returns TRUE if the nth element in that reply is
     an array reply (nested arrays are not supported).
 
-$Function STRING get_array_reply_value(PRIV_TASK, INT)
+$Method STRING .get_array_reply_value(PRIV_TASK, INT)
 
 Return value
-    If a previously executed Redis command using ``redis.execute()`` returned an
+    If a previously executed Redis command using ``.execute()`` returned an
     array reply, this function returns a string representation of the nth element
     in that reply (nested arrays are not supported).
 
-$Function VOID free(PRIV_TASK)
+$Method VOID .free(PRIV_TASK)
 
 Description
     Frees memory internally used by Redis commands an replies. It's recommended to
     use this function, but if not called this will be handled automatically during
-    the next call to ``redis.command()``.
+    the next call to ``.command()`` using the same object.
+
+$Method VOID .fini()
+
+Description
+    Closes all established Redis connections in shared pools. Must be used during
+    the ``vcl_fini`` phase. It's recommended to use this function, but if not
+    called this will be handled automatically during the unload of the VCL using
+    the VMOD.
