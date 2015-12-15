@@ -521,7 +521,7 @@ vmod_fini(struct sess *sp, struct vmod_priv *vcl_priv)
         }
 
         // Release pool lock.
-        AZ(pthread_mutex_lock(&ipool->mutex));
+        AZ(pthread_mutex_unlock(&ipool->mutex));
     }
 
     // Release config lock.
