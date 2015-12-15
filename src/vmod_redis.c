@@ -558,7 +558,7 @@ vmod_db_fini(VRT_CTX, struct vmod_redis_db *db)
         }
 
         // Release pool lock.
-        AZ(pthread_mutex_lock(&ipool->mutex));
+        AZ(pthread_mutex_unlock(&ipool->mutex));
     }
 
     // Release database lock.
