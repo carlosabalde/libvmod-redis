@@ -51,16 +51,27 @@ Arguments
     shared_contexts: if enabled, Redis connections are not local to Varnish
     worker threads, but shared by all threads using one or more pools.
 
-    max_contexts: when ``shared_contexts`` is disabled, this option sets the
-    maximum number of Redis connections per Varnish worker thread and database
-    instance. Each thread and database object keeps up to one connection per
-    tag. If more than one tag is available in a database, incrementing this
-    limit allows recycling of Redis connections. When ``shared_contexts`` is
-    enabled, the VMOD creates one pool per tag and database instance; this
-    option sets the maximum number of Redis connections per pool. Note that
-    when Redis Cluster support is enabled for a database, each server is the
-    cluster is internally labeled by the VMOD with a different tag (i.e. each
-    server in the cluster has its own pool of Redis connections).
+    max_contexts:
+        When ``shared_contexts`` is enabled, the VMOD creates one pool of
+        Redis connections per tag and database instance. This option sets the
+        maximum number of connections in each pool. All Varnish worker threads
+        using the same database instance will share connections in these pools.
+        Pools are not shared between database instances.
+
+        Note that when Redis Cluster support is enabled for a database, each
+        server is the cluster is internally labeled by the VMOD with a different
+        tag.
+
+        When ``shared_contexts`` is disabled, Redis connections are local to
+        each Varnish worker thread. This option sets the maximum number of Redis
+        connections per Varnish worker thread. Each thread keeps up to one
+        connection per tag and database instance. If more than one (database,
+        tag) pair is available, incrementing this limit allows recycling of
+        Redis connections.
+
+        WARNING: when creating multiple database instances, always use the same
+        value in all instances using private contexts. Otherwise you may
+        experience inconsistent behavior.
 Description
     Creates a new database instance.
 

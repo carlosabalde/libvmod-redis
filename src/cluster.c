@@ -217,7 +217,10 @@ unsafe_discover_slots(VRT_CTX, struct vmod_redis_db *db)
     }
 
     // Contact already known clustered servers and try to fetch the
-    // slots-servers mapping.
+    // slots-servers mapping: the current implementation does not allow
+    // mixing in a database clustered and standalone servers. All servers
+    // in the list will be clustered (i.e. the iserver->db->cluster.enabled
+    // check is not really useful).
     redis_server_t *iserver;
     VTAILQ_FOREACH(iserver, &db->servers, list) {
         if (iserver->db->cluster.enabled) {
@@ -389,7 +392,10 @@ unsafe_get_random_cluster_tag(struct vmod_redis_db *db)
     // Initializations.
     const char *result = NULL;
 
-    // Look for a clustered server.
+    // Look for a clustered server: the current implementation does not allow
+    // mixing in a database clustered and standalone servers. The first server
+    // in the list will always be clustered (i.e. the iserver->db->cluster.enabled
+    // is not really useful).
     redis_server_t *iserver;
     VTAILQ_FOREACH(iserver, &db->servers, list) {
         if (iserver->db->cluster.enabled) {
