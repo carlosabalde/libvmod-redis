@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 0.2.7
+Version: 0.3.0
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,6 +36,11 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Tue Dec 15 2015 Carlos Abalde <carlos.abalde@gmail.com> - 0.3.0-0.20151215
+- Added support for multiple clusters.
+- Added .retries().
+- Removed redis.fini().
+- Improved manual page.
 * Mon Jun 08 2015 Carlos Abalde <carlos.abalde@gmail.com> - 0.2.7-0.20150608
 - Fixed memory leak during redis.fini().
 - Fixed initialization / reset of command execution timeout.
