@@ -35,7 +35,7 @@ static const char *get_reply(VRT_CTX, redisReply *reply);
  *****************************************************************************/
 
 int
-init_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
+event_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
 {
     // Check event.
     switch (e) {
@@ -194,8 +194,7 @@ vmod_db_add_server(
  *****************************************************************************/
 
 VCL_VOID
-vmod_db_add_cserver(
-    VRT_CTX, struct vmod_redis_db *db, VCL_STRING location)
+vmod_db_add_cserver(VRT_CTX, struct vmod_redis_db *db, VCL_STRING location)
 {
     // Check input.
     if ((location != NULL) && (strlen(location) > 0)) {
@@ -281,7 +280,7 @@ vmod_db_timeout(VRT_CTX, struct vmod_redis_db *db, VCL_INT command_timeout)
     // Fetch local thread state.
     thread_state_t *state = get_thread_state(ctx, 0);
 
-    // Do not continue if the initial call to .command() was not executed.
+    // Do not continue if the initial call to .command() was not executed
     // or if running this in a different database.
     if ((state->command.argc >= 1) && (state->command.db == db)) {
         state->command.timeout.tv_sec = command_timeout / 1000;
@@ -414,8 +413,7 @@ VMOD_STORAGE_REPLY_IS_FOO(array, ARRAY)
  *****************************************************************************/
 
 VCL_STRING
-vmod_db_get_reply(
-    VRT_CTX, struct vmod_redis_db *db)
+vmod_db_get_reply(VRT_CTX, struct vmod_redis_db *db)
 {
     thread_state_t *state = get_thread_state(ctx, 0);
     if ((state->command.db == db) &&
@@ -434,8 +432,7 @@ vmod_db_get_reply(
  *****************************************************************************/
 
 VCL_INT
-vmod_db_get_integer_reply(
-    VRT_CTX, struct vmod_redis_db *db)
+vmod_db_get_integer_reply(VRT_CTX, struct vmod_redis_db *db)
 {
     thread_state_t *state = get_thread_state(ctx, 0);
     if ((state->command.db == db) &&
