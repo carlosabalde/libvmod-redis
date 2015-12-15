@@ -22,9 +22,11 @@ typedef struct redis_server {
 #define REDIS_SERVER_MAGIC 0xac587b11
     unsigned magic;
 
+    // Database.
+    struct vmod_redis_db *db;
+
     // Tag (allocated in the heap; i.e. 'main', 'master', 'slave', etc.).
     const char *tag;
-    unsigned clustered;
 
     // Type & location.
     enum REDIS_SERVER_TYPE type;
@@ -86,6 +88,12 @@ typedef struct vcl_priv {
     // Object marker.
 #define VCL_PRIV_MAGIC 0x77feec11
     unsigned magic;
+} vcl_priv_t;
+
+struct vmod_redis_db {
+    // Object marker.
+    unsigned magic;
+#define VMOD_REDIS_DB_MAGIC 0xef35182b
 
     // Mutex.
     pthread_mutex_t mutex;
@@ -100,15 +108,17 @@ typedef struct vcl_priv {
     unsigned max_contexts;
 
     // Redis Cluster options / state (allocated in the heap).
-    unsigned clustered;
-    struct timeval connection_timeout;
-    unsigned max_cluster_hops;
-    unsigned context_ttl;
-    const char *slots[MAX_REDIS_CLUSTER_SLOTS];
+    struct cluster {
+        unsigned enabled;
+        struct timeval connection_timeout;
+        unsigned max_hops;
+        unsigned context_ttl;
+        const char *slots[MAX_REDIS_CLUSTER_SLOTS];
+    } cluster;
 
     // Shared contexts (allocated in the heap).
     VTAILQ_HEAD(,redis_context_pool) pools;
-} vcl_priv_t;
+};
 
 typedef struct thread_state {
     // Object marker.
@@ -120,15 +130,19 @@ typedef struct thread_state {
     VTAILQ_HEAD(,redis_context) contexts;
 
     // Redis command:
+    //   - Database.
     //   - Tag (allocated in the session workspace).
     //   - Arguments (allocated in the session workspace).
     //   - Reply (allocated in the heap).
 #define MAX_REDIS_COMMAND_ARGS 128
-    struct timeval timeout;
-    const char *tag;
-    unsigned argc;
-    const char *argv[MAX_REDIS_COMMAND_ARGS];
-    redisReply *reply;
+    struct command {
+        struct vmod_redis_db *db;
+        struct timeval timeout;
+        const char *tag;
+        unsigned argc;
+        const char *argv[MAX_REDIS_COMMAND_ARGS];
+        redisReply *reply;
+    } command;
 } thread_state_t;
 
 #define REDIS_LOG(ctx, message, ...) \
@@ -146,7 +160,8 @@ typedef struct thread_state {
 const char *new_clustered_redis_server_tag(const char *location);
 
 redis_server_t *new_redis_server(
-    const char *tag, const char *location, struct timeval connection_timeout, unsigned context_ttl);
+    struct vmod_redis_db *db, const char *tag, const char *location,
+    unsigned clustered, struct timeval connection_timeout, unsigned context_ttl);
 void free_redis_server(redis_server_t *server);
 
 redis_context_t *new_redis_context(
@@ -156,19 +171,25 @@ void free_redis_context(redis_context_t *context);
 redis_context_pool_t *new_redis_context_pool(const char *tag);
 void free_redis_context_pool(redis_context_pool_t *pool);
 
-vcl_priv_t *new_vcl_priv(
-    struct timeval command_timeout, unsigned retries, unsigned shared_pool, unsigned max_pool_size);
+vcl_priv_t *new_vcl_priv();
 void free_vcl_priv(vcl_priv_t *priv);
+
+struct vmod_redis_db *new_vmod_redis_db(
+    struct timeval command_timeout, unsigned retries, unsigned shared_contexts,
+    unsigned max_contexts);
+void free_vmod_redis_db(struct vmod_redis_db *db);
 
 thread_state_t *new_thread_state();
 void free_thread_state(thread_state_t *state);
 
-redis_server_t *unsafe_get_redis_server(vcl_priv_t *config, const char *tag);
-redis_context_pool_t *unsafe_get_context_pool(vcl_priv_t *config, const char *tag);
+redis_server_t *unsafe_get_redis_server(
+    struct vmod_redis_db *db, const char *tag);
+redis_context_pool_t *unsafe_get_context_pool(
+    struct vmod_redis_db *db, const char *tag);
 
 redisReply *redis_execute(
-    const struct vrt_ctx *ctx, vcl_priv_t *config, thread_state_t *state,
-    const char *tag, unsigned version, struct timeval timeout, unsigned argc, const char *argv[],
-    unsigned asking);
+    const struct vrt_ctx *ctx, struct vmod_redis_db *db, thread_state_t *state,
+    const char *tag, unsigned version, struct timeval timeout,
+    unsigned argc, const char *argv[], unsigned asking);
 
 #endif
