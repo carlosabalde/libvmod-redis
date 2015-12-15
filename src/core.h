@@ -103,7 +103,7 @@ struct vmod_redis_db {
 
     // General options.
     struct timeval command_timeout;
-    unsigned retries;
+    unsigned command_retries;
     unsigned shared_contexts;
     unsigned max_contexts;
 
@@ -138,6 +138,7 @@ typedef struct thread_state {
     struct command {
         struct vmod_redis_db *db;
         struct timeval timeout;
+        unsigned retries;
         const char *tag;
         unsigned argc;
         const char *argv[MAX_REDIS_COMMAND_ARGS];
@@ -175,8 +176,8 @@ vcl_priv_t *new_vcl_priv();
 void free_vcl_priv(vcl_priv_t *priv);
 
 struct vmod_redis_db *new_vmod_redis_db(
-    struct timeval command_timeout, unsigned retries, unsigned shared_contexts,
-    unsigned max_contexts);
+    struct timeval command_timeout, unsigned command_retries,
+    unsigned shared_contexts, unsigned max_contexts);
 void free_vmod_redis_db(struct vmod_redis_db *db);
 
 thread_state_t *new_thread_state();

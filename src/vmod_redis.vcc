@@ -36,12 +36,17 @@ Arguments
     cluster will use this TTL.
 
     command_timeout: command timeout (milliseconds; 0 means no timeout) when
-    executing a Redis command.
+    executing a Redis command. If Redis Cluster support has been enabled this
+    value will be used for all command executions (unless something different
+    is specified with ``.timeout()``).
+
+    command_retries: number of retries to be executed after a failed command
+    execution. If Redis Cluster support has been enabled this value will be
+    used for all command executions (unless something different is specified
+    with ``.retries()``).
 
     max_cluster_hops: maximum number of redirections (0 means no limit) when
     executing a command and Redis Cluster support has been enabled.
-
-    retries: number of retries to be executed after a failed command execution.
 
     shared_contexts: if enabled, Redis connections are not local to Varnish
     worker threads, but shared by all threads using one or more pools.
@@ -49,13 +54,13 @@ Arguments
     max_contexts: when ``shared_contexts`` is disabled, this option sets the
     maximum number of Redis connections per Varnish worker thread and database
     instance. Each thread and database object keeps up to one connection per
-    tag. If more than one tag is available, incrementing this limit allows
-    recycling of Redis connections. When ``shared_contexts`` is enabled,
-    the VMOD creates one pool per tag and database instance; this option sets
-    the maximum number of Redis connections per pool. Note that when Redis
-    Cluster support is enabled for a database, each server is the cluster
-    is internally labeled by the VMOD with a different tag (i.e. each server
-    in the cluster has its own pool of Redis connections).
+    tag. If more than one tag is available in a database, incrementing this
+    limit allows recycling of Redis connections. When ``shared_contexts`` is
+    enabled, the VMOD creates one pool per tag and database instance; this
+    option sets the maximum number of Redis connections per pool. Note that
+    when Redis Cluster support is enabled for a database, each server is the
+    cluster is internally labeled by the VMOD with a different tag (i.e. each
+    server in the cluster has its own pool of Redis connections).
 Description
     Creates a new database instance.
 
@@ -138,6 +143,15 @@ Arguments
     used when executing a specific Redis command.
 Description
     Allows overriding the default command timeout provided when calling
+    ``redis.db()``.
+
+$Method VOID .retries(INT)
+
+Arguments
+    command_retries: number of retries to be executed after a failed command
+    execution.
+Description
+    Allows overriding the default number of retries provided when calling
     ``redis.db()``.
 
 $Method VOID .push(STRING)

@@ -207,7 +207,7 @@ free_vcl_priv(vcl_priv_t *priv)
 
 struct vmod_redis_db *
 new_vmod_redis_db(
-    struct timeval command_timeout, unsigned retries,
+    struct timeval command_timeout, unsigned command_retries,
     unsigned shared_contexts, unsigned max_contexts)
 {
     struct vmod_redis_db *result;
@@ -219,7 +219,7 @@ new_vmod_redis_db(
     VTAILQ_INIT(&result->servers);
 
     result->command_timeout = command_timeout;
-    result->retries = retries;
+    result->command_retries = command_retries;
     result->shared_contexts = shared_contexts;
     result->max_contexts = max_contexts;
 
@@ -249,7 +249,7 @@ free_vmod_redis_db(struct vmod_redis_db *db)
     }
 
     db->command_timeout = (struct timeval){ 0 };
-    db->retries = 0;
+    db->command_retries = 0;
     db->shared_contexts = 0;
     db->max_contexts = 0;
 
@@ -286,6 +286,7 @@ new_thread_state()
 
     result->command.db = NULL;
     result->command.timeout = (struct timeval){ 0 };
+    result->command.retries = 0;
     result->command.tag = NULL;
     result->command.argc = 0;
     result->command.reply = NULL;
@@ -306,6 +307,7 @@ free_thread_state(thread_state_t *state)
 
     state->command.db = NULL;
     state->command.timeout = (struct timeval){ 0 };
+    state->command.retries = 0;
     state->command.tag = NULL;
     state->command.argc = 0;
     if (state->command.reply != NULL) {

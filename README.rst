@@ -25,7 +25,7 @@ import redis;
 ::
 
     # Configuration.
-    Object db(TAG, LOCATION, CONNECTION_TIMEOUT, CONNECTION_TTL, COMMAND_TIMEOUT, MAX_CLUSTER_HOPS, RETRIES, SHARED_CONTEXTS, MAX_CONTEXTS)
+    Object db(TAG, LOCATION, CONNECTION_TIMEOUT, CONNECTION_TTL, COMMAND_TIMEOUT, COMMAND_RETRIES, MAX_CLUSTER_HOPS, SHARED_CONTEXTS, MAX_CONTEXTS)
     Method VOID add_server(TAG, LOCATION, CONNECTION_TIMEOUT, CONNECTION_TTL)
     Method VOID add_cserver(LOCATION)
 
@@ -33,6 +33,7 @@ import redis;
     Method VOID .command(COMMAND)
     Method VOID .server(TAG)
     Method VOID .timeout(COMMAND_TIMEOUT)
+    Method VOID .retries(COMMAND_RETRIES)
     Method VOID .push(ARGUMENT)
     Method VOID .execute()
 
@@ -160,7 +161,7 @@ Clustered setup
         # connections per server, all shared between all Varnish worker threads.
         # Two initial cluster servers are provided; remaining servers are
         # automatically discovered.
-        new db = redis.db("cluster", "192.168.1.100:6379", 500, 0, 0, 16, 0, true, 100, true, 100);
+        new db = redis.db("cluster", "192.168.1.100:6379", 500, 0, 0, 0, 16, true, 100);
         db.add_cserver("192.168.1.101:6379");
     }
 
