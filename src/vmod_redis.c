@@ -259,7 +259,7 @@ vmod_db_timeout(VRT_CTX, struct vmod_redis_db *db, VCL_INT command_timeout)
     // Fetch local thread state.
     thread_state_t *state = get_thread_state(ctx, 0);
 
-    // Do not continue if the initial call to .command() was not executed.
+    // Do not continue if the initial call to .command() was not executed
     // or if running this in a different database.
     if ((state->command.argc >= 1) && (state->command.db == db)) {
         state->command.timeout.tv_sec = command_timeout / 1000;
@@ -307,7 +307,7 @@ vmod_db_execute(VRT_CTX, struct vmod_redis_db *db)
     // Fetch local thread state.
     thread_state_t *state = get_thread_state(ctx, 0);
 
-    // Do not continue if the initial call to .command() was not executed.
+    // Do not continue if the initial call to .command() was not executed
     // or if running this in a different database.
     if ((state->command.argc >= 1) && (state->command.db == db)) {
         // Clustered vs. classic execution.
