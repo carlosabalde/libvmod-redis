@@ -60,7 +60,7 @@ init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
 }
 
 /******************************************************************************
- * STORAGE OBJECT.
+ * DB OBJECT.
  *****************************************************************************/
 
 VCL_VOID
