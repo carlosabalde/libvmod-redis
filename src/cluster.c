@@ -169,9 +169,11 @@ unsafe_add_redis_server(struct vmod_redis_db *db, const char *location)
         VTAILQ_INSERT_TAIL(&db->servers, result, list);
 
         // If required, add new pool.
-        if (unsafe_get_context_pool(db, result->tag) == NULL) {
-            redis_context_pool_t *pool = new_redis_context_pool(result->tag);
-            VTAILQ_INSERT_TAIL(&db->pools, pool, list);
+        if (db->shared_contexts) {
+            if (unsafe_get_context_pool(db, result->tag) == NULL) {
+                redis_context_pool_t *pool = new_redis_context_pool(result->tag);
+                VTAILQ_INSERT_TAIL(&db->pools, pool, list);
+            }
         }
     }
 

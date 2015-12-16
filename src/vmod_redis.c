@@ -246,13 +246,15 @@ vmod_db_execute(VRT_CTX, struct vmod_redis_db *db)
         // Clustered vs. classic execution.
         if (db->cluster.enabled) {
             state->command.reply = cluster_execute(
-                ctx, db, state, version, state->command.timeout, state->command.retries,
+                ctx, db, state, version,
+                state->command.timeout, state->command.retries,
                 state->command.argc, state->command.argv);
         } else {
             int tries = 1 + state->command.retries;
             while ((tries > 0) && (state->command.reply == NULL)) {
                 state->command.reply = redis_execute(
-                    ctx, db, state, NULL, version, state->command.timeout,
+                    ctx, db, state, NULL, version,
+                    state->command.timeout,
                     state->command.argc, state->command.argv, 0);
                 tries--;
             }
@@ -492,9 +494,11 @@ unsafe_add_redis_server(VRT_CTX, struct vmod_redis_db *db, const char *location)
         VTAILQ_INSERT_TAIL(&db->servers, result, list);
 
         // If required, add new pool.
-        if (unsafe_get_context_pool(db, result->tag) == NULL) {
-            redis_context_pool_t *pool = new_redis_context_pool(result->tag);
-            VTAILQ_INSERT_TAIL(&db->pools, pool, list);
+        if (db->shared_contexts) {
+            if (unsafe_get_context_pool(db, result->tag) == NULL) {
+                redis_context_pool_t *pool = new_redis_context_pool(result->tag);
+                VTAILQ_INSERT_TAIL(&db->pools, pool, list);
+            }
         }
     } else {
         REDIS_LOG(ctx,
