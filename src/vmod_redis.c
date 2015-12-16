@@ -72,7 +72,7 @@ event_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
 }
 
 /******************************************************************************
- * STORAGE OBJECT.
+ * DB OBJECT.
  *****************************************************************************/
 
 VCL_VOID
