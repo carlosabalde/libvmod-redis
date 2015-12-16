@@ -7,9 +7,6 @@
 
 #include "vqueue.h"
 
-#define CLUSTERED_REDIS_SERVER_TAG "cluster"
-#define CLUSTERED_REDIS_SERVER_TAG_PREFIX ":"
-
 #define MAX_REDIS_CLUSTER_SLOTS 16384
 
 enum REDIS_SERVER_TYPE {
@@ -25,7 +22,7 @@ typedef struct redis_server {
     // Database.
     struct vmod_redis_db *db;
 
-    // Tag (allocated in the heap; i.e. 'main', 'master', 'slave', etc.).
+    // Tag (allocated in the heap).
     const char *tag;
 
     // Type & location.
@@ -37,12 +34,6 @@ typedef struct redis_server {
         } address;
         const char *path;
     } location;
-
-    // Connection timeout.
-    struct timeval connection_timeout;
-
-    // Context TTL.
-    unsigned context_ttl;
 
     // Tail queue.
     VTAILQ_ENTRY(redis_server) list;
@@ -102,6 +93,8 @@ struct vmod_redis_db {
     VTAILQ_HEAD(,redis_server) servers;
 
     // General options.
+    struct timeval connection_timeout;
+    unsigned context_ttl;
     struct timeval command_timeout;
     unsigned command_retries;
     unsigned shared_contexts;
@@ -110,9 +103,7 @@ struct vmod_redis_db {
     // Redis Cluster options / state (allocated in the heap).
     struct cluster {
         unsigned enabled;
-        struct timeval connection_timeout;
         unsigned max_hops;
-        unsigned context_ttl;
         const char *slots[MAX_REDIS_CLUSTER_SLOTS];
     } cluster;
 
@@ -131,7 +122,6 @@ typedef struct thread_state {
 
     // Redis command:
     //   - Database.
-    //   - Tag (allocated in the session workspace).
     //   - Arguments (allocated in the session workspace).
     //   - Reply (allocated in the heap).
 #define MAX_REDIS_COMMAND_ARGS 128
@@ -139,7 +129,6 @@ typedef struct thread_state {
         struct vmod_redis_db *db;
         struct timeval timeout;
         unsigned retries;
-        const char *tag;
         unsigned argc;
         const char *argv[MAX_REDIS_COMMAND_ARGS];
         redisReply *reply;
@@ -158,11 +147,7 @@ typedef struct thread_state {
         } \
     } while (0)
 
-const char *new_clustered_redis_server_tag(const char *location);
-
-redis_server_t *new_redis_server(
-    struct vmod_redis_db *db, const char *tag, const char *location,
-    unsigned clustered, struct timeval connection_timeout, unsigned context_ttl);
+redis_server_t *new_redis_server(struct vmod_redis_db *db, const char *location);
 void free_redis_server(redis_server_t *server);
 
 redis_context_t *new_redis_context(
@@ -176,8 +161,10 @@ vcl_priv_t *new_vcl_priv();
 void free_vcl_priv(vcl_priv_t *priv);
 
 struct vmod_redis_db *new_vmod_redis_db(
+    struct timeval connection_timeout, unsigned context_ttl,
     struct timeval command_timeout, unsigned command_retries,
-    unsigned shared_contexts, unsigned max_contexts);
+    unsigned shared_contexts, unsigned max_contexts, unsigned clustered,
+    unsigned max_cluster_hops);
 void free_vmod_redis_db(struct vmod_redis_db *db);
 
 thread_state_t *new_thread_state();

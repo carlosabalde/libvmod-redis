@@ -23,8 +23,7 @@ static thread_state_t *get_thread_state(VRT_CTX, unsigned flush);
 static void make_thread_key();
 
 static redis_server_t *unsafe_add_redis_server(
-    VRT_CTX, struct vmod_redis_db *db, const char *tag, const char *location,
-    unsigned clustered, struct timeval connection_timeout, unsigned context_ttl);
+    VRT_CTX, struct vmod_redis_db *db, const char *location);
 
 static const char *get_reply(VRT_CTX, redisReply *reply);
 
@@ -61,15 +60,15 @@ init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
 }
 
 /******************************************************************************
- * STORAGE OBJECT.
+ * DB OBJECT.
  *****************************************************************************/
 
 VCL_VOID
 vmod_db__init(
     VRT_CTX, struct vmod_redis_db **db, const char *vcl_name,
-    VCL_STRING tag, VCL_STRING location, VCL_INT connection_timeout,
-    VCL_INT context_ttl, VCL_INT command_timeout, VCL_INT command_retries,
-    VCL_INT max_cluster_hops, VCL_BOOL shared_contexts, VCL_INT max_contexts)
+    VCL_STRING location, VCL_INT connection_timeout, VCL_INT context_ttl,
+    VCL_INT command_timeout, VCL_INT command_retries, VCL_BOOL shared_contexts,
+    VCL_INT max_contexts, VCL_BOOL clustered, VCL_INT max_cluster_hops)
 {
     // Assert input.
     CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
@@ -77,11 +76,9 @@ vmod_db__init(
     AZ(*db);
 
     // Check input.
-    if ((tag != NULL) && (strlen(tag) > 0) &&
-        (location != NULL) && (strlen(location) > 0) &&
+    if ((location != NULL) && (strlen(location) > 0) &&
         (max_contexts > 0)) {
         // Initializations.
-        unsigned clustered = (strcmp(tag, CLUSTERED_REDIS_SERVER_TAG) == 0);
         struct timeval connection_timeout_tv;
         connection_timeout_tv.tv_sec = connection_timeout / 1000;
         connection_timeout_tv.tv_usec = (connection_timeout % 1000) * 1000;
@@ -91,22 +88,17 @@ vmod_db__init(
 
         // Create new database instance.
         struct vmod_redis_db *instance = new_vmod_redis_db(
-            command_timeout_tv, command_retries, shared_contexts, max_contexts);
+            connection_timeout_tv, context_ttl, command_timeout_tv,
+            command_retries, shared_contexts, max_contexts,
+            clustered, max_cluster_hops);
 
         // Add initial server.
-        redis_server_t *server = unsafe_add_redis_server(
-            ctx, instance, tag, location, clustered,
-            connection_timeout_tv, context_ttl);
+        redis_server_t *server = unsafe_add_redis_server(ctx, instance, location);
 
         // Do not continue if we failed to create the server instance.
         if (server != NULL) {
-            // If a clustered server was added, enable clustering, set clustering
-            // options, and populate the slots-tags mapping.
-            if (clustered) {
-                instance->cluster.enabled = 1;
-                instance->cluster.connection_timeout = connection_timeout_tv;
-                instance->cluster.max_hops = max_cluster_hops;
-                instance->cluster.context_ttl = context_ttl;
+            // Populate the slots-tags mapping.
+            if (instance->cluster.enabled) {
                 discover_cluster_slots(ctx, instance);
             }
 
@@ -136,74 +128,18 @@ vmod_db__fini(struct vmod_redis_db **db)
  *****************************************************************************/
 
 VCL_VOID
-vmod_db_add_server(
-    VRT_CTX, struct vmod_redis_db *db, VCL_STRING tag,
-    VCL_STRING location, VCL_INT connection_timeout, VCL_INT context_ttl)
-{
-    // Check input.
-    if ((tag != NULL) && (strlen(tag) > 0) &&
-        (location != NULL) && (strlen(location) > 0)) {
-        // Do not continue if clustering has been enabled.
-        if (!db->cluster.enabled) {
-            // Do not allow usage of tags internally reserved for clustering.
-            if ((strcmp(tag, CLUSTERED_REDIS_SERVER_TAG) != 0) &&
-                (strncmp(tag, CLUSTERED_REDIS_SERVER_TAG_PREFIX,
-                         strlen(CLUSTERED_REDIS_SERVER_TAG_PREFIX)) != 0)) {
-                // Initializations.
-                struct timeval connection_timeout_tv;
-                connection_timeout_tv.tv_sec = connection_timeout / 1000;
-                connection_timeout_tv.tv_usec = (connection_timeout % 1000) * 1000;
-
-                // Get database lock.
-                AZ(pthread_mutex_lock(&db->mutex));
-
-                // Add new server.
-                unsafe_add_redis_server(
-                    ctx, db, tag, location, 0,
-                    connection_timeout_tv, context_ttl);
-
-                // Release database lock.
-                AZ(pthread_mutex_unlock(&db->mutex));
-            } else {
-                REDIS_LOG(ctx,
-                    "Failed to add server '%s' using reserved tag '%s'",
-                    location, tag);
-            }
-        } else {
-            REDIS_LOG(ctx,
-                "Failed to add server '%s' while clustering is enabled",
-                location);
-        }
-    }
-}
-
-/******************************************************************************
- * .add_cserver();
- *****************************************************************************/
-
-VCL_VOID
-vmod_db_add_cserver(
-    VRT_CTX, struct vmod_redis_db *db, VCL_STRING location)
+vmod_db_add_server(VRT_CTX, struct vmod_redis_db *db, VCL_STRING location)
 {
     // Check input.
     if ((location != NULL) && (strlen(location) > 0)) {
-        // Do not continue if clustering has not been enabled.
-        if (db->cluster.enabled) {
-            // Get database lock.
-            AZ(pthread_mutex_lock(&db->mutex));
+        // Get database lock.
+        AZ(pthread_mutex_lock(&db->mutex));
 
-            // Add new server.
-            unsafe_add_redis_server(
-                ctx, db, NULL, location, 1,
-                db->cluster.connection_timeout, db->cluster.context_ttl);
+        // Add new server.
+        unsafe_add_redis_server(ctx, db, location);
 
-            // Release database lock.
-            AZ(pthread_mutex_unlock(&db->mutex));
-        } else {
-            REDIS_LOG(ctx,
-                "Failed to add cluster server '%s' while clustering is disabled",
-                location);
-        }
+        // Release database lock.
+        AZ(pthread_mutex_unlock(&db->mutex));
     }
 }
 
@@ -226,27 +162,6 @@ vmod_db_command(VRT_CTX, struct vmod_redis_db *db, VCL_STRING name)
         state->command.argc = 1;
         state->command.argv[0] = WS_Copy(ctx->ws, name, -1);
         AN(state->command.argv[0]);
-    }
-}
-
-/******************************************************************************
- * .server();
- *****************************************************************************/
-
-VCL_VOID
-vmod_db_server(VRT_CTX, struct vmod_redis_db *db, VCL_STRING tag)
-{
-    // Check input.
-    if ((tag != NULL) && (strlen(tag) > 0)) {
-        // Fetch local thread state.
-        thread_state_t *state = get_thread_state(ctx, 0);
-
-        // Do not continue if the initial call to .command() was not executed
-        // or if running this in a different database.
-        if ((state->command.argc >= 1) && (state->command.db == db)) {
-            state->command.tag = WS_Copy(ctx->ws, tag, -1);
-            AN(state->command.tag);
-        }
     }
 }
 
@@ -329,17 +244,17 @@ vmod_db_execute(VRT_CTX, struct vmod_redis_db *db)
     // or if running this in a different database.
     if ((state->command.argc >= 1) && (state->command.db == db)) {
         // Clustered vs. classic execution.
-        if ((db->cluster.enabled) &&
-            ((state->command.tag == NULL) ||
-             (strcmp(state->command.tag, CLUSTERED_REDIS_SERVER_TAG) == 0))) {
+        if (db->cluster.enabled) {
             state->command.reply = cluster_execute(
-                ctx, db, state, version, state->command.timeout, state->command.retries,
+                ctx, db, state, version,
+                state->command.timeout, state->command.retries,
                 state->command.argc, state->command.argv);
         } else {
             int tries = 1 + state->command.retries;
             while ((tries > 0) && (state->command.reply == NULL)) {
                 state->command.reply = redis_execute(
-                    ctx, db, state, state->command.tag, version, state->command.timeout,
+                    ctx, db, state, NULL, version,
+                    state->command.timeout,
                     state->command.argc, state->command.argv, 0);
                 tries--;
             }
@@ -549,7 +464,6 @@ get_thread_state(VRT_CTX, unsigned flush)
         result->command.db = NULL;
         result->command.timeout = (struct timeval){ 0 };
         result->command.retries = 0;
-        result->command.tag = NULL;
         result->command.argc = 0;
         if (result->command.reply != NULL) {
             freeReplyObject(result->command.reply);
@@ -568,13 +482,10 @@ make_thread_key()
 }
 
 static redis_server_t *
-unsafe_add_redis_server(
-    VRT_CTX, struct vmod_redis_db *db, const char *tag, const char *location,
-    unsigned clustered, struct timeval connection_timeout, unsigned context_ttl)
+unsafe_add_redis_server(VRT_CTX, struct vmod_redis_db *db, const char *location)
 {
     // Initializations.
-    redis_server_t *result = new_redis_server(
-        db, tag, location, clustered, connection_timeout, context_ttl);
+    redis_server_t *result = new_redis_server(db, location);
 
     // Do not continue if we failed to create the server instance.
     // Caller should own db->mutex!
@@ -583,14 +494,16 @@ unsafe_add_redis_server(
         VTAILQ_INSERT_TAIL(&db->servers, result, list);
 
         // If required, add new pool.
-        if (unsafe_get_context_pool(db, result->tag) == NULL) {
-            redis_context_pool_t *pool = new_redis_context_pool(result->tag);
-            VTAILQ_INSERT_TAIL(&db->pools, pool, list);
+        if (db->shared_contexts) {
+            if (unsafe_get_context_pool(db, result->tag) == NULL) {
+                redis_context_pool_t *pool = new_redis_context_pool(result->tag);
+                VTAILQ_INSERT_TAIL(&db->pools, pool, list);
+            }
         }
     } else {
         REDIS_LOG(ctx,
-            "Failed to add server '%s' tagged as '%s'",
-            location, tag);
+            "Failed to add server '%s'",
+            location);
     }
 
     // Done!
