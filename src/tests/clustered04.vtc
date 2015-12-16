@@ -9,9 +9,9 @@ varnish v1 -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
-        new db = redis.db("cluster", "${redis_master1}", 500, 0, 0, 0, 16, true, 32);
-        db.add_cserver("${redis_master2}");
-        db.add_cserver("${redis_master3}");
+        new db = redis.db("${redis_master1}", 500, 0, 0, 0, true, 32, true, 16);
+        db.add_server("${redis_master2}");
+        db.add_server("${redis_master3}");
     }
 
     sub vcl_deliver {
@@ -37,110 +37,104 @@ varnish v2 -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
-        new db = redis.db("master1", "${redis_master1}", 500, 0, 0, 0, 16, true, 32);
-        db.add_server("master2", "${redis_master2}", 500, 0);
+        new master1 = redis.db("${redis_master1}", 500, 0, 0, 0, false, 1, false, 0);
+        new master2 = redis.db("${redis_master2}", 500, 0, 0, 0, false, 1, false, 0);
     }
 
     sub vcl_deliver {
         # Get the key's containing slot.
-        db.command("CLUSTER");
-        db.push("KEYSLOT");
-        db.push("${redis_key_in_master1}");
-        db.execute();
-        if (db.reply_is_integer()) {
-            set resp.http.Slot = db.get_integer_reply();
+        master1.command("CLUSTER");
+        master1.push("KEYSLOT");
+        master1.push("${redis_key_in_master1}");
+        master1.execute();
+        if (master1.reply_is_integer()) {
+            set resp.http.Slot = master1.get_integer_reply();
         }
 
         # Get the ID for the original node (master1).
-        db.command("CLUSTER");
-        db.push("NODES");
-        db.execute();
-        if (db.reply_is_string()) {
-            set resp.http.NodeOrig = regsub(db.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master1} .*$", "\1");
+        master1.command("CLUSTER");
+        master1.push("NODES");
+        master1.execute();
+        if (master1.reply_is_string()) {
+            set resp.http.NodeOrig = regsub(master1.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master1} .*$", "\1");
             if (resp.http.NodeOrig !~ "[0-9a-f]+") {
                 unset resp.http.NodeOrig;
             }
         }
 
         # Get the ID for the destination node (master2).
-        db.command("CLUSTER");
-        db.push("NODES");
-        db.execute();
-        if (db.reply_is_string()) {
-            set resp.http.NodeDest = regsub(db.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master2} .*$", "\1");
+        master1.command("CLUSTER");
+        master1.push("NODES");
+        master1.execute();
+        if (master1.reply_is_string()) {
+            set resp.http.NodeDest = regsub(master1.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master2} .*$", "\1");
             if (resp.http.NodeDest !~ "[0-9a-f]+") {
                 unset resp.http.NodeDest;
             }
         }
 
         # Mark the destination node as IMPORTING.
-        db.command("CLUSTER");
-        db.server("master2");
-        db.push("SETSLOT");
-        db.push(resp.http.Slot);
-        db.push("IMPORTING");
-        db.push(resp.http.NodeOrig);
-        db.execute();
-        if (db.reply_is_status()) {
-            set resp.http.Reply-4 = db.get_status_reply();
+        master2.command("CLUSTER");
+        master2.push("SETSLOT");
+        master2.push(resp.http.Slot);
+        master2.push("IMPORTING");
+        master2.push(resp.http.NodeOrig);
+        master2.execute();
+        if (master2.reply_is_status()) {
+            set resp.http.Reply-4 = master2.get_status_reply();
         }
 
         # Mark the original node as MIGRATING.
-        db.command("CLUSTER");
-        db.server("master1");
-        db.push("SETSLOT");
-        db.push(resp.http.Slot);
-        db.push("MIGRATING");
-        db.push(resp.http.NodeDest);
-        db.execute();
-        if (db.reply_is_status()) {
-            set resp.http.Reply-5 = db.get_status_reply();
+        master1.command("CLUSTER");
+        master1.push("SETSLOT");
+        master1.push(resp.http.Slot);
+        master1.push("MIGRATING");
+        master1.push(resp.http.NodeDest);
+        master1.execute();
+        if (master1.reply_is_status()) {
+            set resp.http.Reply-5 = master1.get_status_reply();
         }
 
         # Migrate key.
-        db.command("MIGRATE");
-        db.server("master1");
-        db.push(regsub("${redis_master2}", "([\d\.]*):([\d]*)", "\1"));
-        db.push(regsub("${redis_master2}", "([\d\.]*):([\d]*)", "\2"));
-        db.push("${redis_key_in_master1}");
-        db.push("0");
-        db.push("0");
-        db.execute();
-        if (db.reply_is_status()) {
-            set resp.http.Reply-6 = db.get_status_reply();
+        master1.command("MIGRATE");
+        master1.push(regsub("${redis_master2}", "([\d\.]*):([\d]*)", "\1"));
+        master1.push(regsub("${redis_master2}", "([\d\.]*):([\d]*)", "\2"));
+        master1.push("${redis_key_in_master1}");
+        master1.push("0");
+        master1.push("0");
+        master1.execute();
+        if (master1.reply_is_status()) {
+            set resp.http.Reply-6 = master1.get_status_reply();
         }
 
         # Assign the containing slot to the destination node in both nodes.
 
-        db.command("CLUSTER");
-        db.server("master1");
-        db.push("SETSLOT");
-        db.push(resp.http.Slot);
-        db.push("NODE");
-        db.push(resp.http.NodeDest);
-        db.execute();
-        if (db.reply_is_status()) {
-            set resp.http.Reply-7 = db.get_status_reply();
+        master1.command("CLUSTER");
+        master1.push("SETSLOT");
+        master1.push(resp.http.Slot);
+        master1.push("NODE");
+        master1.push(resp.http.NodeDest);
+        master1.execute();
+        if (master1.reply_is_status()) {
+            set resp.http.Reply-7 = master1.get_status_reply();
         }
 
-        db.command("CLUSTER");
-        db.server("master2");
-        db.push("SETSLOT");
-        db.push(resp.http.Slot);
-        db.push("NODE");
-        db.push(resp.http.NodeDest);
-        db.execute();
-        if (db.reply_is_status()) {
-            set resp.http.Reply-8 = db.get_status_reply();
+        master2.command("CLUSTER");
+        master2.push("SETSLOT");
+        master2.push(resp.http.Slot);
+        master2.push("NODE");
+        master2.push(resp.http.NodeDest);
+        master2.execute();
+        if (master2.reply_is_status()) {
+            set resp.http.Reply-8 = master2.get_status_reply();
         }
 
         # Check that the original node replies with a MOVED redirection.
-        db.command("GET");
-        db.server("master1");
-        db.push("${redis_key_in_master1}");
-        db.execute();
-        if (db.reply_is_error()) {
-            if (db.get_error_reply() ~ "^MOVED ") {
+        master1.command("GET");
+        master1.push("${redis_key_in_master1}");
+        master1.execute();
+        if (master1.reply_is_error()) {
+            if (master1.get_error_reply() ~ "^MOVED ") {
                 set resp.http.Reply-9 = "MOVED";
             }
         }
@@ -174,9 +168,9 @@ varnish v3 -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
-        new db = redis.db("cluster", "${redis_master1}", 500, 0, 0, 0, 16, true, 32);
-        db.add_cserver("${redis_master2}");
-        db.add_cserver("${redis_master3}");
+        new db = redis.db("${redis_master1}", 500, 0, 0, 0, true, 32, true, 16);
+        db.add_server("${redis_master2}");
+        db.add_server("${redis_master3}");
     }
 
     sub vcl_deliver {
