@@ -26,41 +26,23 @@ static redisReply *get_redis_repy(
 
 static const char *sha1(VRT_CTX, const char *script);
 
-const char *
-new_clustered_redis_server_tag(const char *location)
-{
-    // Check location (only host + port format is allowed).
-    AN(strchr(location, ':'));
-
-    // Build tag.
-    char *result = malloc(
-        strlen(CLUSTERED_REDIS_SERVER_TAG_PREFIX) +
-        strlen(location) +
-        1);
-    AN(result);
-    strcpy(result, CLUSTERED_REDIS_SERVER_TAG_PREFIX);
-    strcat(result, location);
-
-    // Done!
-    return result;
-}
-
 redis_server_t *
-new_redis_server(
-    struct vmod_redis_db *db, const char *tag, const char *location,
-    unsigned clustered, struct timeval connection_timeout, unsigned context_ttl)
+new_redis_server(struct vmod_redis_db *db, const char *location)
 {
     // Initializations.
     redis_server_t *result = NULL;
     char *ptr = strrchr(location, ':');
 
-    // Do not continue if this is a clustered server but its location is not
+    // Do not continue if this is a clustered database but the location is not
     // provided using the host + port format.
-    if (!clustered || (ptr != NULL)) {
+    if (!db->cluster.enabled || (ptr != NULL)) {
         ALLOC_OBJ(result, REDIS_SERVER_MAGIC);
         AN(result);
 
         result->db = db;
+
+        result->tag = strdup(location);
+        AN(result->tag);
 
         if (ptr != NULL) {
             result->type = REDIS_SERVER_HOST_TYPE;
@@ -72,15 +54,6 @@ new_redis_server(
             result->location.path = strdup(location);
             AN(result->location.path);
         }
-
-        if (clustered) {
-            result->tag = new_clustered_redis_server_tag(location);
-        } else {
-            result->tag = strdup(tag);
-        }
-        AN(result->tag);
-        result->connection_timeout = connection_timeout;
-        result->context_ttl = context_ttl;
     }
 
     // Done!
@@ -107,9 +80,6 @@ free_redis_server(redis_server_t *server)
             server->location.path = NULL;
             break;
     }
-
-    server->connection_timeout = (struct timeval){ 0 };
-    server->context_ttl = 0;
 
     FREE_OBJ(server);
 }
@@ -207,8 +177,10 @@ free_vcl_priv(vcl_priv_t *priv)
 
 struct vmod_redis_db *
 new_vmod_redis_db(
+    struct timeval connection_timeout, unsigned context_ttl,
     struct timeval command_timeout, unsigned command_retries,
-    unsigned shared_contexts, unsigned max_contexts)
+    unsigned shared_contexts, unsigned max_contexts, unsigned clustered,
+    unsigned max_cluster_hops)
 {
     struct vmod_redis_db *result;
     ALLOC_OBJ(result, VMOD_REDIS_DB_MAGIC);
@@ -218,15 +190,15 @@ new_vmod_redis_db(
 
     VTAILQ_INIT(&result->servers);
 
+    result->connection_timeout = connection_timeout;
+    result->context_ttl = context_ttl;
     result->command_timeout = command_timeout;
     result->command_retries = command_retries;
     result->shared_contexts = shared_contexts;
     result->max_contexts = max_contexts;
 
-    result->cluster.enabled = 0;
-    result->cluster.connection_timeout = (struct timeval){ 0 };
-    result->cluster.max_hops = 0;
-    result->cluster.context_ttl = 0;
+    result->cluster.enabled = clustered;
+    result->cluster.max_hops = max_cluster_hops;
     for (int i = 0; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
         result->cluster.slots[i] = NULL;
     }
@@ -248,15 +220,15 @@ free_vmod_redis_db(struct vmod_redis_db *db)
         free_redis_server(iserver);
     }
 
+    db->connection_timeout = (struct timeval){ 0 };
+    db->context_ttl = 0;
     db->command_timeout = (struct timeval){ 0 };
     db->command_retries = 0;
     db->shared_contexts = 0;
     db->max_contexts = 0;
 
     db->cluster.enabled = 0;
-    db->cluster.connection_timeout = (struct timeval){ 0 };
     db->cluster.max_hops = 0;
-    db->cluster.context_ttl = 0;
     for (int i = 0; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
         if (db->cluster.slots[i] != NULL) {
             free((void *) (db->cluster.slots[i]));
@@ -287,7 +259,6 @@ new_thread_state()
     result->command.db = NULL;
     result->command.timeout = (struct timeval){ 0 };
     result->command.retries = 0;
-    result->command.tag = NULL;
     result->command.argc = 0;
     result->command.reply = NULL;
 
@@ -308,7 +279,6 @@ free_thread_state(thread_state_t *state)
     state->command.db = NULL;
     state->command.timeout = (struct timeval){ 0 };
     state->command.retries = 0;
-    state->command.tag = NULL;
     state->command.argc = 0;
     if (state->command.reply != NULL) {
         freeReplyObject(state->command.reply);
@@ -457,8 +427,8 @@ is_valid_redis_context(redis_context_t *context, unsigned version, time_t now)
     // Check if context is in an error state or if it's too old.
     if ((context->rcontext->err) ||
         (context->version != version) ||
-        ((context->server->context_ttl > 0) &&
-         (now - context->tst > context->server->context_ttl))) {
+        ((context->server->db->context_ttl > 0) &&
+         (now - context->tst > context->server->db->context_ttl))) {
         return 0;
 
     // Check if context connection has been hung up by the server.
@@ -539,19 +509,20 @@ new_rcontext(VRT_CTX, redis_server_t * server, unsigned version, time_t now)
     redisContext *result;
 
     // Create context.
-    if ((server->connection_timeout.tv_sec > 0) || (server->connection_timeout.tv_usec > 0)) {
+    if ((server->db->connection_timeout.tv_sec > 0) ||
+        (server->db->connection_timeout.tv_usec > 0)) {
         switch (server->type) {
             case REDIS_SERVER_HOST_TYPE:
                 result = redisConnectWithTimeout(
                     server->location.address.host,
                     server->location.address.port,
-                    server->connection_timeout);
+                    server->db->connection_timeout);
                 break;
 
             case REDIS_SERVER_SOCKET_TYPE:
                 result = redisConnectUnixWithTimeout(
                     server->location.path,
-                    server->connection_timeout);
+                    server->db->connection_timeout);
                 break;
 
             default:

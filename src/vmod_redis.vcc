@@ -13,113 +13,82 @@ DESCRIPTION
 VMOD using the synchronous hiredis library API to access Redis servers from VCL.
 
 $Event event_function
-$Object db(STRING, STRING, INT, INT, INT, INT, INT, BOOL, INT)
+$Object db(STRING, INT, INT, INT, INT, BOOL, INT, BOOL, INT)
 
 Arguments
-    tag: name tagging the Redis server in some category (e.g. ``main``,
-    ``master``, ``slave``, etc.). When using the reserved tag ``cluster`` the
-    VMOD internally enables the Redis Cluster support, automatically discovering
-    other servers in the cluster using the command ``CLUSTER SLOTS``.
-
     location: Redis connection string. Both host + port and UNIX sockets are
-    supported. If this is a Redis Cluster server only host + port format is
-    allowed.
+    supported. Only host + port format is allowed when Redis Cluster support
+    is enabled.
 
     connection_timeout: connection timeout (milliseconds; 0 means no timeout)
-    to the Redis server. If Redis Cluster support has been enabled all servers
-    in the cluster will use this timeout.
+    to the Redis server.
 
     connection_ttl: TTL (seconds) of Redis connections (0 means no TTL). Once
     the TTL of a connection is consumed, the module transparently reestablishes
     it. See "Client timeouts" in http://redis.io/topics/clients for extra
-    information. If Redis Cluster support has been enabled all servers in the
-    cluster will use this TTL.
+    information.
 
     command_timeout: command timeout (milliseconds; 0 means no timeout) when
-    executing a Redis command. If Redis Cluster support has been enabled this
-    value will be used for all command executions (unless something different
-    is specified with ``.timeout()``).
+    executing a Redis command. It can be overridden during command execution
+    with ``.timeout()``.
 
     command_retries: number of retries to be executed after a failed command
-    execution. If Redis Cluster support has been enabled this value will be
-    used for all command executions (unless something different is specified
-    with ``.retries()``).
-
-    max_cluster_hops: maximum number of redirections (0 means no limit) when
-    executing a command and Redis Cluster support has been enabled.
+    execution. It can be overridden during command execution with
+    ``.retries()``.
 
     shared_contexts: if enabled, Redis connections are not local to Varnish
     worker threads, but shared by all threads using one or more pools.
 
     max_contexts:
         When ``shared_contexts`` is enabled, the VMOD creates one pool of
-        Redis connections per tag and database instance. This option sets the
-        maximum number of connections in each pool. All Varnish worker threads
-        using the same database instance will share connections in these pools.
-        Pools are not shared between database instances.
+        Redis connections per location and database instance. This option sets
+        the maximum number of connections in each pool. All Varnish worker
+        threads using the same database instance will share connections in these
+        pools. Pools are not shared between database instances.
 
         Note that when Redis Cluster support is enabled for a database, each
-        server is the cluster is internally labeled by the VMOD with a different
-        tag.
+        server is the cluster is internally labeled by the VMOD with its
+        location (host + port).
 
         When ``shared_contexts`` is disabled, Redis connections are local to
         each Varnish worker thread. This option sets the maximum number of Redis
         connections per Varnish worker thread. Each thread keeps up to one
-        connection per tag and database instance. If more than one (database,
-        tag) pair is available, incrementing this limit allows recycling of
+        connection per location and database instance. If more than one (database,
+        location) pair is available, incrementing this limit allows recycling of
         Redis connections.
 
         WARNING: when creating multiple database instances, always use the same
         value in all instances using private contexts. Otherwise you may
         experience inconsistent behavior.
+
+    clustered: enables the Redis Cluster support, automatically discovering
+    other servers in the cluster using the command ``CLUSTER SLOTS``.
+
+    max_cluster_hops: maximum number of redirections (0 means no limit) when
+    executing a command and Redis Cluster support has been enabled.
 Description
     Creates a new database instance.
 
-$Method VOID .add_server(STRING, STRING, INT, INT)
+$Method VOID .add_server(STRING)
 
 Arguments
-    tag: name tagging the Redis server in some category (e.g. ``main``,
-    ``master``, ``slave``, etc.). Using the reserved tag ``cluster`` is not
-    allowed.
-
     location: Redis connection string. Both host + port and UNIX sockets are
-    supported.
-
-    connection_timeout: connection timeout (milliseconds) to the Redis server.
-
-    connection_ttl: TTL (seconds) of Redis connections (0 means no TTL). Once
-    the TTL of a connection is consumed, the module transparently reestablishes
-    it. See "Client timeouts" in http://redis.io/topics/clients for extra
-    information.
+    supported. If Redis Cluster support has been enabled only host + port
+    format is allowed.
 Description
     Adds an extra Redis server.
 
-    This feature is only available if Redis Custer support has not been enabled
-    when calling ``redis.db()``. Use this feature (1) when using master-slave
-    replication; or (2) when using multiple independent servers; or (3) when
-    using some kind of proxy assisted partitioning
-    (e.g. https://github.com/twitter/twemproxy) and more than one proxy is
-    available.
-
     When a command is submitted using ``.execute()`` and more than one Redis
-    server is available, the destination server is selected according with the tag
-    specified with ``.server()``. If not specified a randomly selected connection
-    will be used (if the worker thread / corresponding pool already has any
-    Redis connection established and available), or a new connection to a
-    randomly selected server will be established.
+    server is available, the destination server is randomly selected. A
+    randomly selected connection will be used (if the worker thread /
+    corresponding pool already has any Redis connection established and
+    available), or a new connection to a randomly selected server will be
+    established.
 
-$Method VOID .add_cserver(STRING)
-
-Arguments
-    location: Redis connection string. Only host + port format is allowed.
-Description
-    Adds an extra Redis Cluster server.
-
-    This feature is only available once Redis Custer support has been enabled
-    when calling ``redis.db()``. Other servers in the cluster are automatically
-    discovered by the VMOD using the ``CLUSTER SLOTS`` commands. Anyway, knowing
-    more cluster servers during startup increases the chances of discover the
-    cluster topology if some server is failing.
+    If Redis Cluster support has been enabled other servers in the cluster are
+    automatically discovered by the VMOD using the ``CLUSTER SLOTS`` command.
+    Anyway, knowing more cluster servers during startup increases the chances
+    of discover the cluster topology if some server is failing.
 
 $Method VOID .command(STRING)
 
@@ -133,19 +102,6 @@ Description
     On execution time, ``EVAL`` commands are internally replace by ``EVALSHA``
     commands, which fallback to the original ``EVAL`` command if the Redis
     server returns a ``NOSCRIPT`` error (see http://redis.io/commands/eval).
-
-$Method VOID .server(STRING)
-
-Arguments
-    tag: tag of the Redis server a previously enqueued Redis command will be
-    delivered to (e.g. ``main``, ``master``, ``slave``, ``cluster``, etc.).
-Description
-    Selects the type of Redis server a previously enqueued Redis command will
-    be delivered to.
-
-    If not specified and Redis Cluster support hasn't been enabled, a randomly
-    selected connection / server will be used (see ``.add_server()`` for
-    extra information).
 
 $Method VOID .timeout(INT)
 
