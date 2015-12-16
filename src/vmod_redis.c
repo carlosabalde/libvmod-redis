@@ -29,6 +29,8 @@ static redis_server_t *unsafe_add_redis_server(
 
 static const char *get_reply(VRT_CTX, redisReply *reply);
 
+static void handle_vcl_cold_event(VRT_CTX, vcl_priv_t *config);
+
 /******************************************************************************
  * VMOD INITIALIZATION.
  *****************************************************************************/
@@ -36,6 +38,9 @@ static const char *get_reply(VRT_CTX, redisReply *reply);
 int
 event_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
 {
+    // Initializations.
+    vcl_priv_t *config = vcl_priv->priv;
+
     // Check event.
     switch (e) {
         case VCL_EVENT_LOAD:
@@ -59,8 +64,8 @@ event_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
             break;
 
         case VCL_EVENT_COLD:
-            // XXX: how to get the full list of database instances in order to
-            // close pooled connections shared between threads?
+            // Close connections in shared pools.
+            handle_vcl_cold_event(ctx, config);
             break;
 
         default:
@@ -77,7 +82,7 @@ event_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
 
 VCL_VOID
 vmod_db__init(
-    VRT_CTX, struct vmod_redis_db **db, const char *vcl_name,
+    VRT_CTX, struct vmod_redis_db **db, const char *vcl_name, struct vmod_priv *vcl_priv,
     VCL_STRING location, VCL_INT connection_timeout, VCL_INT context_ttl,
     VCL_INT command_timeout, VCL_INT command_retries, VCL_BOOL shared_contexts,
     VCL_INT max_contexts, VCL_BOOL clustered, VCL_INT max_cluster_hops)
@@ -91,6 +96,7 @@ vmod_db__init(
     if ((location != NULL) && (strlen(location) > 0) &&
         (max_contexts > 0)) {
         // Initializations.
+        vcl_priv_t *config = vcl_priv->priv;
         struct timeval connection_timeout_tv;
         connection_timeout_tv.tv_sec = connection_timeout / 1000;
         connection_timeout_tv.tv_usec = (connection_timeout % 1000) * 1000;
@@ -114,7 +120,10 @@ vmod_db__init(
                 discover_cluster_slots(ctx, instance);
             }
 
-            // Return the new database instance.
+            // Register & return the new database instance.
+            // XXX: is there a better way to keep track of database instances?
+            vcl_priv_db_t *vcl_priv_db = new_vcl_priv_db(instance);
+            VTAILQ_INSERT_TAIL(&config->dbs, vcl_priv_db, list);
             *db = instance;
         } else {
             free_vmod_redis_db(instance);
@@ -585,4 +594,46 @@ get_reply(VRT_CTX, redisReply *reply)
 
     // Done!
     return result;
+}
+
+static void
+handle_vcl_cold_event(VRT_CTX, vcl_priv_t *config)
+{
+    // Iterate through registered database instances and close connections in
+    // shared pools.
+    vcl_priv_db_t *idb;
+    VTAILQ_FOREACH(idb, &config->dbs, list) {
+        if ((idb != NULL) && (idb->magic == VCL_PRIV_DB_MAGIC)) {
+            // Get database lock.
+            AZ(pthread_mutex_lock(&idb->db->mutex));
+
+            // Release contexts in all pools.
+            redis_context_pool_t *ipool;
+            VTAILQ_FOREACH(ipool, &idb->db->pools, list) {
+                // Get pool lock.
+                AZ(pthread_mutex_lock(&ipool->mutex));
+
+                // Release all contexts (both free an busy; this method is
+                // assumed to be called when threads are not using the pool).
+                ipool->ncontexts = 0;
+                redis_context_t *icontext;
+                while (!VTAILQ_EMPTY(&ipool->free_contexts)) {
+                    icontext = VTAILQ_FIRST(&ipool->free_contexts);
+                    VTAILQ_REMOVE(&ipool->free_contexts, icontext, list);
+                    free_redis_context(icontext);
+                }
+                while (!VTAILQ_EMPTY(&ipool->busy_contexts)) {
+                    icontext = VTAILQ_FIRST(&ipool->busy_contexts);
+                    VTAILQ_REMOVE(&ipool->busy_contexts, icontext, list);
+                    free_redis_context(icontext);
+                }
+
+                // Release pool lock.
+                AZ(pthread_mutex_unlock(&ipool->mutex));
+            }
+
+            // Release database lock.
+            AZ(pthread_mutex_unlock(&idb->db->mutex));
+        }
+    }
 }

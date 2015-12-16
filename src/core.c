@@ -159,22 +159,6 @@ free_redis_context_pool(redis_context_pool_t *pool)
     FREE_OBJ(pool);
 }
 
-vcl_priv_t *
-new_vcl_priv()
-{
-    vcl_priv_t *result;
-    ALLOC_OBJ(result, VCL_PRIV_MAGIC);
-    AN(result);
-
-    return result;
-}
-
-void
-free_vcl_priv(vcl_priv_t *priv)
-{
-    FREE_OBJ(priv);
-}
-
 struct vmod_redis_db *
 new_vmod_redis_db(
     struct timeval connection_timeout, unsigned context_ttl,
@@ -285,6 +269,51 @@ free_thread_state(thread_state_t *state)
     }
 
     FREE_OBJ(state);
+}
+
+vcl_priv_t *
+new_vcl_priv()
+{
+    vcl_priv_t *result;
+    ALLOC_OBJ(result, VCL_PRIV_MAGIC);
+    AN(result);
+
+    VTAILQ_INIT(&result->dbs);
+
+    return result;
+}
+
+void
+free_vcl_priv(vcl_priv_t *priv)
+{
+    vcl_priv_db_t *idb;
+    while (!VTAILQ_EMPTY(&priv->dbs)) {
+        idb = VTAILQ_FIRST(&priv->dbs);
+        VTAILQ_REMOVE(&priv->dbs, idb, list);
+        free_vcl_priv_db(idb);
+    }
+
+    FREE_OBJ(priv);
+}
+
+vcl_priv_db_t *
+new_vcl_priv_db(struct vmod_redis_db *db)
+{
+    vcl_priv_db_t *result;
+    ALLOC_OBJ(result, VCL_PRIV_DB_MAGIC);
+    AN(result);
+
+    result->db = db;
+
+    return result;
+}
+
+void
+free_vcl_priv_db(vcl_priv_db_t *db)
+{
+    db->db = NULL;
+
+    FREE_OBJ(db);
 }
 
 redis_server_t *

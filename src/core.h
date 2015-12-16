@@ -75,12 +75,6 @@ typedef struct redis_context_pool {
     VTAILQ_ENTRY(redis_context_pool) list;
 } redis_context_pool_t;
 
-typedef struct vcl_priv {
-    // Object marker.
-#define VCL_PRIV_MAGIC 0x77feec11
-    unsigned magic;
-} vcl_priv_t;
-
 struct vmod_redis_db {
     // Object marker.
     unsigned magic;
@@ -135,6 +129,27 @@ typedef struct thread_state {
     } command;
 } thread_state_t;
 
+typedef struct vcl_priv_db {
+    // Object marker.
+#define VCL_PRIV_DB_MAGIC 0x9200fda1
+    unsigned magic;
+
+    // Database.
+    struct vmod_redis_db *db;
+
+    // Tail queue.
+    VTAILQ_ENTRY(vcl_priv_db) list;
+} vcl_priv_db_t;
+
+typedef struct vcl_priv {
+    // Object marker.
+#define VCL_PRIV_MAGIC 0x77feec11
+    unsigned magic;
+
+    // Databases.
+    VTAILQ_HEAD(,vcl_priv_db) dbs;
+} vcl_priv_t;
+
 #define REDIS_LOG(ctx, message, ...) \
     do { \
         char _buffer[512]; \
@@ -157,9 +172,6 @@ void free_redis_context(redis_context_t *context);
 redis_context_pool_t *new_redis_context_pool(const char *tag);
 void free_redis_context_pool(redis_context_pool_t *pool);
 
-vcl_priv_t *new_vcl_priv();
-void free_vcl_priv(vcl_priv_t *priv);
-
 struct vmod_redis_db *new_vmod_redis_db(
     struct timeval connection_timeout, unsigned context_ttl,
     struct timeval command_timeout, unsigned command_retries,
@@ -169,6 +181,12 @@ void free_vmod_redis_db(struct vmod_redis_db *db);
 
 thread_state_t *new_thread_state();
 void free_thread_state(thread_state_t *state);
+
+vcl_priv_t *new_vcl_priv();
+void free_vcl_priv(vcl_priv_t *priv);
+
+vcl_priv_db_t *new_vcl_priv_db(struct vmod_redis_db *db);
+void free_vcl_priv_db(vcl_priv_db_t *db);
 
 redis_server_t *unsafe_get_redis_server(
     struct vmod_redis_db *db, const char *tag);

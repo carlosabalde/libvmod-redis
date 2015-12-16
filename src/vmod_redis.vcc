@@ -13,7 +13,7 @@ DESCRIPTION
 VMOD using the synchronous hiredis library API to access Redis servers from VCL.
 
 $Event event_function
-$Object db(STRING, INT, INT, INT, INT, BOOL, INT, BOOL, INT)
+$Object db(PRIV_VCL, STRING, INT, INT, INT, INT, BOOL, INT, BOOL, INT)
 
 Arguments
     location: Redis connection string. Both host + port and UNIX sockets are

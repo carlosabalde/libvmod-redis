@@ -148,10 +148,6 @@ Clustered setup
         # connections per server, all shared between all Varnish worker threads.
         # Two initial cluster servers are provided; remaining servers are
         # automatically discovered.
-        # WARNING: when sharing connection between worker threads, these
-        # connections are not discarded when switching VCL. They are only closed
-        # when the old VCL is discarded! This limitation will be fixed in future
-        # versions.
         new cluster = redis.db("192.168.1.100:6379", 500, 0, 0, 0, true, 100, true, 16);
         cluster.add_server("192.168.1.101:6379");
     }
