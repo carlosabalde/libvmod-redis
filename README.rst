@@ -3,7 +3,7 @@
    :alt: Travis CI badge
    :target: https://travis-ci.org/carlosabalde/libvmod-redis/
 
-VMOD using the synchronous hiredis library API (https://github.com/redis/hiredis) to access Redis servers from VCL.
+VMOD using the [synchronous hiredis library API](https://github.com/redis/hiredis) to access Redis servers from VCL.
 
 Highlights:
 
@@ -13,9 +13,9 @@ Highlights:
 * **Support for classic Redis deployments** using multiple Redis servers (replicated or standalone) **and for clustered deployments based on Redis Cluster**.
 * **Support for multiple Redis connections**, local to each Varnish worker thread, or shared using one or more pools.
 
-Please, check out the project wiki at https://github.com/carlosabalde/libvmod-redis/wiki for some extra information and useful links.
+Please, check out [the project wiki](https://github.com/carlosabalde/libvmod-redis/wiki) for some extra information and useful links.
 
-Looking for official support for this VMOD? Please, contact Allenta Consulting (http://www.allenta.com), the Varnish Software integration partner for Spain and Portugal (https://www.varnish-software.com/partner/allenta-consulting).
+Looking for official support for this VMOD? Please, contact [Allenta Consulting](https://www.allenta.com), a [Varnish Software Premium partner](https://www.varnish-software.com/partner/allenta-consulting).
 
 SYNOPSIS
 ========
@@ -25,7 +25,11 @@ import redis;
 ::
 
     # Configuration.
-    Object db(LOCATION, CONNECTION_TIMEOUT, CONNECTION_TTL, COMMAND_TIMEOUT, COMMAND_RETRIES, SHARED_CONTEXTS, MAX_CONTEXTS, CLUSTERED, MAX_CLUSTER_HOPS)
+    Object db(
+        LOCATION, CONNECTION_TIMEOUT, CONNECTION_TTL,
+        COMMAND_TIMEOUT, COMMAND_RETRIES,
+        SHARED_CONTEXTS, MAX_CONTEXTS,
+        CLUSTERED, MAX_CLUSTER_HOPS)
     Method VOID .add_server(LOCATION)
 
     # Command execution.
@@ -177,7 +181,7 @@ The source tree is based on autotools to configure the building, and does also h
 
 Dependencies:
 
-* hiredis - minimalistic C Redis client library (https://github.com/redis/hiredis)
+* [hiredis](https://github.com/redis/hiredis) - minimalistic C Redis client library.
 
 COPYRIGHT
 =========
