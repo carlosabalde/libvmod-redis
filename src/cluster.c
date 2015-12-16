@@ -158,15 +158,13 @@ unsafe_add_redis_server(struct vmod_redis_db *db, const char *location)
 {
     // Initializations.
     redis_server_t *result = NULL;
-    const char *tag = new_clustered_redis_server_tag(location);
+    const char *tag = location;
 
     // Register new server & slot if required.
     result = unsafe_get_redis_server(db, tag);
     if (result == NULL) {
         // Add new server.
-        result = new_redis_server(
-            db, NULL, location, 1,
-            db->cluster.connection_timeout, db->cluster.context_ttl);
+        result = new_redis_server(db, location);
         AN(result);
         VTAILQ_INSERT_TAIL(&db->servers, result, list);
 
@@ -176,9 +174,6 @@ unsafe_add_redis_server(struct vmod_redis_db *db, const char *location)
             VTAILQ_INSERT_TAIL(&db->pools, pool, list);
         }
     }
-
-    // Release previously allocated tag.
-    free((void *) tag);
 
     // Done!
     return result;
@@ -217,95 +212,91 @@ unsafe_discover_slots(VRT_CTX, struct vmod_redis_db *db)
     }
 
     // Contact already known clustered servers and try to fetch the
-    // slots-servers mapping: the current implementation does not allow
-    // mixing in a database clustered and standalone servers. All servers
-    // in the list will be clustered (i.e. the iserver->db->cluster.enabled
-    // check is not really useful).
+    // slots-servers mapping.
     redis_server_t *iserver;
     VTAILQ_FOREACH(iserver, &db->servers, list) {
-        if (iserver->db->cluster.enabled) {
-            // Check server.
-            CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
-            assert(iserver->type == REDIS_SERVER_HOST_TYPE);
+        // Check server.
+        CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
+        assert(iserver->type == REDIS_SERVER_HOST_TYPE);
 
-            // Create context.
-            redisContext *rcontext;
-            if ((iserver->connection_timeout.tv_sec > 0) || (iserver->connection_timeout.tv_usec > 0)) {
-                rcontext = redisConnectWithTimeout(
-                    iserver->location.address.host,
-                    iserver->location.address.port,
-                    iserver->connection_timeout);
-            } else {
-                rcontext = redisConnect(
-                    iserver->location.address.host,
-                    iserver->location.address.port);
+        // Create context.
+        redisContext *rcontext;
+        if ((iserver->db->connection_timeout.tv_sec > 0) ||
+            (iserver->db->connection_timeout.tv_usec > 0)) {
+            rcontext = redisConnectWithTimeout(
+                iserver->location.address.host,
+                iserver->location.address.port,
+                iserver->db->connection_timeout);
+        } else {
+            rcontext = redisConnect(
+                iserver->location.address.host,
+                iserver->location.address.port);
+        }
+        AN(rcontext);
+
+        // Check context.
+        if (!rcontext->err) {
+            // Set command execution timeout.
+            int tr = redisSetTimeout(rcontext, db->command_timeout);
+            if (tr != REDIS_OK) {
+                REDIS_LOG(ctx, "Failed to set command execution timeout (%d)", tr);
             }
-            AN(rcontext);
 
-            // Check context.
-            if (!rcontext->err) {
-                // Set command execution timeout.
-                int tr = redisSetTimeout(rcontext, db->command_timeout);
-                if (tr != REDIS_OK) {
-                    REDIS_LOG(ctx, "Failed to set command execution timeout (%d)", tr);
-                }
+            // Send command.
+            redisReply *reply = redisCommand(rcontext, DISCOVERY_COMMAND);
 
-                // Send command.
-                redisReply *reply = redisCommand(rcontext, DISCOVERY_COMMAND);
+            // Check reply.
+            if ((!rcontext->err) &&
+                (reply != NULL) &&
+                (reply->type == REDIS_REPLY_ARRAY)) {
+                // Extract slots.
+                for (i = 0; i < reply->elements; i++) {
+                    if ((reply->element[i]->type == REDIS_REPLY_ARRAY) &&
+                        (reply->element[i]->elements >= 3) &&
+                        (reply->element[i]->element[2]->type == REDIS_REPLY_ARRAY) &&
+                        (reply->element[i]->element[2]->elements == 2)) {
+                        // Extract slot data.
+                        int start = reply->element[i]->element[0]->integer;
+                        int end = reply->element[i]->element[1]->integer;
+                        char *host = reply->element[i]->element[2]->element[0]->str;
+                        int port = reply->element[i]->element[2]->element[1]->integer;
 
-                // Check reply.
-                if ((!rcontext->err) &&
-                    (reply != NULL) &&
-                    (reply->type == REDIS_REPLY_ARRAY)) {
-                    // Extract slots.
-                    for (i = 0; i < reply->elements; i++) {
-                        if ((reply->element[i]->type == REDIS_REPLY_ARRAY) &&
-                            (reply->element[i]->elements >= 3) &&
-                            (reply->element[i]->element[2]->type == REDIS_REPLY_ARRAY) &&
-                            (reply->element[i]->element[2]->elements == 2)) {
-                            // Extract slot data.
-                            int start = reply->element[i]->element[0]->integer;
-                            int end = reply->element[i]->element[1]->integer;
-                            char *host = reply->element[i]->element[2]->element[0]->str;
-                            int port = reply->element[i]->element[2]->element[1]->integer;
-
-                            // Check slot data.
-                            if ((start >= 0) && (start < MAX_REDIS_CLUSTER_SLOTS) &&
-                                (end >= 0) && (end < MAX_REDIS_CLUSTER_SLOTS)) {
-                                snprintf(
-                                    location, sizeof(location),
-                                    "%s:%d", host, port);
-                                unsafe_add_slot(db, start, end, location);
-                            }
+                        // Check slot data.
+                        if ((start >= 0) && (start < MAX_REDIS_CLUSTER_SLOTS) &&
+                            (end >= 0) && (end < MAX_REDIS_CLUSTER_SLOTS)) {
+                            snprintf(
+                                location, sizeof(location),
+                                "%s:%d", host, port);
+                            unsafe_add_slot(db, start, end, location);
                         }
                     }
-
-                    // Stop execution.
-                    stop = 1;
-                } else {
-                    REDIS_LOG(ctx,
-                        "Failed to execute Redis command (%s)",
-                        DISCOVERY_COMMAND);
                 }
 
-                // Release reply.
-                if (reply != NULL) {
-                    freeReplyObject(reply);
-                }
+                // Stop execution.
+                stop = 1;
             } else {
                 REDIS_LOG(ctx,
-                    "Failed to establish Redis connection (%d): %s",
-                    rcontext->err,
-                    rcontext->errstr);
+                    "Failed to execute Redis command (%s)",
+                    DISCOVERY_COMMAND);
             }
 
-            // Release context.
-            redisFree(rcontext);
-
-            // Slots-severs mapping already discovered?
-            if (stop) {
-                break;
+            // Release reply.
+            if (reply != NULL) {
+                freeReplyObject(reply);
             }
+        } else {
+            REDIS_LOG(ctx,
+                "Failed to establish Redis connection (%d): %s",
+                rcontext->err,
+                rcontext->errstr);
+        }
+
+        // Release context.
+        redisFree(rcontext);
+
+        // Slots-severs mapping already discovered?
+        if (stop) {
+            break;
         }
     }
 }
@@ -392,25 +383,20 @@ unsafe_get_random_cluster_tag(struct vmod_redis_db *db)
     // Initializations.
     const char *result = NULL;
 
-    // Look for a clustered server: the current implementation does not allow
-    // mixing in a database clustered and standalone servers. The first server
-    // in the list will always be clustered (i.e. the iserver->db->cluster.enabled
-    // is not really useful).
+    // Look for a clustered server.
     redis_server_t *iserver;
     VTAILQ_FOREACH(iserver, &db->servers, list) {
-        if (iserver->db->cluster.enabled) {
-            // Found!
-            CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
-            result = iserver->tag;
+        // Found!
+        CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
+        result = iserver->tag;
 
-            // Move the server to the end of the list (this ensures a nice
-            // distribution of load between all available servers).
-            VTAILQ_REMOVE(&db->servers, iserver, list);
-            VTAILQ_INSERT_TAIL(&db->servers, iserver, list);
+        // Move the server to the end of the list (this ensures a nice
+        // distribution of load between all available servers).
+        VTAILQ_REMOVE(&db->servers, iserver, list);
+        VTAILQ_INSERT_TAIL(&db->servers, iserver, list);
 
-            // Done!
-            break;
-        }
+        // Done!
+        break;
     }
 
     // Done!

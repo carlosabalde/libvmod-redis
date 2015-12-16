@@ -25,13 +25,11 @@ import redis;
 ::
 
     # Configuration.
-    Object db(TAG, LOCATION, CONNECTION_TIMEOUT, CONNECTION_TTL, COMMAND_TIMEOUT, COMMAND_RETRIES, MAX_CLUSTER_HOPS, SHARED_CONTEXTS, MAX_CONTEXTS)
-    Method VOID add_server(TAG, LOCATION, CONNECTION_TIMEOUT, CONNECTION_TTL)
-    Method VOID add_cserver(LOCATION)
+    Object db(LOCATION, CONNECTION_TIMEOUT, CONNECTION_TTL, COMMAND_TIMEOUT, COMMAND_RETRIES, SHARED_CONTEXTS, MAX_CONTEXTS, CLUSTERED, MAX_CLUSTER_HOPS)
+    Method VOID .add_server(LOCATION)
 
     # Command execution.
     Method VOID .command(COMMAND)
-    Method VOID .server(TAG)
     Method VOID .timeout(COMMAND_TIMEOUT)
     Method VOID .retries(COMMAND_RETRIES)
     Method VOID .push(ARGUMENT)
@@ -77,7 +75,7 @@ Single server
     sub vcl_init {
         # VMOD configuration: simple case, keeping up to one Redis connection
         # per Varnish worker thread.
-        new db = redis.db("main", "192.168.1.100:6379", 500, 0, 0, 0, 0, false, 1);
+        new db = redis.db("192.168.1.100:6379", 500, 0, 0, 0, , false, 1, false, 0);
     }
 
     sub vcl_deliver {
@@ -120,26 +118,24 @@ Multiple servers
         # VMOD configuration: master-slave replication, keeping up to two
         # Redis connections per Varnish worker thread (up to one to the master
         # server & up to one to a randomly selected slave server).
-        new db = redis.db("master", "192.168.1.100:6379", 500, 0, 0, 0, 0, false, 2);
-        db.add_server("slave", "192.168.1.101:6379", 500, 0);
-        db.add_server("slave", "192.168.1.102:6379", 500, 0);
-        db.add_server("slave", "192.168.1.103:6379", 500, 0);
+        new master = redis.db("192.168.1.100:6379", 500, 0, 0, 0, false, 1, false, 0);
+        new slave = redis.db("192.168.1.101:6379", 500, 0, 0, 0, false, 1, false, 0);
+        slave.add_server("192.168.1.102:6379");
+        slave.add_server("192.168.1.103:6379");
     }
 
     sub vcl_deliver {
         # SET submitted to the master server.
-        db.command("SET");
-        db.server("master");
-        db.push("foo");
-        db.push("Hello world!");
-        db.execute();
+        master.command("SET");
+        master.push("foo");
+        master.push("Hello world!");
+        master.execute();
 
         # GET submitted to one of the slave servers.
-        db.command("GET");
-        db.server("slave");
-        db.push("foo");
-        db.execute();
-        set req.http.X-Foo = db.get_string_reply();
+        slave.command("GET");
+        slave.push("foo");
+        slave.execute();
+        set req.http.X-Foo = slave.get_string_reply();
     }
 
 Clustered setup
@@ -152,22 +148,22 @@ Clustered setup
         # connections per server, all shared between all Varnish worker threads.
         # Two initial cluster servers are provided; remaining servers are
         # automatically discovered.
-        new db = redis.db("cluster", "192.168.1.100:6379", 500, 0, 0, 0, 16, true, 100);
-        db.add_cserver("192.168.1.101:6379");
+        new cluster = redis.db("192.168.1.100:6379", 500, 0, 0, 0, true, 100, true, 16);
+        cluster.add_server("192.168.1.101:6379");
     }
 
     sub vcl_deliver {
         # SET internally routed to the destination server.
-        db.command("SET");
-        db.push("foo");
-        db.push("Hello world!");
-        db.execute();
+        cluster.command("SET");
+        cluster.push("foo");
+        cluster.push("Hello world!");
+        cluster.execute();
 
         # GET internally routed to the destination server.
-        db.command("GET");
-        db.push("foo");
-        db.execute();
-        set req.http.X-Foo = db.get_string_reply();
+        cluster.command("GET");
+        cluster.push("foo");
+        cluster.execute();
+        set req.http.X-Foo = cluster.get_string_reply();
     }
 
 INSTALLATION

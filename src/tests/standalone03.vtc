@@ -9,48 +9,42 @@ varnish v1 -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
-        new db = redis.db("s1", "${redis_master1_address}", 500, 0, 0, 0, 0, false, 2);
-        db.add_server("s2", "${redis_master2_socket}", 500, 0);
+        new master1 = redis.db("${redis_master1_address}", 500, 0, 0, 0, false, 1, false, 0);
+        new master2 = redis.db("${redis_master2_address}", 500, 0, 0, 0, false, 1, false, 0);
     }
 
     sub vcl_deliver {
-        # SET (s1) -> GET (s1) -> GET (s2).
-        db.command("SET");
-        db.server("s1");
-        db.push("foo");
-        db.push("Hello world!");
-        db.execute();
+        # SET (master1) -> GET (master1) -> GET (master2).
+        master1.command("SET");
+        master1.push("foo");
+        master1.push("Hello world!");
+        master1.execute();
 
-        db.command("GET");
-        db.server("s1");
-        db.push("foo");
-        db.execute();
-        set resp.http.Reply-1 = db.get_reply();
+        master1.command("GET");
+        master1.push("foo");
+        master1.execute();
+        set resp.http.Reply-1 = master1.get_reply();
 
-        db.command("GET");
-        db.server("s2");
-        db.push("foo");
-        db.execute();
-        set resp.http.Reply-2 = db.get_reply();
+        master2.command("GET");
+        master2.push("foo");
+        master2.execute();
+        set resp.http.Reply-2 = master2.get_reply();
 
-        # SET (s2) -> GET (s2) -> GET (s1).
-        db.command("SET");
-        db.server("s2");
-        db.push("bar");
-        db.push("Hello world!");
-        db.execute();
+        # SET (master2) -> GET (master2) -> GET (master1).
+        master2.command("SET");
+        master2.push("bar");
+        master2.push("Hello world!");
+        master2.execute();
 
-        db.command("GET");
-        db.server("s2");
-        db.push("bar");
-        db.execute();
-        set resp.http.Reply-3 = db.get_reply();
+        master2.command("GET");
+        master2.push("bar");
+        master2.execute();
+        set resp.http.Reply-3 = master2.get_reply();
 
-        db.command("GET");
-        db.server("s1");
-        db.push("bar");
-        db.execute();
-        set resp.http.Reply-4 = db.get_reply();
+        master1.command("GET");
+        master1.push("bar");
+        master1.execute();
+        set resp.http.Reply-4 = master1.get_reply();
     }
 } -start
 
@@ -65,59 +59,4 @@ client c1 {
     expect resp.http.Reply-4 == ""
 } -run
 
-varnish v2 -vcl+backend {
-    import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
-
-    sub vcl_init {
-        new db1 = redis.db("foo", "${redis_master1_address}", 500, 0, 0, 0, 0, false, 1);
-        new db2 = redis.db("foo", "${redis_master2_address}", 500, 0, 0, 0, 0, false, 1);
-    }
-
-    sub vcl_deliver {
-        # SET (db1) -> GET (db1) -> GET (db2).
-        db1.command("SET");
-        db1.push("foo");
-        db1.push("Hello world!");
-        db1.execute();
-
-        db1.command("GET");
-        db1.push("foo");
-        db1.execute();
-        set resp.http.Reply-1 = db1.get_reply();
-
-        db2.command("GET");
-        db2.push("foo");
-        db2.execute();
-        set resp.http.Reply-2 = db2.get_reply();
-
-        # SET (db2) -> GET (db2) -> GET (db1).
-        db2.command("SET");
-        db2.push("bar");
-        db2.push("Hello world!");
-        db2.execute();
-
-        db2.command("GET");
-        db2.push("bar");
-        db2.execute();
-        set resp.http.Reply-3 = db2.get_reply();
-
-        db1.command("GET");
-        db1.push("bar");
-        db1.execute();
-        set resp.http.Reply-4 = db1.get_reply();
-    }
-} -start
-
-client c2 -connect ${v2_sock} {
-    txreq
-    rxresp
-
-    expect resp.http.Reply-1 == "Hello world!"
-    expect resp.http.Reply-2 == ""
-
-    expect resp.http.Reply-3 == "Hello world!"
-    expect resp.http.Reply-4 == ""
-} -run
-
 varnish v1 -expect client_req == 1
-varnish v2 -expect client_req == 1
