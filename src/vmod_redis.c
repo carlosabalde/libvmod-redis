@@ -328,7 +328,7 @@ vmod_db_replied(VRT_CTX, struct vmod_redis_db *db)
  * .reply_is_array();
  *****************************************************************************/
 
-#define VMOD_STORAGE_REPLY_IS_FOO(lower, upper) \
+#define VMOD_DB_REPLY_IS_FOO(lower, upper) \
 VCL_BOOL \
 vmod_db_reply_is_ ## lower(VRT_CTX, struct vmod_redis_db *db) \
 { \
@@ -339,12 +339,12 @@ vmod_db_reply_is_ ## lower(VRT_CTX, struct vmod_redis_db *db) \
         (state->command.reply->type == REDIS_REPLY_ ## upper); \
 }
 
-VMOD_STORAGE_REPLY_IS_FOO(error, ERROR)
-VMOD_STORAGE_REPLY_IS_FOO(nil, NIL)
-VMOD_STORAGE_REPLY_IS_FOO(status, STATUS)
-VMOD_STORAGE_REPLY_IS_FOO(integer, INTEGER)
-VMOD_STORAGE_REPLY_IS_FOO(string, STRING)
-VMOD_STORAGE_REPLY_IS_FOO(array, ARRAY)
+VMOD_DB_REPLY_IS_FOO(error, ERROR)
+VMOD_DB_REPLY_IS_FOO(nil, NIL)
+VMOD_DB_REPLY_IS_FOO(status, STATUS)
+VMOD_DB_REPLY_IS_FOO(integer, INTEGER)
+VMOD_DB_REPLY_IS_FOO(string, STRING)
+VMOD_DB_REPLY_IS_FOO(array, ARRAY)
 
 /******************************************************************************
  * .get_reply();
@@ -382,7 +382,7 @@ vmod_db_get_integer_reply(VRT_CTX, struct vmod_redis_db *db)
     }
 }
 
-#define VMOD_STORAGE_GET_FOO_REPLY(lower, upper) \
+#define VMOD_DB_GET_FOO_REPLY(lower, upper) \
 VCL_STRING \
 vmod_db_get_ ## lower ## _reply(VRT_CTX, struct vmod_redis_db *db) \
 { \
@@ -402,9 +402,9 @@ vmod_db_get_ ## lower ## _reply(VRT_CTX, struct vmod_redis_db *db) \
     } \
 }
 
-VMOD_STORAGE_GET_FOO_REPLY(error, ERROR)
-VMOD_STORAGE_GET_FOO_REPLY(status, STATUS)
-VMOD_STORAGE_GET_FOO_REPLY(string, STRING)
+VMOD_DB_GET_FOO_REPLY(error, ERROR)
+VMOD_DB_GET_FOO_REPLY(status, STATUS)
+VMOD_DB_GET_FOO_REPLY(string, STRING)
 
 /******************************************************************************
  * .get_array_reply_length();
@@ -432,7 +432,7 @@ vmod_db_get_array_reply_length(VRT_CTX, struct vmod_redis_db *db)
  * .array_reply_is_array();
  *****************************************************************************/
 
-#define VMOD_STORAGE_ARRAY_REPLY_IS_FOO(lower, upper) \
+#define VMOD_DB_ARRAY_REPLY_IS_FOO(lower, upper) \
 VCL_BOOL \
 vmod_db_array_reply_is_ ## lower(VRT_CTX, struct vmod_redis_db *db, VCL_INT index) \
 { \
@@ -445,12 +445,12 @@ vmod_db_array_reply_is_ ## lower(VRT_CTX, struct vmod_redis_db *db, VCL_INT inde
         (state->command.reply->element[index]->type == REDIS_REPLY_ ## upper); \
 }
 
-VMOD_STORAGE_ARRAY_REPLY_IS_FOO(error, ERROR)
-VMOD_STORAGE_ARRAY_REPLY_IS_FOO(nil, NIL)
-VMOD_STORAGE_ARRAY_REPLY_IS_FOO(status, STATUS)
-VMOD_STORAGE_ARRAY_REPLY_IS_FOO(integer, INTEGER)
-VMOD_STORAGE_ARRAY_REPLY_IS_FOO(string, STRING)
-VMOD_STORAGE_ARRAY_REPLY_IS_FOO(array, ARRAY)
+VMOD_DB_ARRAY_REPLY_IS_FOO(error, ERROR)
+VMOD_DB_ARRAY_REPLY_IS_FOO(nil, NIL)
+VMOD_DB_ARRAY_REPLY_IS_FOO(status, STATUS)
+VMOD_DB_ARRAY_REPLY_IS_FOO(integer, INTEGER)
+VMOD_DB_ARRAY_REPLY_IS_FOO(string, STRING)
+VMOD_DB_ARRAY_REPLY_IS_FOO(array, ARRAY)
 
 /******************************************************************************
  * .get_array_reply_value();
