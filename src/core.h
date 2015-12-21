@@ -68,36 +68,6 @@ typedef struct redis_context {
     VTAILQ_ENTRY(redis_context) list;
 } redis_context_t;
 
-<<<<<<< HEAD
-typedef struct redis_context_pool {
-    // Object marker.
-#define REDIS_CONTEXT_POOL_MAGIC 0x9700a5ef
-    unsigned magic;
-
-    // Tag (allocated in the heap).
-    const char *tag;
-
-    // Mutex & condition variable.
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;
-
-    // Contexts (allocated in the heap).
-    unsigned ncontexts;
-    VTAILQ_HEAD(,redis_context) free_contexts;
-    VTAILQ_HEAD(,redis_context) busy_contexts;
-
-    // Tail queue.
-    VTAILQ_ENTRY(redis_context_pool) list;
-} redis_context_pool_t;
-
-typedef struct vcl_priv {
-    // Object marker.
-#define VCL_PRIV_MAGIC 0x77feec11
-    unsigned magic;
-} vcl_priv_t;
-
-=======
->>>>>>> b8a4422... Simplified internals
 struct vmod_redis_db {
     // Object marker.
     unsigned magic;
@@ -214,6 +184,27 @@ typedef struct thread_state {
         redisReply *reply;
     } command;
 } thread_state_t;
+
+typedef struct vcl_priv_db {
+    // Object marker.
+#define VCL_PRIV_DB_MAGIC 0x9200fda1
+    unsigned magic;
+
+    // Database.
+    struct vmod_redis_db *db;
+
+    // Tail queue.
+    VTAILQ_ENTRY(vcl_priv_db) list;
+} vcl_priv_db_t;
+
+typedef struct vcl_priv {
+    // Object marker.
+#define VCL_PRIV_MAGIC 0x77feec11
+    unsigned magic;
+
+    // Databases.
+    VTAILQ_HEAD(,vcl_priv_db) dbs;
+} vcl_priv_t;
 
 #define REDIS_LOG(ctx, message, ...) \
     do { \
