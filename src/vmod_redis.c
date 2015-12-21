@@ -569,26 +569,12 @@ unsafe_add_redis_server(VRT_CTX, struct vmod_redis_db *db, const char *location)
     // Do not continue if we failed to create the server instance.
     // Caller should own db->mutex!
     if (result != NULL) {
-        // Add new server.
         VTAILQ_INSERT_TAIL(&db->servers, result, list);
-
-        // If required, add new pool.
-        if (db->shared_contexts) {
-            if (unsafe_get_context_pool(db, result->tag) == NULL) {
-                redis_context_pool_t *pool = new_redis_context_pool(result->tag);
-                VTAILQ_INSERT_TAIL(&db->pools, pool, list);
-            }
-        }
-
-        // Update stats.
         db->stats.servers.total++;
     } else {
-        // Log error.
         REDIS_LOG(ctx,
             "Failed to add server '%s'",
             location);
-
-        // Update stats.
         db->stats.servers.failed++;
     }
 
