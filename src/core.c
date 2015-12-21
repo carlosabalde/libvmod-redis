@@ -189,6 +189,26 @@ new_vmod_redis_db(
 
     VTAILQ_INIT(&result->pools);
 
+    result->stats.servers.total = 0;
+    result->stats.servers.failed = 0;
+    result->stats.connections.total = 0;
+    result->stats.connections.failed = 0;
+    result->stats.connections.dropped.error = 0;
+    result->stats.connections.dropped.hung_up = 0;
+    result->stats.connections.dropped.overflow = 0;
+    result->stats.connections.dropped.ttl = 0;
+    result->stats.connections.dropped.version = 0;
+    result->stats.workers.blocked = 0;
+    result->stats.commands.total = 0;
+    result->stats.commands.failed = 0;
+    result->stats.commands.retried = 0;
+    result->stats.commands.error = 0;
+    result->stats.commands.noscript = 0;
+    result->stats.cluster.discoveries.total = 0;
+    result->stats.cluster.discoveries.failed = 0;
+    result->stats.cluster.replies.moved = 0;
+    result->stats.cluster.replies.ask = 0;
+
     return result;
 }
 
@@ -226,6 +246,26 @@ free_vmod_redis_db(struct vmod_redis_db *db)
         VTAILQ_REMOVE(&db->pools, ipool, list);
         free_redis_context_pool(ipool);
     }
+
+    db->stats.servers.total = 0;
+    db->stats.servers.failed = 0;
+    db->stats.connections.total = 0;
+    db->stats.connections.failed = 0;
+    db->stats.connections.dropped.error = 0;
+    db->stats.connections.dropped.hung_up = 0;
+    db->stats.connections.dropped.overflow = 0;
+    db->stats.connections.dropped.ttl = 0;
+    db->stats.connections.dropped.version = 0;
+    db->stats.workers.blocked = 0;
+    db->stats.commands.total = 0;
+    db->stats.commands.failed = 0;
+    db->stats.commands.retried = 0;
+    db->stats.commands.error = 0;
+    db->stats.commands.noscript = 0;
+    db->stats.cluster.discoveries.total = 0;
+    db->stats.cluster.discoveries.failed = 0;
+    db->stats.cluster.replies.moved = 0;
+    db->stats.cluster.replies.ask = 0;
 
     FREE_OBJ(db);
 }
@@ -413,6 +453,11 @@ redis_execute(
                 freeReplyObject(result);
                 result = NULL;
 
+                // Update stats.
+                AZ(pthread_mutex_lock(&db->mutex));
+                db->stats.commands.noscript++;
+                AZ(pthread_mutex_unlock(&db->mutex));
+
             // Command execution is completed.
             } else {
                 done = 1;
@@ -426,17 +471,23 @@ redis_execute(
         }
 
         // Check reply.
+        AZ(pthread_mutex_lock(&db->mutex));
         if (context->rcontext->err) {
             REDIS_LOG(ctx,
                 "Failed to execute Redis command (%s): [%d] %s",
                 argv[0],
                 context->rcontext->err,
                 context->rcontext->errstr);
+            db->stats.commands.failed++;
         } else if (result == NULL) {
             REDIS_LOG(ctx,
                 "Failed to execute Redis command (%s)",
                 argv[0]);
+            db->stats.commands.failed++;
+        } else {
+            db->stats.commands.total++;
         }
+        AZ(pthread_mutex_unlock(&db->mutex));
 
         // Release context.
         unlock_redis_context(ctx, db, state, context);
@@ -451,13 +502,30 @@ redis_execute(
  *****************************************************************************/
 
 static unsigned
-is_valid_redis_context(redis_context_t *context, unsigned version, time_t now)
+is_valid_redis_context(
+    struct vmod_redis_db *db,
+    redis_context_t *context, unsigned version, time_t now)
 {
-    // Check if context is in an error state or if it's too old.
-    if ((context->rcontext->err) ||
-        (context->version != version) ||
-        ((context->server->db->context_ttl > 0) &&
-         (now - context->tst > context->server->db->context_ttl))) {
+    // Check if context is in an error state.
+    if (context->rcontext->err) {
+        AZ(pthread_mutex_lock(&db->mutex));
+        db->stats.connections.dropped.error++;
+        AZ(pthread_mutex_unlock(&db->mutex));
+        return 0;
+
+    // Check if context is too told (version).
+    } else if (context->version != version) {
+        AZ(pthread_mutex_lock(&db->mutex));
+        db->stats.connections.dropped.version++;
+        AZ(pthread_mutex_unlock(&db->mutex));
+        return 0;
+
+    // Check if context is too told (TTL).
+    } else if ((context->server->db->context_ttl > 0) &&
+               (now - context->tst > context->server->db->context_ttl)) {
+        AZ(pthread_mutex_lock(&db->mutex));
+        db->stats.connections.dropped.ttl++;
+        AZ(pthread_mutex_unlock(&db->mutex));
         return 0;
 
     // Check if context connection has been hung up by the server.
@@ -466,6 +534,9 @@ is_valid_redis_context(redis_context_t *context, unsigned version, time_t now)
         fds.fd = context->rcontext->fd;
         fds.events = POLLOUT;
         if ((poll(&fds, 1, 0) != 1) || (fds.revents & POLLHUP)) {
+            AZ(pthread_mutex_lock(&db->mutex));
+            db->stats.connections.dropped.hung_up++;
+            AZ(pthread_mutex_unlock(&db->mutex));
             return 0;
         }
     }
@@ -533,7 +604,9 @@ unsafe_pick_context_pool(struct vmod_redis_db *db, const char *tag)
 }
 
 static redisContext *
-new_rcontext(VRT_CTX, redis_server_t * server, unsigned version, time_t now)
+new_rcontext(
+    VRT_CTX, struct vmod_redis_db *db, redis_server_t * server,
+    unsigned version, time_t now)
 {
     redisContext *result;
 
@@ -577,6 +650,7 @@ new_rcontext(VRT_CTX, redis_server_t * server, unsigned version, time_t now)
     AN(result);
 
     // Check created context.
+    AZ(pthread_mutex_lock(&db->mutex));
     if (result->err) {
         REDIS_LOG(ctx,
             "Failed to establish Redis connection (%d): %s",
@@ -584,7 +658,11 @@ new_rcontext(VRT_CTX, redis_server_t * server, unsigned version, time_t now)
             result->errstr);
         redisFree(result);
         result = NULL;
+        db->stats.connections.failed++;
+    } else {
+        db->stats.connections.total++;
     }
+    AZ(pthread_mutex_unlock(&db->mutex));
 
 #if HIREDIS_MAJOR >= 0 && HIREDIS_MINOR >= 12
     // Enable TCP keep-alive.
@@ -628,7 +706,7 @@ lock_private_redis_context(
     }
 
     // Is the previously selected context valid?
-    if ((result != NULL) && (!is_valid_redis_context(result, version, now))) {
+    if ((result != NULL) && (!is_valid_redis_context(db, result, version, now))) {
         // Release context.
         VTAILQ_REMOVE(&state->contexts, result, list);
         state->ncontexts--;
@@ -655,11 +733,14 @@ lock_private_redis_context(
                 VTAILQ_REMOVE(&state->contexts, icontext, list);
                 state->ncontexts--;
                 free_redis_context(icontext);
+                AZ(pthread_mutex_lock(&db->mutex));
+                db->stats.connections.dropped.overflow++;
+                AZ(pthread_mutex_unlock(&db->mutex));
             }
 
             // Create new context using the previously selected server. If any
             // error arises discard the context and continue.
-            redisContext *rcontext = new_rcontext(ctx, server, version, now);
+            redisContext *rcontext = new_rcontext(ctx, db, server, version, now);
             if (rcontext != NULL) {
                 result = new_redis_context(server, rcontext, version, now);
                 VTAILQ_INSERT_TAIL(&state->contexts, result, list);
@@ -707,7 +788,7 @@ retry:
             VTAILQ_INSERT_TAIL(&pool->busy_contexts, result, list);
 
             // Is the context valid?
-            if (!is_valid_redis_context(result, version, now)) {
+            if (!is_valid_redis_context(db, result, version, now)) {
                 // Release context.
                 VTAILQ_REMOVE(&pool->busy_contexts, result, list);
                 pool->ncontexts--;
@@ -743,15 +824,21 @@ retry:
                         VTAILQ_REMOVE(&pool->free_contexts, icontext, list);
                         pool->ncontexts--;
                         free_redis_context(icontext);
+                        AZ(pthread_mutex_lock(&db->mutex));
+                        db->stats.connections.dropped.overflow++;
+                        AZ(pthread_mutex_unlock(&db->mutex));
                     } else {
                         AZ(pthread_cond_wait(&pool->cond, &pool->mutex));
+                        AZ(pthread_mutex_lock(&db->mutex));
+                        db->stats.workers.blocked++;
+                        AZ(pthread_mutex_unlock(&db->mutex));
                         goto retry;
                     }
                 }
 
                 // Create new context using the previously selected server. If any
                 // error arises discard the context and continue.
-                redisContext *rcontext = new_rcontext(ctx, server, version, now);
+                redisContext *rcontext = new_rcontext(ctx, db, server, version, now);
                 if (rcontext != NULL) {
                     result = new_redis_context(server, rcontext, version, now);
                     VTAILQ_INSERT_TAIL(&pool->busy_contexts, result, list);

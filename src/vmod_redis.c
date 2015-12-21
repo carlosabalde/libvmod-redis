@@ -294,6 +294,12 @@ vmod_db_execute(VRT_CTX, struct vmod_redis_db *db)
                     state->command.argc, state->command.argv, 0);
                 tries--;
             }
+
+            if (tries < state->command.retries) {
+                AZ(pthread_mutex_lock(&db->mutex));
+                db->stats.commands.retried += state->command.retries - tries;
+                AZ(pthread_mutex_unlock(&db->mutex));
+            }
         }
 
         // Log error replies (other errors are already logged while executing
@@ -304,6 +310,10 @@ vmod_db_execute(VRT_CTX, struct vmod_redis_db *db)
                 "Got error reply while executing Redis command (%s): %s",
                 state->command.argv[0],
                 state->command.reply->str);
+
+            AZ(pthread_mutex_lock(&db->mutex));
+            db->stats.commands.error++;
+            AZ(pthread_mutex_unlock(&db->mutex));
         }
     }
 }
@@ -481,6 +491,73 @@ vmod_db_free(VRT_CTX, struct vmod_redis_db *db)
 }
 
 /******************************************************************************
+ * .stats();
+ * redis.stats();
+ *****************************************************************************/
+
+VCL_STRING
+vmod_db_stats(VRT_CTX, struct vmod_redis_db *db)
+{
+    return WS_Printf(ctx->ws,
+        "{"
+          "\"severs\": {"
+            "\"total\": %d,"
+            "\"failed\": %d"
+          "},"
+          "\"connections\": {"
+            "\"total\": %d,"
+            "\"failed\": %d,"
+            "\"dropped\": {"
+              "\"error\": %d,"
+              "\"hung_up\": %d,"
+              "\"overflow\": %d,"
+              "\"ttl\": %d,"
+              "\"version\": %d"
+            "}"
+          "},"
+          "\"workers\": {"
+              "\"blocked\": %d"
+          "},"
+          "\"commands\": {"
+            "\"total\": %d,"
+            "\"failed\": %d,"
+            "\"retried\": %d,"
+            "\"error\": %d,"
+            "\"noscript\": %d"
+          "},"
+          "\"cluster\": {"
+            "\"discoveries\": {"
+              "\"total\": %d,"
+              "\"failed\": %d"
+            "},"
+            "\"replies\": {"
+              "\"moved\": %d,"
+              "\"ask\": %d"
+            "}"
+          "}"
+        "}",
+        db->stats.servers.total,
+        db->stats.servers.failed,
+        db->stats.connections.total,
+        db->stats.connections.failed,
+        db->stats.connections.dropped.error,
+        db->stats.connections.dropped.hung_up,
+        db->stats.connections.dropped.overflow,
+        db->stats.connections.dropped.ttl,
+        db->stats.connections.dropped.version,
+        db->stats.workers.blocked,
+        db->stats.commands.total,
+        db->stats.commands.failed,
+        db->stats.commands.retried,
+        db->stats.commands.error,
+        db->stats.commands.noscript,
+        db->stats.cluster.discoveries.total,
+        db->stats.cluster.discoveries.failed,
+        db->stats.cluster.replies.moved,
+        db->stats.cluster.replies.ask);
+}
+
+/******************************************************************************
  * UTILITIES.
  *****************************************************************************/
 
@@ -545,10 +622,17 @@ unsafe_add_redis_server(VRT_CTX, struct vmod_redis_db *db, const char *location)
                 VTAILQ_INSERT_TAIL(&db->pools, pool, list);
             }
         }
+
+        // Update stats.
+        db->stats.servers.total++;
     } else {
+        // Log error.
         REDIS_LOG(ctx,
             "Failed to add server '%s'",
             location);
+
+        // Update stats.
+        db->stats.servers.failed++;
     }
 
     // Done!
