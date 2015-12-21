@@ -28,7 +28,7 @@ typedef struct redis_server {
     // Type & location.
     enum REDIS_SERVER_TYPE type;
     union {
-        struct address {
+        struct {
             const char *host;
             unsigned port;
         } address;
@@ -101,7 +101,7 @@ struct vmod_redis_db {
     unsigned max_contexts;
 
     // Redis Cluster options / state (allocated in the heap).
-    struct cluster {
+    struct {
         unsigned enabled;
         unsigned max_hops;
         const char *slots[MAX_REDIS_CLUSTER_SLOTS];
@@ -109,6 +109,72 @@ struct vmod_redis_db {
 
     // Shared contexts (allocated in the heap).
     VTAILQ_HEAD(,redis_context_pool) pools;
+
+    // Stats.
+    struct stats {
+        struct {
+            // Number of successfully created servers.
+            unsigned total;
+            // Number of failures while trying to create new servers.
+            unsigned failed;
+        } servers;
+
+        struct {
+            // Number of successfully created connections.
+            unsigned total;
+            // Number of failures while trying to create new connections.
+            unsigned failed;
+            // Number of (established and probably healthy) connections dropped.
+            struct {
+                unsigned error;
+                unsigned hung_up;
+                unsigned overflow;
+                unsigned ttl;
+                unsigned version;
+            } dropped;
+        } connections;
+
+        struct {
+            // Number of times some worker thread have been blocked waiting for
+            // a free connection.
+            unsigned blocked;
+        } workers;
+
+        struct {
+            // Number of successfully executed commands (this includes Redis
+            // error replies).
+            unsigned total;
+            // Number of failed command executions (this does not include Redis
+            // error replies). If retries have been requested, each failed try
+            // is considered as a separate command.
+            unsigned failed;
+            // Number of retried command executions (this includes both
+            // successful and failed executions).
+            unsigned retried;
+            // Number of successfully executed commands returning a Redis error
+            // reply.
+            unsigned error;
+            // Number of NOSCRIPT error replies while executing EVALSHA
+            // commands.
+            unsigned noscript;
+        } commands;
+
+        struct {
+            struct {
+                // Number of successfully executed discoveries.
+                unsigned total;
+                // Number of failed discoveries (this includes connection
+                // failures, unexpected responses, etc.).
+                unsigned failed;
+            } discoveries;
+            struct {
+                // Number of MOVED replies.
+                unsigned moved;
+                // Number of ASK replies.
+                unsigned ask;
+            } replies;
+        } cluster;
+    } stats;
 };
 
 typedef struct thread_state {
@@ -125,7 +191,7 @@ typedef struct thread_state {
     //   - Arguments (allocated in the session workspace).
     //   - Reply (allocated in the heap).
 #define MAX_REDIS_COMMAND_ARGS 128
-    struct command {
+    struct {
         struct vmod_redis_db *db;
         struct timeval timeout;
         unsigned retries;

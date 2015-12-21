@@ -272,3 +272,8 @@ Description
     Frees memory internally used by Redis commands an replies. It's recommended to
     use this function, but if not called this will be handled automatically during
     the next call to ``.command()`` using the same object.
+
+$Method STRING .stats()
+
+Description
+    Returns internal stats.
