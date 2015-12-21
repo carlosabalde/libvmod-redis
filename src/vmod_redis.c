@@ -458,7 +458,8 @@ vmod_db_free(VRT_CTX, struct vmod_redis_db *db)
 VCL_STRING
 vmod_db_stats(VRT_CTX, struct vmod_redis_db *db)
 {
-    return WS_Printf(ctx->ws,
+    AZ(pthread_mutex_lock(&db->mutex));
+    char *result = WS_Printf(ctx->ws,
         "{"
           "\"severs\": {"
             "\"total\": %d,"
@@ -515,6 +516,8 @@ vmod_db_stats(VRT_CTX, struct vmod_redis_db *db)
         db->stats.cluster.discoveries.failed,
         db->stats.cluster.replies.moved,
         db->stats.cluster.replies.ask);
+    AZ(pthread_mutex_unlock(&db->mutex));
+    return result;
 }
 
 /******************************************************************************
