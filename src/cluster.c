@@ -90,12 +90,18 @@ cluster_execute(
                     // ASK vs. MOVED.
                     AZ(pthread_mutex_lock(&db->mutex));
                     if (strncmp(result->str, "MOVED", 3) == 0) {
+                        // Update stats.
+                        db->stats.cluster.replies.moved++;
+
                         // Ignore reply and rediscover the cluster topology.
                         // XXX: at the moment this implementation may result in
                         // multiple threads executing multiple -serialized-
                         // cluster discoveries.
                         unsafe_discover_slots(ctx, db);
                     } else {
+                        // Update stats.
+                        db->stats.cluster.replies.ask++;
+
                         // Extract location (e.g. ASK 3999 127.0.0.1:6381).
                         char *ptr = strchr(result->str, ' ');
                         AN(ptr);
@@ -127,6 +133,10 @@ cluster_execute(
             } else {
                 tries--;
                 random = 1;
+
+                AZ(pthread_mutex_lock(&db->mutex));
+                db->stats.commands.retried++;
+                AZ(pthread_mutex_unlock(&db->mutex));
             }
         }
 
@@ -280,6 +290,7 @@ unsafe_discover_slots(VRT_CTX, struct vmod_redis_db *db)
                 REDIS_LOG(ctx,
                     "Failed to execute Redis command (%s)",
                     DISCOVERY_COMMAND);
+                db->stats.cluster.discoveries.failed++;
             }
 
             // Release reply.
@@ -291,6 +302,7 @@ unsafe_discover_slots(VRT_CTX, struct vmod_redis_db *db)
                 "Failed to establish Redis connection (%d): %s",
                 rcontext->err,
                 rcontext->errstr);
+            db->stats.cluster.discoveries.failed++;
         }
 
         // Release context.
@@ -298,6 +310,7 @@ unsafe_discover_slots(VRT_CTX, struct vmod_redis_db *db)
 
         // Slots-severs mapping already discovered?
         if (stop) {
+            db->stats.cluster.discoveries.total++;
             break;
         }
     }
