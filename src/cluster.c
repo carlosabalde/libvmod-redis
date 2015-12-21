@@ -164,27 +164,39 @@ cluster_execute(
  *****************************************************************************/
 
 static redis_server_t *
+unsafe_get_redis_server(struct vmod_redis_db *db, const char *location)
+{
+    // Initializations.
+    redis_server_t *result = NULL;
+
+    // Look for a server matching the tag.
+    // Beware location is used as tag.
+    redis_server_t *iserver;
+    VTAILQ_FOREACH(iserver, &db->servers, list) {
+        if (strcmp(location, iserver->tag) == 0) {
+            CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
+            result = iserver;
+            break;
+        }
+    }
+
+    // Done!
+    return result;
+}
+
+static redis_server_t *
 unsafe_add_redis_server(struct vmod_redis_db *db, const char *location)
 {
     // Initializations.
     redis_server_t *result = NULL;
-    const char *tag = location;
 
     // Register new server & slot if required.
-    result = unsafe_get_redis_server(db, tag);
+    result = unsafe_get_redis_server(db, location);
     if (result == NULL) {
-        // Add new server.
         result = new_redis_server(db, location);
         AN(result);
         VTAILQ_INSERT_TAIL(&db->servers, result, list);
-
-        // If required, add new pool.
-        if (db->shared_contexts) {
-            if (unsafe_get_context_pool(db, result->tag) == NULL) {
-                redis_context_pool_t *pool = new_redis_context_pool(result->tag);
-                VTAILQ_INSERT_TAIL(&db->pools, pool, list);
-            }
-        }
+        db->stats.servers.total++;
     }
 
     // Done!
@@ -233,12 +245,12 @@ unsafe_discover_slots(VRT_CTX, struct vmod_redis_db *db)
 
         // Create context.
         redisContext *rcontext;
-        if ((iserver->db->connection_timeout.tv_sec > 0) ||
-            (iserver->db->connection_timeout.tv_usec > 0)) {
+        if ((db->connection_timeout.tv_sec > 0) ||
+            (db->connection_timeout.tv_usec > 0)) {
             rcontext = redisConnectWithTimeout(
                 iserver->location.address.host,
                 iserver->location.address.port,
-                iserver->db->connection_timeout);
+                db->connection_timeout);
         } else {
             rcontext = redisConnect(
                 iserver->location.address.host,
