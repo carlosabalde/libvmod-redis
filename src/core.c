@@ -54,6 +54,13 @@ new_redis_server(struct vmod_redis_db *db, const char *location)
             result->location.path = strdup(location);
             AN(result->location.path);
         }
+
+        AZ(pthread_mutex_init(&result->pool.mutex, NULL));
+        AZ(pthread_cond_init(&result->pool.cond, NULL));
+
+        result->pool.ncontexts = 0;
+        VTAILQ_INIT(&result->pool.free_contexts);
+        VTAILQ_INIT(&result->pool.busy_contexts);
     }
 
     // Done!
@@ -79,6 +86,22 @@ free_redis_server(redis_server_t *server)
             free((void *) server->location.path);
             server->location.path = NULL;
             break;
+    }
+
+    AZ(pthread_mutex_destroy(&server->pool.mutex));
+    AZ(pthread_cond_destroy(&server->pool.cond));
+
+    server->pool.ncontexts = 0;
+    redis_context_t *icontext;
+    while (!VTAILQ_EMPTY(&server->pool.free_contexts)) {
+        icontext = VTAILQ_FIRST(&server->pool.free_contexts);
+        VTAILQ_REMOVE(&server->pool.free_contexts, icontext, list);
+        free_redis_context(icontext);
+    }
+    while (!VTAILQ_EMPTY(&server->pool.busy_contexts)) {
+        icontext = VTAILQ_FIRST(&server->pool.busy_contexts);
+        VTAILQ_REMOVE(&server->pool.busy_contexts, icontext, list);
+        free_redis_context(icontext);
     }
 
     FREE_OBJ(server);
@@ -114,51 +137,6 @@ free_redis_context(redis_context_t *context)
     FREE_OBJ(context);
 }
 
-redis_context_pool_t *
-new_redis_context_pool(const char *tag)
-{
-    redis_context_pool_t *result;
-    ALLOC_OBJ(result, REDIS_CONTEXT_POOL_MAGIC);
-    AN(result);
-
-    result->tag = strdup(tag);
-    AN(result->tag);
-
-    AZ(pthread_mutex_init(&result->mutex, NULL));
-    AZ(pthread_cond_init(&result->cond, NULL));
-
-    result->ncontexts = 0;
-    VTAILQ_INIT(&result->free_contexts);
-    VTAILQ_INIT(&result->busy_contexts);
-
-    return result;
-}
-
-void
-free_redis_context_pool(redis_context_pool_t *pool)
-{
-    free((void *) pool->tag);
-    pool->tag = NULL;
-
-    AZ(pthread_mutex_destroy(&pool->mutex));
-    AZ(pthread_cond_destroy(&pool->cond));
-
-    pool->ncontexts = 0;
-    redis_context_t *icontext;
-    while (!VTAILQ_EMPTY(&pool->free_contexts)) {
-        icontext = VTAILQ_FIRST(&pool->free_contexts);
-        VTAILQ_REMOVE(&pool->free_contexts, icontext, list);
-        free_redis_context(icontext);
-    }
-    while (!VTAILQ_EMPTY(&pool->busy_contexts)) {
-        icontext = VTAILQ_FIRST(&pool->busy_contexts);
-        VTAILQ_REMOVE(&pool->busy_contexts, icontext, list);
-        free_redis_context(icontext);
-    }
-
-    FREE_OBJ(pool);
-}
-
 struct vmod_redis_db *
 new_vmod_redis_db(
     struct timeval connection_timeout, unsigned context_ttl,
@@ -186,8 +164,6 @@ new_vmod_redis_db(
     for (int i = 0; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
         result->cluster.slots[i] = NULL;
     }
-
-    VTAILQ_INIT(&result->pools);
 
     result->stats.servers.total = 0;
     result->stats.servers.failed = 0;
@@ -238,13 +214,6 @@ free_vmod_redis_db(struct vmod_redis_db *db)
             free((void *) (db->cluster.slots[i]));
             db->cluster.slots[i] = NULL;
         }
-    }
-
-    redis_context_pool_t *ipool;
-    while (!VTAILQ_EMPTY(&db->pools)) {
-        ipool = VTAILQ_FIRST(&db->pools);
-        VTAILQ_REMOVE(&db->pools, ipool, list);
-        free_redis_context_pool(ipool);
     }
 
     db->stats.servers.total = 0;
@@ -354,48 +323,6 @@ free_vcl_priv_db(vcl_priv_db_t *db)
     db->db = NULL;
 
     FREE_OBJ(db);
-}
-
-redis_server_t *
-unsafe_get_redis_server(struct vmod_redis_db *db, const char *tag)
-{
-    // Initializations.
-    redis_server_t *result = NULL;
-
-    // Look for a server matching the tag.
-    // Caller should own db->mutex!
-    redis_server_t *iserver;
-    VTAILQ_FOREACH(iserver, &db->servers, list) {
-        if (strcmp(tag, iserver->tag) == 0) {
-            CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
-            result = iserver;
-            break;
-        }
-    }
-
-    // Done!
-    return result;
-}
-
-redis_context_pool_t *
-unsafe_get_context_pool(struct vmod_redis_db *db, const char *tag)
-{
-    // Initializations.
-    redis_context_pool_t *result = NULL;
-
-    // Look for a pool matching the tag.
-    // Caller should own db->mutex!
-    redis_context_pool_t *ipool;
-    VTAILQ_FOREACH(ipool, &db->pools, list) {
-        if (strcmp(tag, ipool->tag) == 0) {
-            CHECK_OBJ_NOTNULL(ipool, REDIS_CONTEXT_POOL_MAGIC);
-            result = ipool;
-            break;
-        }
-      }
-
-    // Done!
-    return result;
 }
 
 redisReply *
@@ -521,8 +448,7 @@ is_valid_redis_context(
         return 0;
 
     // Check if context is too told (TTL).
-    } else if ((context->server->db->context_ttl > 0) &&
-               (now - context->tst > context->server->db->context_ttl)) {
+    } else if ((db->context_ttl > 0) && (now - context->tst > db->context_ttl)) {
         AZ(pthread_mutex_lock(&db->mutex));
         db->stats.connections.dropped.ttl++;
         AZ(pthread_mutex_unlock(&db->mutex));
@@ -574,35 +500,6 @@ unsafe_pick_redis_server(struct vmod_redis_db *db, const char *tag)
     return result;
 }
 
-static redis_context_pool_t *
-unsafe_pick_context_pool(struct vmod_redis_db *db, const char *tag)
-{
-    // Initializations.
-    redis_context_pool_t *result = NULL;
-
-    // Look for a pool matching the tag.
-    // Caller should own db->mutex!
-    redis_context_pool_t *ipool;
-    VTAILQ_FOREACH(ipool, &db->pools, list) {
-        if ((tag == NULL) || (strcmp(tag, ipool->tag) == 0)) {
-            // Found!
-            CHECK_OBJ_NOTNULL(ipool, REDIS_CONTEXT_POOL_MAGIC);
-            result = ipool;
-
-            // Move the pool to the end of the list (this ensures a nice
-            // distribution of load between all available pools).
-            VTAILQ_REMOVE(&db->pools, result, list);
-            VTAILQ_INSERT_TAIL(&db->pools, result, list);
-
-            // Done!
-            break;
-        }
-    }
-
-    // Done!
-    return result;
-}
-
 static redisContext *
 new_rcontext(
     VRT_CTX, struct vmod_redis_db *db, redis_server_t * server,
@@ -611,20 +508,20 @@ new_rcontext(
     redisContext *result;
 
     // Create context.
-    if ((server->db->connection_timeout.tv_sec > 0) ||
-        (server->db->connection_timeout.tv_usec > 0)) {
+    if ((db->connection_timeout.tv_sec > 0) ||
+        (db->connection_timeout.tv_usec > 0)) {
         switch (server->type) {
             case REDIS_SERVER_HOST_TYPE:
                 result = redisConnectWithTimeout(
                     server->location.address.host,
                     server->location.address.port,
-                    server->db->connection_timeout);
+                    db->connection_timeout);
                 break;
 
             case REDIS_SERVER_SOCKET_TYPE:
                 result = redisConnectUnixWithTimeout(
                     server->location.path,
-                    server->db->connection_timeout);
+                    db->connection_timeout);
                 break;
 
             default:
@@ -747,7 +644,7 @@ lock_private_redis_context(
                 state->ncontexts++;
             }
         } else {
-            REDIS_LOG(ctx, "The requested server does not exist: %s", tag);
+            REDIS_LOG(ctx, "Failed to pick Redis server: %s", tag);
         }
     }
 
@@ -760,38 +657,36 @@ lock_shared_redis_context(
     VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
     const char *tag, unsigned version)
 {
-    redis_context_t *icontext;
-
     // Initializations.
     redis_context_t *result = NULL;
     time_t now = time(NULL);
 
-    // Fetch pool instance.
+    // Select server matching the requested tag.
     AZ(pthread_mutex_lock(&db->mutex));
-    redis_context_pool_t *pool = unsafe_pick_context_pool(db, tag);
+    redis_server_t *server = unsafe_pick_redis_server(db, tag);
     AZ(pthread_mutex_unlock(&db->mutex));
 
-    // Do not continue if a pool was not found.
-    if (pool != NULL) {
+    // Do not continue if a server was not found.
+    if (server != NULL) {
         // Get pool lock.
-        AZ(pthread_mutex_lock(&pool->mutex));
+        AZ(pthread_mutex_lock(&server->pool.mutex));
 
 retry:
         // Look for an existing free context.
-        while (!VTAILQ_EMPTY(&pool->free_contexts)) {
+        while (!VTAILQ_EMPTY(&server->pool.free_contexts)) {
             // Extract context.
-            result = VTAILQ_FIRST(&pool->free_contexts);
+            result = VTAILQ_FIRST(&server->pool.free_contexts);
             CHECK_OBJ_NOTNULL(result, REDIS_CONTEXT_MAGIC);
 
             // Mark the context as busy.
-            VTAILQ_REMOVE(&pool->free_contexts, result, list);
-            VTAILQ_INSERT_TAIL(&pool->busy_contexts, result, list);
+            VTAILQ_REMOVE(&server->pool.free_contexts, result, list);
+            VTAILQ_INSERT_TAIL(&server->pool.busy_contexts, result, list);
 
             // Is the context valid?
             if (!is_valid_redis_context(db, result, version, now)) {
                 // Release context.
-                VTAILQ_REMOVE(&pool->busy_contexts, result, list);
-                pool->ncontexts--;
+                VTAILQ_REMOVE(&server->pool.busy_contexts, result, list);
+                server->pool.ncontexts--;
                 free_redis_context(result);
 
                 // A new context needs to be selected.
@@ -803,58 +698,35 @@ retry:
             }
         }
 
-        // If required, create new context using a randomly selected server matching
-        // the requested tag. If any error arises discard the context and continue.
-        // If maximum number of contexts has been reached, wait for another thread
-        // releasing some context or, if possible, discard some existing free context.
+        // If required, create new context using the currently selected server. If any
+        // error arises discard the context and continue. If maximum number of contexts
+        // has been reached, wait for another thread releasing some context.
         if (result == NULL) {
-            // Select server matching the requested tag.
-            AZ(pthread_mutex_lock(&db->mutex));
-            redis_server_t *server = unsafe_pick_redis_server(db, tag);
-            AZ(pthread_mutex_unlock(&db->mutex));
+            // If an empty slot is not available, wait for another thread.
+            if (server->pool.ncontexts >= db->max_contexts) {
+                AZ(pthread_cond_wait(&server->pool.cond, &server->pool.mutex));
+                AZ(pthread_mutex_lock(&db->mutex));
+                db->stats.workers.blocked++;
+                AZ(pthread_mutex_unlock(&db->mutex));
+                goto retry;
+            }
 
-            // Do not continue if a server was not found.
-            if (server != NULL) {
-                // If an empty slot is not available, release an existing free context
-                // or wait for another thread.
-                if (pool->ncontexts >= db->max_contexts) {
-                    if (!VTAILQ_EMPTY(&pool->free_contexts)) {
-                        icontext = VTAILQ_FIRST(&pool->free_contexts);
-                        CHECK_OBJ_NOTNULL(icontext, REDIS_CONTEXT_MAGIC);
-                        VTAILQ_REMOVE(&pool->free_contexts, icontext, list);
-                        pool->ncontexts--;
-                        free_redis_context(icontext);
-                        AZ(pthread_mutex_lock(&db->mutex));
-                        db->stats.connections.dropped.overflow++;
-                        AZ(pthread_mutex_unlock(&db->mutex));
-                    } else {
-                        AZ(pthread_cond_wait(&pool->cond, &pool->mutex));
-                        AZ(pthread_mutex_lock(&db->mutex));
-                        db->stats.workers.blocked++;
-                        AZ(pthread_mutex_unlock(&db->mutex));
-                        goto retry;
-                    }
-                }
-
-                // Create new context using the previously selected server. If any
-                // error arises discard the context and continue.
-                redisContext *rcontext = new_rcontext(ctx, db, server, version, now);
-                if (rcontext != NULL) {
-                    result = new_redis_context(server, rcontext, version, now);
-                    VTAILQ_INSERT_TAIL(&pool->busy_contexts, result, list);
-                    pool->ncontexts++;
-                }
-            } else {
-                REDIS_LOG(ctx, "The requested server does not exist: %s", tag);
+            // Create new context using the previously selected server. If any
+            // error arises discard the context and continue.
+            redisContext *rcontext = new_rcontext(ctx, db, server, version, now);
+            if (rcontext != NULL) {
+                result = new_redis_context(server, rcontext, version, now);
+                VTAILQ_INSERT_TAIL(&server->pool.busy_contexts, result, list);
+                server->pool.ncontexts++;
             }
         }
 
         // Release pool lock.
-        AZ(pthread_mutex_unlock(&pool->mutex));
+        AZ(pthread_mutex_unlock(&server->pool.mutex));
 
-    // The poll was not found.
+    // The server was not found.
     } else {
-        REDIS_LOG(ctx, "The requested server does not exist: %s", tag);
+        REDIS_LOG(ctx, "Failed to pick Redis server: %s", tag);
     }
 
     // Done!
@@ -881,18 +753,12 @@ unlock_shared_redis_context(
     CHECK_OBJ_NOTNULL(context, REDIS_CONTEXT_MAGIC);
     CHECK_OBJ_NOTNULL(context->server, REDIS_SERVER_MAGIC);
 
-    // Fetch pool instance.
-    AZ(pthread_mutex_lock(&db->mutex));
-    redis_context_pool_t *pool = unsafe_get_context_pool(db, context->server->tag);
-    AN(pool);
-    AZ(pthread_mutex_unlock(&db->mutex));
-
     // Return context to the pool's free list.
-    AZ(pthread_mutex_lock(&pool->mutex));
-    VTAILQ_REMOVE(&pool->busy_contexts, context, list);
-    VTAILQ_INSERT_TAIL(&pool->free_contexts, context, list);
-    AZ(pthread_cond_signal(&pool->cond));
-    AZ(pthread_mutex_unlock(&pool->mutex));
+    AZ(pthread_mutex_lock(&context->server->pool.mutex));
+    VTAILQ_REMOVE(&context->server->pool.busy_contexts, context, list);
+    VTAILQ_INSERT_TAIL(&context->server->pool.free_contexts, context, list);
+    AZ(pthread_cond_signal(&context->server->pool.cond));
+    AZ(pthread_mutex_unlock(&context->server->pool.mutex));
 }
 
 static void

@@ -614,26 +614,12 @@ unsafe_add_redis_server(VRT_CTX, struct vmod_redis_db *db, const char *location)
     // Do not continue if we failed to create the server instance.
     // Caller should own db->mutex!
     if (result != NULL) {
-        // Add new server.
         VTAILQ_INSERT_TAIL(&db->servers, result, list);
-
-        // If required, add new pool.
-        if (db->shared_contexts) {
-            if (unsafe_get_context_pool(db, result->tag) == NULL) {
-                redis_context_pool_t *pool = new_redis_context_pool(result->tag);
-                VTAILQ_INSERT_TAIL(&db->pools, pool, list);
-            }
-        }
-
-        // Update stats.
         db->stats.servers.total++;
     } else {
-        // Log error.
         REDIS_LOG(ctx,
             "Failed to add server '%s'",
             location);
-
-        // Update stats.
         db->stats.servers.failed++;
     }
 
@@ -694,28 +680,28 @@ handle_vcl_cold_event(VRT_CTX, vcl_priv_t *config)
             AZ(pthread_mutex_lock(&idb->db->mutex));
 
             // Release contexts in all pools.
-            redis_context_pool_t *ipool;
-            VTAILQ_FOREACH(ipool, &idb->db->pools, list) {
+            redis_server_t *iserver;
+            VTAILQ_FOREACH(iserver, &idb->db->servers, list) {
                 // Get pool lock.
-                AZ(pthread_mutex_lock(&ipool->mutex));
+                AZ(pthread_mutex_lock(&iserver->pool.mutex));
 
                 // Release all contexts (both free an busy; this method is
                 // assumed to be called when threads are not using the pool).
-                ipool->ncontexts = 0;
+                iserver->pool.ncontexts = 0;
                 redis_context_t *icontext;
-                while (!VTAILQ_EMPTY(&ipool->free_contexts)) {
-                    icontext = VTAILQ_FIRST(&ipool->free_contexts);
-                    VTAILQ_REMOVE(&ipool->free_contexts, icontext, list);
+                while (!VTAILQ_EMPTY(&iserver->pool.free_contexts)) {
+                    icontext = VTAILQ_FIRST(&iserver->pool.free_contexts);
+                    VTAILQ_REMOVE(&iserver->pool.free_contexts, icontext, list);
                     free_redis_context(icontext);
                 }
-                while (!VTAILQ_EMPTY(&ipool->busy_contexts)) {
-                    icontext = VTAILQ_FIRST(&ipool->busy_contexts);
-                    VTAILQ_REMOVE(&ipool->busy_contexts, icontext, list);
+                while (!VTAILQ_EMPTY(&iserver->pool.busy_contexts)) {
+                    icontext = VTAILQ_FIRST(&iserver->pool.busy_contexts);
+                    VTAILQ_REMOVE(&iserver->pool.busy_contexts, icontext, list);
                     free_redis_context(icontext);
                 }
 
                 // Release pool lock.
-                AZ(pthread_mutex_unlock(&ipool->mutex));
+                AZ(pthread_mutex_unlock(&iserver->pool.mutex));
             }
 
             // Release database lock.

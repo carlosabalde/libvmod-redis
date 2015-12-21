@@ -22,7 +22,7 @@ typedef struct redis_server {
     // Database.
     struct vmod_redis_db *db;
 
-    // Tag (allocated in the heap).
+    // Tag: NULL or ip:port (allocated in the heap).
     const char *tag;
 
     // Type & location.
@@ -35,6 +35,18 @@ typedef struct redis_server {
         const char *path;
     } location;
 
+    // Shared pool.
+    struct {
+        // Mutex & condition variable.
+        pthread_mutex_t mutex;
+        pthread_cond_t cond;
+
+        // Contexts (allocated in the heap).
+        unsigned ncontexts;
+        VTAILQ_HEAD(,redis_context) free_contexts;
+        VTAILQ_HEAD(,redis_context) busy_contexts;
+    } pool;
+
     // Tail queue.
     VTAILQ_ENTRY(redis_server) list;
 } redis_server_t;
@@ -44,8 +56,10 @@ typedef struct redis_context {
 #define REDIS_CONTEXT_MAGIC 0xe11eaa70
     unsigned magic;
 
-    // Data (allocated in the heap).
+    // Server.
     redis_server_t *server;
+
+    // Data (allocated in the heap).
     redisContext *rcontext;
     unsigned version;
     time_t tst;
@@ -53,27 +67,6 @@ typedef struct redis_context {
     // Tail queue.
     VTAILQ_ENTRY(redis_context) list;
 } redis_context_t;
-
-typedef struct redis_context_pool {
-    // Object marker.
-#define REDIS_CONTEXT_POOL_MAGIC 0x9700a5ef
-    unsigned magic;
-
-    // Tag (allocated in the heap).
-    const char *tag;
-
-    // Mutex & condition variable.
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;
-
-    // Contexts (allocated in the heap).
-    unsigned ncontexts;
-    VTAILQ_HEAD(,redis_context) free_contexts;
-    VTAILQ_HEAD(,redis_context) busy_contexts;
-
-    // Tail queue.
-    VTAILQ_ENTRY(redis_context_pool) list;
-} redis_context_pool_t;
 
 struct vmod_redis_db {
     // Object marker.
@@ -100,9 +93,6 @@ struct vmod_redis_db {
         unsigned max_hops;
         const char *slots[MAX_REDIS_CLUSTER_SLOTS];
     } cluster;
-
-    // Shared contexts (allocated in the heap).
-    VTAILQ_HEAD(,redis_context_pool) pools;
 
     // Stats.
     struct stats {
@@ -235,9 +225,6 @@ redis_context_t *new_redis_context(
     redis_server_t *server, redisContext *rcontext, unsigned version, time_t tst);
 void free_redis_context(redis_context_t *context);
 
-redis_context_pool_t *new_redis_context_pool(const char *tag);
-void free_redis_context_pool(redis_context_pool_t *pool);
-
 struct vmod_redis_db *new_vmod_redis_db(
     struct timeval connection_timeout, unsigned context_ttl,
     struct timeval command_timeout, unsigned command_retries,
@@ -253,11 +240,6 @@ void free_vcl_priv(vcl_priv_t *priv);
 
 vcl_priv_db_t *new_vcl_priv_db(struct vmod_redis_db *db);
 void free_vcl_priv_db(vcl_priv_db_t *db);
-
-redis_server_t *unsafe_get_redis_server(
-    struct vmod_redis_db *db, const char *tag);
-redis_context_pool_t *unsafe_get_context_pool(
-    struct vmod_redis_db *db, const char *tag);
 
 redisReply *redis_execute(
     const struct vrt_ctx *ctx, struct vmod_redis_db *db, thread_state_t *state,

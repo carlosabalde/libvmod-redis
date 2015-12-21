@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 0.3.2
+Version: 0.3.3
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,6 +36,8 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Tue Dec 22 2015 Carlos Abalde <carlos.abalde@gmail.com> - 0.3.3-0.20151222
+- Improvements & fixes.
 * Mon Dec 21 2015 Carlos Abalde <carlos.abalde@gmail.com> - 0.3.2-0.20151221
 - Added .stats().
 * Wed Dec 16 2015 Carlos Abalde <carlos.abalde@gmail.com> - 0.3.1-0.20151216
