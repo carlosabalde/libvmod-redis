@@ -1,0 +1,62 @@
+varnishtest "Tests workers are blocked when using a small shared pool"
+
+server s1 {
+   rxreq
+   txresp
+} -repeat 2 -start
+
+varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
+    import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
+
+    sub vcl_init {
+        new db = redis.db("${redis_master1_address}", 500, 0, 0, 0, true, 1, false, 0);
+    }
+
+    sub vcl_deliver {
+        # Slow vs fast command.
+        if (req.http.Slow == "1") {
+            db.command("DEBUG");
+            db.push("sleep");
+            db.push("3");
+        } else {
+            db.command("SET");
+            db.push("foo");
+            db.push("hello");
+        }
+        db.execute();
+        set resp.http.Replied = db.replied();
+        set resp.http.Reply = db.get_reply();
+
+        # Stats.
+        set resp.http.db-stats = db.stats();
+        set resp.http.db-servers-total = db.counter("servers.total");
+        set resp.http.db-connections-total = db.counter("connections.total");
+        set resp.http.db-workers-blocked = db.counter("workers.blocked");
+        set resp.http.db-commands-total = db.counter("commands.total");
+    }
+} -start
+
+client c1 {
+    txreq -hdr "Slow: 1"
+    rxresp
+
+    expect resp.http.Replied == "true"
+    expect resp.http.Reply == "OK"
+} -start
+
+delay 1.0
+
+client c2 {
+    txreq -hdr "Slow: 0"
+    rxresp
+
+    expect resp.http.Replied == "true"
+    expect resp.http.Reply == "OK"
+
+    expect resp.http.db-servers-total == "1"
+    expect resp.http.db-connections-total == "1"
+    expect resp.http.db-workers-blocked == "1"
+    expect resp.http.db-commands-total == "2"
+} -run
+
+varnish v1 -expect client_req == 2
