@@ -5,7 +5,7 @@ server s1 {
    txresp
 } -repeat 1 -start
 
-varnish v1 -vcl+backend {
+varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
@@ -13,11 +13,28 @@ varnish v1 -vcl+backend {
         db.add_server("${redis_master2}");
         db.add_server("${redis_master3}");
     }
+
+    sub vcl_deliver {
+        set resp.http.db-stats = db.stats();
+        set resp.http.db-servers-total = db.counter("servers.total");
+        set resp.http.db-connections-total = db.counter("connections.total");
+        set resp.http.db-commands-total = db.counter("commands.total");
+        set resp.http.db-cluster-discoveries-total = db.counter("cluster.discoveries.total");
+        set resp.http.db-cluster-replies-moved = db.counter("cluster.replies.moved");
+        set resp.http.db-cluster-replies-ask = db.counter("cluster.replies.ask");
+    }
 } -start
 
 client c1 {
     txreq
     rxresp
+
+    expect resp.http.db-servers-total == "3"
+    expect resp.http.db-connections-total == "0"
+    expect resp.http.db-commands-total == "0"
+    expect resp.http.db-cluster-discoveries-total == "1"
+    expect resp.http.db-cluster-replies-moved == "0"
+    expect resp.http.db-cluster-replies-ask == "0"
 } -run
 
 varnish v1 -expect client_req == 1

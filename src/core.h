@@ -242,8 +242,11 @@ vcl_priv_db_t *new_vcl_priv_db(struct vmod_redis_db *db);
 void free_vcl_priv_db(vcl_priv_db_t *db);
 
 redisReply *redis_execute(
-    const struct vrt_ctx *ctx, struct vmod_redis_db *db, thread_state_t *state,
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
     const char *tag, unsigned version, struct timeval timeout,
     unsigned argc, const char *argv[], unsigned asking);
+
+redis_server_t * unsafe_add_redis_server(
+    VRT_CTX, struct vmod_redis_db *db, const char *location);
 
 #endif

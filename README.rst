@@ -66,6 +66,7 @@ import redis;
     # Other.
     Method VOID .free()
     Method STRING .stats()
+    Method INT .counter(NAME)
 
 EXAMPLES
 ========

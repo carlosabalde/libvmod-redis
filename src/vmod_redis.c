@@ -24,9 +24,6 @@ static thread_state_t *get_thread_state(VRT_CTX, unsigned flush);
 static void flush_thread_state(thread_state_t *state);
 static void make_thread_key();
 
-static redis_server_t *unsafe_add_redis_server(
-    VRT_CTX, struct vmod_redis_db *db, const char *location);
-
 static const char *get_reply(VRT_CTX, redisReply *reply);
 
 static void handle_vcl_cold_event(VRT_CTX, vcl_priv_t *config);
@@ -500,7 +497,7 @@ vmod_db_stats(VRT_CTX, struct vmod_redis_db *db)
     AZ(pthread_mutex_lock(&db->mutex));
     char *result = WS_Printf(ctx->ws,
         "{"
-          "\"severs\": {"
+          "\"servers\": {"
             "\"total\": %d,"
             "\"failed\": %d"
           "},"
@@ -560,6 +557,59 @@ vmod_db_stats(VRT_CTX, struct vmod_redis_db *db)
 }
 
 /******************************************************************************
+ * .counter();
+ *****************************************************************************/
+
+VCL_INT
+vmod_db_counter(VRT_CTX, struct vmod_redis_db *db, VCL_STRING name)
+{
+    if (strcmp(name, "servers.total") == 0) {
+        return db->stats.servers.total;
+    } else if (strcmp(name, "servers.failed") == 0) {
+        return db->stats.servers.failed;
+    } else if (strcmp(name, "connections.total") == 0) {
+        return db->stats.connections.total;
+    } else if (strcmp(name, "connections.failed") == 0) {
+        return db->stats.connections.failed;
+    } else if (strcmp(name, "connections.dropped.error") == 0) {
+        return db->stats.connections.dropped.error;
+    } else if (strcmp(name, "connections.dropped.hung_up") == 0) {
+        return db->stats.connections.dropped.hung_up;
+    } else if (strcmp(name, "connections.dropped.overflow") == 0) {
+        return db->stats.connections.dropped.overflow;
+    } else if (strcmp(name, "connections.dropped.ttl") == 0) {
+        return db->stats.connections.dropped.ttl;
+    } else if (strcmp(name, "connections.dropped.version") == 0) {
+        return db->stats.connections.dropped.version;
+    } else if (strcmp(name, "workers.blocked") == 0) {
+        return db->stats.workers.blocked;
+    } else if (strcmp(name, "commands.total") == 0) {
+        return db->stats.commands.total;
+    } else if (strcmp(name, "commands.failed") == 0) {
+        return db->stats.commands.failed;
+    } else if (strcmp(name, "commands.retried") == 0) {
+        return db->stats.commands.retried;
+    } else if (strcmp(name, "commands.error") == 0) {
+        return db->stats.commands.error;
+    } else if (strcmp(name, "commands.noscript") == 0) {
+        return db->stats.commands.noscript;
+    } else if (strcmp(name, "cluster.discoveries.total") == 0) {
+        return db->stats.cluster.discoveries.total;
+    } else if (strcmp(name, "cluster.discoveries.failed") == 0) {
+        return db->stats.cluster.discoveries.failed;
+    } else if (strcmp(name, "cluster.replies.moved") == 0) {
+        return db->stats.cluster.replies.moved;
+    } else if (strcmp(name, "cluster.replies.ask") == 0) {
+        return db->stats.cluster.replies.ask;
+    } else {
+        REDIS_LOG(ctx,
+            "Failed to fetch counter '%s'",
+            name);
+        return 0;
+    }
+}
+
+/******************************************************************************
  * UTILITIES.
  *****************************************************************************/
 
@@ -603,28 +653,6 @@ static void
 make_thread_key()
 {
     AZ(pthread_key_create(&thread_key, (void *) free_thread_state));
-}
-
-static redis_server_t *
-unsafe_add_redis_server(VRT_CTX, struct vmod_redis_db *db, const char *location)
-{
-    // Initializations.
-    redis_server_t *result = new_redis_server(db, location);
-
-    // Do not continue if we failed to create the server instance.
-    // Caller should own db->mutex!
-    if (result != NULL) {
-        VTAILQ_INSERT_TAIL(&db->servers, result, list);
-        db->stats.servers.total++;
-    } else {
-        REDIS_LOG(ctx,
-            "Failed to add server '%s'",
-            location);
-        db->stats.servers.failed++;
-    }
-
-    // Done!
-    return result;
 }
 
 static const char *
