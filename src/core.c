@@ -411,6 +411,40 @@ redis_execute(
     return result;
 }
 
+redis_server_t *
+unsafe_add_redis_server(VRT_CTX, struct vmod_redis_db *db, const char *location)
+{
+    // Initializations.
+    redis_server_t *result = NULL;
+
+    // Look for a server matching the tag.
+    redis_server_t *iserver;
+    VTAILQ_FOREACH(iserver, &db->servers, list) {
+        if (strcmp(location, iserver->tag) == 0) {
+            CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
+            result = iserver;
+            break;
+        }
+    }
+
+    // Register new server if required. Beware location is used as tag.
+    if (result == NULL) {
+        result = new_redis_server(db, location);
+        if (result != NULL) {
+            VTAILQ_INSERT_TAIL(&db->servers, result, list);
+            db->stats.servers.total++;
+        } else {
+            REDIS_LOG(ctx,
+                "Failed to add server '%s'",
+                location);
+            db->stats.servers.failed++;
+        }
+    }
+
+    // Done!
+    return result;
+}
+
 /******************************************************************************
  * UTILITIES.
  *****************************************************************************/
