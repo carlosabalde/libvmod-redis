@@ -1,3 +1,11 @@
+libvmod-redis (0.3.4-1) unstable; urgency=low
+
+  * Added .counter()
+  * Improved handling of -MOVED errors
+  * Simplified & improved internals
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Tue, 22 Dec 2015 17:00:00 +0100
+
 libvmod-redis (0.3.3-1) unstable; urgency=low
 
   * Improvements & fixes
