@@ -5,7 +5,7 @@ server s1 {
    txresp
 } -repeat 1 -start
 
-varnish v1 -vcl+backend {
+varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
@@ -62,6 +62,16 @@ varnish v1 -vcl+backend {
         db.execute();
         set resp.http.Replied-6 = db.replied();
         set resp.http.Reply-6 = db.get_reply();
+
+        # Stats.
+        set resp.http.db-stats = db.stats();
+        set resp.http.db-servers-total = db.counter("servers.total");
+        set resp.http.db-connections-total = db.counter("connections.total");
+        set resp.http.db-connections-dropped-error = db.counter("connections.dropped.error");
+        set resp.http.db-commands-total = db.counter("commands.total");
+        set resp.http.db-commands-error = db.counter("commands.error");
+        set resp.http.db-commands-failed = db.counter("commands.failed");
+        set resp.http.db-commands-noscript = db.counter("commands.noscript");
     }
 } -start
 
@@ -86,6 +96,14 @@ client c1 {
 
     expect resp.http.Replied-6 == "true"
     expect resp.http.Reply-6 == "OK"
+
+    expect resp.http.db-servers-total == "1"
+    expect resp.http.db-connections-total == "2"
+    expect resp.http.db-connections-dropped-error == "1"
+    expect resp.http.db-commands-total == "5"
+    expect resp.http.db-commands-failed == "1"
+    expect resp.http.db-commands-error == "0"
+    expect resp.http.db-commands-noscript == "0"
 } -run
 
 varnish v1 -expect client_req == 1

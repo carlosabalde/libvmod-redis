@@ -3,15 +3,18 @@ varnishtest "Tests handling of MOVED reply messages"
 server s1 {
    rxreq
    txresp
-} -repeat 3 -start
+} -repeat 1 -start
 
-varnish v1 -vcl+backend {
+varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
         new db = redis.db("${redis_master1}", 500, 0, 0, 0, true, 32, true, 16);
         db.add_server("${redis_master2}");
         db.add_server("${redis_master3}");
+
+        new master1 = redis.db("${redis_master1}", 500, 0, 0, 0, false, 1, false, 0);
+        new master2 = redis.db("${redis_master2}", 500, 0, 0, 0, false, 1, false, 0);
     }
 
     sub vcl_deliver {
@@ -23,32 +26,36 @@ varnish v1 -vcl+backend {
         if (db.reply_is_status()) {
             set resp.http.Reply-1 = db.get_status_reply();
         }
+
+        # Migrate key from master1 to master2.
+        call migrate;
+
+        # Get the key (should internally handle the MOVED redirection).
+        db.command("GET");
+        db.push("${redis_key_in_master1}");
+        db.execute();
+        if (db.reply_is_string()) {
+            set resp.http.Reply-2 = db.get_string_reply();
+        }
+
+        # Stats.
+        set resp.http.db-stats = db.stats();
+        set resp.http.db-servers-total = db.counter("servers.total");
+        set resp.http.db-connections-total = db.counter("connections.total");
+        set resp.http.db-commands-total = db.counter("commands.total");
+        set resp.http.db-cluster-discoveries-total = db.counter("cluster.discoveries.total");
+        set resp.http.db-cluster-replies-moved = db.counter("cluster.replies.moved");
+        set resp.http.db-cluster-replies-ask = db.counter("cluster.replies.ask");
     }
-} -start
 
-client c1 {
-    txreq
-    rxresp
-
-    expect resp.http.Reply-1 == "OK"
-} -run
-
-varnish v2 -vcl+backend {
-    import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
-
-    sub vcl_init {
-        new master1 = redis.db("${redis_master1}", 500, 0, 0, 0, false, 1, false, 0);
-        new master2 = redis.db("${redis_master2}", 500, 0, 0, 0, false, 1, false, 0);
-    }
-
-    sub vcl_deliver {
+    sub migrate {
         # Get the key's containing slot.
         master1.command("CLUSTER");
         master1.push("KEYSLOT");
         master1.push("${redis_key_in_master1}");
         master1.execute();
         if (master1.reply_is_integer()) {
-            set resp.http.Slot = master1.get_integer_reply();
+            set resp.http.Migration-Slot = master1.get_integer_reply();
         }
 
         # Get the ID for the original node (master1).
@@ -56,9 +63,9 @@ varnish v2 -vcl+backend {
         master1.push("NODES");
         master1.execute();
         if (master1.reply_is_string()) {
-            set resp.http.NodeOrig = regsub(master1.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master1} .*$", "\1");
-            if (resp.http.NodeOrig !~ "[0-9a-f]+") {
-                unset resp.http.NodeOrig;
+            set resp.http.Migration-NodeOrig = regsub(master1.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master1} .*$", "\1");
+            if (resp.http.Migration-NodeOrig !~ "[0-9a-f]+") {
+                unset resp.http.Migration-NodeOrig;
             }
         }
 
@@ -67,32 +74,32 @@ varnish v2 -vcl+backend {
         master1.push("NODES");
         master1.execute();
         if (master1.reply_is_string()) {
-            set resp.http.NodeDest = regsub(master1.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master2} .*$", "\1");
-            if (resp.http.NodeDest !~ "[0-9a-f]+") {
-                unset resp.http.NodeDest;
+            set resp.http.Migration-NodeDest = regsub(master1.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master2} .*$", "\1");
+            if (resp.http.Migration-NodeDest !~ "[0-9a-f]+") {
+                unset resp.http.Migration-NodeDest;
             }
         }
 
         # Mark the destination node as IMPORTING.
         master2.command("CLUSTER");
         master2.push("SETSLOT");
-        master2.push(resp.http.Slot);
+        master2.push(resp.http.Migration-Slot);
         master2.push("IMPORTING");
-        master2.push(resp.http.NodeOrig);
+        master2.push(resp.http.Migration-NodeOrig);
         master2.execute();
         if (master2.reply_is_status()) {
-            set resp.http.Reply-4 = master2.get_status_reply();
+            set resp.http.Migration-Reply-4 = master2.get_status_reply();
         }
 
         # Mark the original node as MIGRATING.
         master1.command("CLUSTER");
         master1.push("SETSLOT");
-        master1.push(resp.http.Slot);
+        master1.push(resp.http.Migration-Slot);
         master1.push("MIGRATING");
-        master1.push(resp.http.NodeDest);
+        master1.push(resp.http.Migration-NodeDest);
         master1.execute();
         if (master1.reply_is_status()) {
-            set resp.http.Reply-5 = master1.get_status_reply();
+            set resp.http.Migration-Reply-5 = master1.get_status_reply();
         }
 
         # Migrate key.
@@ -104,29 +111,29 @@ varnish v2 -vcl+backend {
         master1.push("0");
         master1.execute();
         if (master1.reply_is_status()) {
-            set resp.http.Reply-6 = master1.get_status_reply();
+            set resp.http.Migration-Reply-6 = master1.get_status_reply();
         }
 
         # Assign the containing slot to the destination node in both nodes.
 
         master1.command("CLUSTER");
         master1.push("SETSLOT");
-        master1.push(resp.http.Slot);
+        master1.push(resp.http.Migration-Slot);
         master1.push("NODE");
-        master1.push(resp.http.NodeDest);
+        master1.push(resp.http.Migration-NodeDest);
         master1.execute();
         if (master1.reply_is_status()) {
-            set resp.http.Reply-7 = master1.get_status_reply();
+            set resp.http.Migration-Reply-7 = master1.get_status_reply();
         }
 
         master2.command("CLUSTER");
         master2.push("SETSLOT");
-        master2.push(resp.http.Slot);
+        master2.push(resp.http.Migration-Slot);
         master2.push("NODE");
-        master2.push(resp.http.NodeDest);
+        master2.push(resp.http.Migration-NodeDest);
         master2.execute();
         if (master2.reply_is_status()) {
-            set resp.http.Reply-8 = master2.get_status_reply();
+            set resp.http.Migration-Reply-8 = master2.get_status_reply();
         }
 
         # Check that the original node replies with a MOVED redirection.
@@ -135,62 +142,36 @@ varnish v2 -vcl+backend {
         master1.execute();
         if (master1.reply_is_error()) {
             if (master1.get_error_reply() ~ "^MOVED ") {
-                set resp.http.Reply-9 = "MOVED";
+                set resp.http.Migration-Reply-9 = "MOVED";
             }
         }
     }
 } -start
 
-client c2 -connect ${v2_sock} {
+client c1 {
     txreq
     rxresp
 
-    expect resp.http.Slot != <undef>
+    expect resp.http.Reply-1 == "OK"
 
-    expect resp.http.NodeOrig != <undef>
+    expect resp.http.Migration-Slot != <undef>
+    expect resp.http.Migration-NodeOrig != <undef>
+    expect resp.http.Migration-NodeDest != <undef>
+    expect resp.http.Migration-Reply-4 == "OK"
+    expect resp.http.Migration-Reply-5 == "OK"
+    expect resp.http.Migration-Reply-6 == "OK"
+    expect resp.http.Migration-Reply-7 == "OK"
+    expect resp.http.Migration-Reply-8 == "OK"
+    expect resp.http.Migration-Reply-9 == "MOVED"
 
-    expect resp.http.NodeDest != <undef>
+    expect resp.http.Reply-2 == "hello"
 
-    expect resp.http.Reply-4 == "OK"
-
-    expect resp.http.Reply-5 == "OK"
-
-    expect resp.http.Reply-6 == "OK"
-
-    expect resp.http.Reply-7 == "OK"
-
-    expect resp.http.Reply-8 == "OK"
-
-    expect resp.http.Reply-9 == "MOVED"
-} -run
-
-varnish v3 -vcl+backend {
-    import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
-
-    sub vcl_init {
-        new db = redis.db("${redis_master1}", 500, 0, 0, 0, true, 32, true, 16);
-        db.add_server("${redis_master2}");
-        db.add_server("${redis_master3}");
-    }
-
-    sub vcl_deliver {
-        # Get the key (should internally handle the MOVED redirection).
-        db.command("GET");
-        db.push("${redis_key_in_master1}");
-        db.execute();
-        if (db.reply_is_string()) {
-            set resp.http.Reply-10 = db.get_string_reply();
-        }
-    }
-} -start
-
-client c3 -connect ${v3_sock} {
-    txreq
-    rxresp
-
-    expect resp.http.Reply-10 == "hello"
+    expect resp.http.db-servers-total == "3"
+    expect resp.http.db-connections-total == "2"
+    expect resp.http.db-commands-total == "3"
+    expect resp.http.db-cluster-discoveries-total == "2"
+    expect resp.http.db-cluster-replies-moved == "1"
+    expect resp.http.db-cluster-replies-ask == "0"
 } -run
 
 varnish v1 -expect client_req == 1
-varnish v2 -expect client_req == 1
-varnish v3 -expect client_req == 1

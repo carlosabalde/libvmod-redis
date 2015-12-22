@@ -14,7 +14,7 @@
 
 static redis_context_t *lock_redis_context(
     VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    const char *tag, unsigned version);
+    redis_server_t *server, unsigned version);
 
 static void unlock_redis_context(
     VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
@@ -41,18 +41,17 @@ new_redis_server(struct vmod_redis_db *db, const char *location)
 
         result->db = db;
 
-        result->tag = strdup(location);
-        AN(result->tag);
-
+        result->location.raw = strdup(location);
+        AN(result->location.raw);
         if (ptr != NULL) {
-            result->type = REDIS_SERVER_HOST_TYPE;
-            result->location.address.host = strndup(location, ptr - location);
-            AN(result->location.address.host);
-            result->location.address.port = atoi(ptr + 1);
+            result->location.type = REDIS_SERVER_LOCATION_HOST_TYPE;
+            result->location.parsed.address.host = strndup(location, ptr - location);
+            AN(result->location.parsed.address.host);
+            result->location.parsed.address.port = atoi(ptr + 1);
         } else {
-            result->type = REDIS_SERVER_SOCKET_TYPE;
-            result->location.path = strdup(location);
-            AN(result->location.path);
+            result->location.type = REDIS_SERVER_LOCATION_SOCKET_TYPE;
+            result->location.parsed.path = strdup(location);
+            AN(result->location.parsed.path);
         }
 
         AZ(pthread_mutex_init(&result->pool.mutex, NULL));
@@ -72,19 +71,18 @@ free_redis_server(redis_server_t *server)
 {
     server->db = NULL;
 
-    free((void *) server->tag);
-    server->tag = NULL;
-
-    switch (server->type) {
-        case REDIS_SERVER_HOST_TYPE:
-            free((void *) server->location.address.host);
-            server->location.address.host = NULL;
-            server->location.address.port = 0;
+    free((void *) server->location.raw);
+    server->location.raw = NULL;
+    switch (server->location.type) {
+        case REDIS_SERVER_LOCATION_HOST_TYPE:
+            free((void *) server->location.parsed.address.host);
+            server->location.parsed.address.host = NULL;
+            server->location.parsed.address.port = 0;
             break;
 
-        case REDIS_SERVER_SOCKET_TYPE:
-            free((void *) server->location.path);
-            server->location.path = NULL;
+        case REDIS_SERVER_LOCATION_SOCKET_TYPE:
+            free((void *) server->location.parsed.path);
+            server->location.parsed.path = NULL;
             break;
     }
 
@@ -139,7 +137,7 @@ free_redis_context(redis_context_t *context)
 
 struct vmod_redis_db *
 new_vmod_redis_db(
-    struct timeval connection_timeout, unsigned context_ttl,
+    const char *name, struct timeval connection_timeout, unsigned context_ttl,
     struct timeval command_timeout, unsigned command_retries,
     unsigned shared_contexts, unsigned max_contexts, unsigned clustered,
     unsigned max_cluster_hops)
@@ -152,6 +150,8 @@ new_vmod_redis_db(
 
     VTAILQ_INIT(&result->servers);
 
+    result->name = strdup(name);
+    AN(result->name);
     result->connection_timeout = connection_timeout;
     result->context_ttl = context_ttl;
     result->command_timeout = command_timeout;
@@ -200,6 +200,8 @@ free_vmod_redis_db(struct vmod_redis_db *db)
         free_redis_server(iserver);
     }
 
+    free((void *) db->name);
+    db->name = NULL;
     db->connection_timeout = (struct timeval){ 0 };
     db->context_ttl = 0;
     db->command_timeout = (struct timeval){ 0 };
@@ -210,10 +212,7 @@ free_vmod_redis_db(struct vmod_redis_db *db)
     db->cluster.enabled = 0;
     db->cluster.max_hops = 0;
     for (int i = 0; i < MAX_REDIS_CLUSTER_SLOTS; i++) {
-        if (db->cluster.slots[i] != NULL) {
-            free((void *) (db->cluster.slots[i]));
-            db->cluster.slots[i] = NULL;
-        }
+        db->cluster.slots[i] = NULL;
     }
 
     db->stats.servers.total = 0;
@@ -328,12 +327,12 @@ free_vcl_priv_db(vcl_priv_db_t *db)
 redisReply *
 redis_execute(
     VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    const char *tag, unsigned version, struct timeval timeout, unsigned argc,
-    const char *argv[], unsigned asking)
+    redis_server_t *server, unsigned version, struct timeval timeout,
+    unsigned argc, const char *argv[], unsigned asking)
 {
     // Initializations.
     redisReply *result = NULL;
-    redis_context_t *context = lock_redis_context(ctx, db, state, tag, version);
+    redis_context_t *context = lock_redis_context(ctx, db, state, server, version);
 
     // Do not continue if a Redis context is not available.
     if (context != NULL) {
@@ -424,6 +423,40 @@ redis_execute(
     return result;
 }
 
+redis_server_t *
+unsafe_add_redis_server(VRT_CTX, struct vmod_redis_db *db, const char *location)
+{
+    // Initializations.
+    redis_server_t *result = NULL;
+
+    // Look for a server matching the location.
+    redis_server_t *iserver;
+    VTAILQ_FOREACH(iserver, &db->servers, list) {
+        CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
+        if (strcmp(iserver->location.raw, location) == 0) {
+            result = iserver;
+            break;
+        }
+    }
+
+    // Register new server if required.
+    if (result == NULL) {
+        result = new_redis_server(db, location);
+        if (result != NULL) {
+            VTAILQ_INSERT_TAIL(&db->servers, result, list);
+            db->stats.servers.total++;
+        } else {
+            REDIS_LOG(ctx,
+                "Failed to add server '%s'",
+                location);
+            db->stats.servers.failed++;
+        }
+    }
+
+    // Done!
+    return result;
+}
+
 /******************************************************************************
  * UTILITIES.
  *****************************************************************************/
@@ -472,28 +505,25 @@ is_valid_redis_context(
 }
 
 static redis_server_t *
-unsafe_pick_redis_server(struct vmod_redis_db *db, const char *tag)
+unsafe_pick_redis_server(struct vmod_redis_db *db)
 {
     // Initializations.
     redis_server_t *result = NULL;
 
-    // Look for a server matching the tag.
-    // Caller should own db->mutex!
+    // Look for a server. Caller should own db->mutex!
     redis_server_t *iserver;
     VTAILQ_FOREACH(iserver, &db->servers, list) {
-        if ((tag == NULL) || (strcmp(tag, iserver->tag) == 0)) {
-            // Found!
-            CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
-            result = iserver;
+        // Found!
+        CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
+        result = iserver;
 
-            // Move the server to the end of the list (this ensures a nice
-            // distribution of load between all available servers).
-            VTAILQ_REMOVE(&db->servers, result, list);
-            VTAILQ_INSERT_TAIL(&db->servers, result, list);
+        // Move the server to the end of the list (this ensures a nice
+        // distribution of load between all available servers).
+        VTAILQ_REMOVE(&db->servers, result, list);
+        VTAILQ_INSERT_TAIL(&db->servers, result, list);
 
-            // Done!
-            break;
-        }
+        // Done!
+        break;
     }
 
     // Done!
@@ -505,22 +535,21 @@ new_rcontext(
     VRT_CTX, struct vmod_redis_db *db, redis_server_t * server,
     unsigned version, time_t now)
 {
-    redisContext *result;
-
     // Create context.
+    redisContext *result;
     if ((db->connection_timeout.tv_sec > 0) ||
         (db->connection_timeout.tv_usec > 0)) {
-        switch (server->type) {
-            case REDIS_SERVER_HOST_TYPE:
+        switch (server->location.type) {
+            case REDIS_SERVER_LOCATION_HOST_TYPE:
                 result = redisConnectWithTimeout(
-                    server->location.address.host,
-                    server->location.address.port,
+                    server->location.parsed.address.host,
+                    server->location.parsed.address.port,
                     db->connection_timeout);
                 break;
 
-            case REDIS_SERVER_SOCKET_TYPE:
+            case REDIS_SERVER_LOCATION_SOCKET_TYPE:
                 result = redisConnectUnixWithTimeout(
-                    server->location.path,
+                    server->location.parsed.path,
                     db->connection_timeout);
                 break;
 
@@ -528,16 +557,16 @@ new_rcontext(
                 result = NULL;
         }
     } else {
-        switch (server->type) {
-            case REDIS_SERVER_HOST_TYPE:
+        switch (server->location.type) {
+            case REDIS_SERVER_LOCATION_HOST_TYPE:
                 result = redisConnect(
-                    server->location.address.host,
-                    server->location.address.port);
+                    server->location.parsed.address.host,
+                    server->location.parsed.address.port);
                 break;
 
-            case REDIS_SERVER_SOCKET_TYPE:
+            case REDIS_SERVER_LOCATION_SOCKET_TYPE:
                 result = redisConnectUnix(
-                    server->location.path);
+                    server->location.parsed.path);
                 break;
 
             default:
@@ -563,7 +592,7 @@ new_rcontext(
 
 #if HIREDIS_MAJOR >= 0 && HIREDIS_MINOR >= 12
     // Enable TCP keep-alive.
-    if ((result != NULL) && (server->type == REDIS_SERVER_HOST_TYPE)) {
+    if ((result != NULL) && (server->location.type == REDIS_SERVER_LOCATION_HOST_TYPE)) {
         redisEnableKeepAlive(result);
     }
 #endif
@@ -575,7 +604,7 @@ new_rcontext(
 static redis_context_t *
 lock_private_redis_context(
     VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    const char *tag, unsigned version)
+    redis_server_t *server, unsigned version)
 {
     redis_context_t *icontext;
 
@@ -583,11 +612,11 @@ lock_private_redis_context(
     redis_context_t *result = NULL;
     time_t now = time(NULL);
 
-    // Select an existing context matching the requested database **and** tag (it
+    // Select an existing context matching the requested database **and** server (it
     // may exist or not, but no more that one instance is possible).
     VTAILQ_FOREACH(icontext, &state->contexts, list) {
         if ((icontext->server->db == db) &&
-            ((tag == NULL) || (strcmp(tag, icontext->server->tag) == 0))) {
+            ((server == NULL) || (server == icontext->server))) {
             // Found!
             CHECK_OBJ_NOTNULL(icontext, REDIS_CONTEXT_MAGIC);
             result = icontext;
@@ -613,13 +642,16 @@ lock_private_redis_context(
         result = NULL;
     }
 
-    // If required, create new context using a randomly selected server matching
-    // the requested tag. If any error arises discard the context and continue.
+    // If required, create new context using the requested server or a randomly
+    // selected server if none was specified. If any error arises discard the
+    // context and continue.
     if (result == NULL) {
-        // Select server matching the requested tag.
-        AZ(pthread_mutex_lock(&db->mutex));
-        redis_server_t *server = unsafe_pick_redis_server(db, tag);
-        AZ(pthread_mutex_unlock(&db->mutex));
+        // Select server.
+        if (server == NULL) {
+            AZ(pthread_mutex_lock(&db->mutex));
+            server = unsafe_pick_redis_server(db);
+            AZ(pthread_mutex_unlock(&db->mutex));
+        }
 
         // Do not continue if a server was not found.
         if (server != NULL) {
@@ -644,7 +676,7 @@ lock_private_redis_context(
                 state->ncontexts++;
             }
         } else {
-            REDIS_LOG(ctx, "Failed to pick Redis server: %s", tag);
+            REDIS_LOG(ctx, "Failed to pick Redis server (%s)", db->name);
         }
     }
 
@@ -655,16 +687,18 @@ lock_private_redis_context(
 static redis_context_t *
 lock_shared_redis_context(
     VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    const char *tag, unsigned version)
+    redis_server_t *server, unsigned version)
 {
     // Initializations.
     redis_context_t *result = NULL;
     time_t now = time(NULL);
 
-    // Select server matching the requested tag.
-    AZ(pthread_mutex_lock(&db->mutex));
-    redis_server_t *server = unsafe_pick_redis_server(db, tag);
-    AZ(pthread_mutex_unlock(&db->mutex));
+    // Select server.
+    if (server == NULL) {
+        AZ(pthread_mutex_lock(&db->mutex));
+        server = unsafe_pick_redis_server(db);
+        AZ(pthread_mutex_unlock(&db->mutex));
+    }
 
     // Do not continue if a server was not found.
     if (server != NULL) {
@@ -726,7 +760,7 @@ retry:
 
     // The server was not found.
     } else {
-        REDIS_LOG(ctx, "Failed to pick Redis server: %s", tag);
+        REDIS_LOG(ctx, "Failed to pick Redis server (%s)", db->name);
     }
 
     // Done!
@@ -736,12 +770,12 @@ retry:
 static redis_context_t *
 lock_redis_context(
     VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    const char *tag, unsigned version)
+    redis_server_t *server, unsigned version)
 {
     if (db->shared_contexts) {
-        return lock_shared_redis_context(ctx, db, state, tag, version);
+        return lock_shared_redis_context(ctx, db, state, server, version);
     } else {
-        return lock_private_redis_context(ctx, db, state, tag, version);
+        return lock_private_redis_context(ctx, db, state, server, version);
     }
 }
 
