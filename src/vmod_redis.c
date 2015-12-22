@@ -85,7 +85,7 @@ vmod_db__init(
 
         // Create new database instance.
         struct vmod_redis_db *instance = new_vmod_redis_db(
-            connection_timeout_tv, context_ttl, command_timeout_tv,
+            vcl_name, connection_timeout_tv, context_ttl, command_timeout_tv,
             command_retries, shared_contexts, max_contexts,
             clustered, max_cluster_hops);
 
@@ -94,9 +94,9 @@ vmod_db__init(
 
         // Do not continue if we failed to create the server instance.
         if (server != NULL) {
-            // Populate the slots-tags mapping.
+            // Populate the slots-servers mapping.
             if (instance->cluster.enabled) {
-                discover_cluster_slots(ctx, instance);
+                discover_cluster_slots(ctx, instance, server);
             }
 
             // Return the new database instance.
@@ -127,15 +127,9 @@ vmod_db__fini(struct vmod_redis_db **db)
 VCL_VOID
 vmod_db_add_server(VRT_CTX, struct vmod_redis_db *db, VCL_STRING location)
 {
-    // Check input.
     if ((location != NULL) && (strlen(location) > 0)) {
-        // Get database lock.
         AZ(pthread_mutex_lock(&db->mutex));
-
-        // Add new server.
         unsafe_add_redis_server(ctx, db, location);
-
-        // Release database lock.
         AZ(pthread_mutex_unlock(&db->mutex));
     }
 }
@@ -147,7 +141,6 @@ vmod_db_add_server(VRT_CTX, struct vmod_redis_db *db, VCL_STRING location)
 VCL_VOID
 vmod_db_command(VRT_CTX, struct vmod_redis_db *db, VCL_STRING name)
 {
-    // Check input.
     if ((name != NULL) && (strlen(name) > 0)) {
         // Fetch local thread state & flush previous command.
         thread_state_t *state = get_thread_state(ctx, 1);
