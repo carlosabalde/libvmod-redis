@@ -5,7 +5,8 @@
 
 #include "core.h"
 
-void discover_cluster_slots(VRT_CTX, struct vmod_redis_db *db);
+void discover_cluster_slots(
+    VRT_CTX, struct vmod_redis_db *db, redis_server_t *server);
 
 redisReply *cluster_execute(
     VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, unsigned version,
