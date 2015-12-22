@@ -9,9 +9,9 @@
 
 #define MAX_REDIS_CLUSTER_SLOTS 16384
 
-enum REDIS_SERVER_TYPE {
-    REDIS_SERVER_HOST_TYPE,
-    REDIS_SERVER_SOCKET_TYPE
+enum REDIS_SERVER_LOCATION_TYPE {
+    REDIS_SERVER_LOCATION_HOST_TYPE,
+    REDIS_SERVER_LOCATION_SOCKET_TYPE
 };
 
 typedef struct redis_server {
@@ -19,20 +19,20 @@ typedef struct redis_server {
 #define REDIS_SERVER_MAGIC 0xac587b11
     unsigned magic;
 
-    // Database.
+    // Database (useful when storing contexts in the thread state).
     struct vmod_redis_db *db;
 
-    // Tag: NULL or ip:port (allocated in the heap).
-    const char *tag;
-
-    // Type & location.
-    enum REDIS_SERVER_TYPE type;
-    union {
-        struct {
-            const char *host;
-            unsigned port;
-        } address;
-        const char *path;
+    // Location (allocated in the heap).
+    struct {
+        const char *raw;
+        enum REDIS_SERVER_LOCATION_TYPE type;
+        union {
+            struct {
+                const char *host;
+                unsigned port;
+            } address;
+            const char *path;
+        } parsed;
     } location;
 
     // Shared pool.
@@ -79,7 +79,8 @@ struct vmod_redis_db {
     // Redis servers (allocated in the heap).
     VTAILQ_HEAD(,redis_server) servers;
 
-    // General options.
+    // General options (allocated in the heap).
+    const char *name;
     struct timeval connection_timeout;
     unsigned context_ttl;
     struct timeval command_timeout;
@@ -87,11 +88,11 @@ struct vmod_redis_db {
     unsigned shared_contexts;
     unsigned max_contexts;
 
-    // Redis Cluster options / state (allocated in the heap).
+    // Redis Cluster options / state.
     struct {
         unsigned enabled;
         unsigned max_hops;
-        const char *slots[MAX_REDIS_CLUSTER_SLOTS];
+        redis_server_t *slots[MAX_REDIS_CLUSTER_SLOTS];
     } cluster;
 
     // Stats.
@@ -226,7 +227,7 @@ redis_context_t *new_redis_context(
 void free_redis_context(redis_context_t *context);
 
 struct vmod_redis_db *new_vmod_redis_db(
-    struct timeval connection_timeout, unsigned context_ttl,
+    const char *name, struct timeval connection_timeout, unsigned context_ttl,
     struct timeval command_timeout, unsigned command_retries,
     unsigned shared_contexts, unsigned max_contexts, unsigned clustered,
     unsigned max_cluster_hops);
@@ -242,8 +243,11 @@ vcl_priv_db_t *new_vcl_priv_db(struct vmod_redis_db *db);
 void free_vcl_priv_db(vcl_priv_db_t *db);
 
 redisReply *redis_execute(
-    const struct vrt_ctx *ctx, struct vmod_redis_db *db, thread_state_t *state,
-    const char *tag, unsigned version, struct timeval timeout,
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
+    redis_server_t *server, unsigned version, struct timeval timeout,
     unsigned argc, const char *argv[], unsigned asking);
+
+redis_server_t * unsafe_add_redis_server(
+    VRT_CTX, struct vmod_redis_db *db, const char *location);
 
 #endif

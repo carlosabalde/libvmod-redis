@@ -3,9 +3,9 @@ varnishtest "Tests multiple servers (private pool)"
 server s1 {
    rxreq
    txresp
-} -repeat 2 -start
+} -repeat 1 -start
 
-varnish v1 -vcl+backend {
+varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
@@ -45,6 +45,23 @@ varnish v1 -vcl+backend {
         master1.push("bar");
         master1.execute();
         set resp.http.Reply-4 = master1.get_reply();
+
+        # Stats.
+        set resp.http.master1-stats = master1.stats();
+        set resp.http.master1-servers-total = master1.counter("servers.total");
+        set resp.http.master1-connections-total = master1.counter("connections.total");
+        set resp.http.master1-connections-dropped-overflow = master1.counter("connections.dropped.overflow");
+        set resp.http.master1-commands-total = master1.counter("commands.total");
+        set resp.http.master1-commands-error = master1.counter("commands.error");
+        set resp.http.master1-commands-noscript = master1.counter("commands.noscript");
+
+        set resp.http.master2-stats = master2.stats();
+        set resp.http.master2-servers-total = master2.counter("servers.total");
+        set resp.http.master2-connections-dropped-overflow = master2.counter("connections.dropped.overflow");
+        set resp.http.master2-connections-total = master2.counter("connections.total");
+        set resp.http.master2-commands-total = master2.counter("commands.total");
+        set resp.http.master2-commands-error = master2.counter("commands.error");
+        set resp.http.master2-commands-noscript = master2.counter("commands.noscript");
     }
 } -start
 
@@ -57,6 +74,20 @@ client c1 {
 
     expect resp.http.Reply-3 == "Hello world!"
     expect resp.http.Reply-4 == ""
+
+    expect resp.http.master1-servers-total == "1"
+    expect resp.http.master1-connections-total == "2"
+    expect resp.http.master1-connections-dropped-overflow == "1"
+    expect resp.http.master1-commands-total == "3"
+    expect resp.http.master1-commands-error == "0"
+    expect resp.http.master1-commands-noscript == "0"
+
+    expect resp.http.master2-servers-total == "1"
+    expect resp.http.master2-connections-total == "1"
+    expect resp.http.master2-connections-dropped-overflow == "1"
+    expect resp.http.master2-commands-total == "3"
+    expect resp.http.master2-commands-error == "0"
+    expect resp.http.master2-commands-noscript == "0"
 } -run
 
 varnish v1 -expect client_req == 1
