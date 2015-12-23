@@ -79,7 +79,7 @@ Single server
     sub vcl_init {
         # VMOD configuration: simple case, keeping up to one Redis connection
         # per Varnish worker thread.
-        new db = redis.db("192.168.1.100:6379", 500, 0, 0, 0, , false, 1, false, 0);
+        new db = redis.db("192.168.1.100:6379", 500, 0, 0, 0, false, 1, false, 0);
     }
 
     sub vcl_deliver {
