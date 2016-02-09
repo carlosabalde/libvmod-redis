@@ -9,7 +9,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
-        new db = redis.db("${redis_master1}", 500, 0, 0, 0, false, 3, true, 16);
+        new db = redis.db("${redis_master1}", 500, 0, 0, 0, false, 3, "", true, 16);
         db.add_server("${redis_master2}");
         db.add_server("${redis_master3}");
     }

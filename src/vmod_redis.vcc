@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2014-2015 Carlos Abalde <carlos.abalde@gmail.com>
+# Copyright (c) 2014-2016 Carlos Abalde <carlos.abalde@gmail.com>
 #
 # You're free to use and distribute this under terms in the
 # LICENSE file.
@@ -13,7 +13,7 @@ DESCRIPTION
 VMOD using the synchronous hiredis library API to access Redis servers from VCL.
 
 $Event event_function
-$Object db(PRIV_VCL, STRING, INT, INT, INT, INT, BOOL, INT, BOOL, INT)
+$Object db(PRIV_VCL, STRING, INT, INT, INT, INT, BOOL, INT, STRING, BOOL, INT)
 
 Arguments
     location: Redis connection string. Both host + port and UNIX sockets are
@@ -60,6 +60,10 @@ Arguments
         WARNING: when creating multiple database instances, always use the same
         value in all instances using private contexts. Otherwise you may
         experience inconsistent behavior.
+
+    password: if not empty, requests for authentication using the ``AUTH``
+    command will be submitted when creating new Redis connections. This argument
+    is ignored when Redis Cluster support is enabled.
 
     clustered: enables the Redis Cluster support, automatically discovering
     other servers in the cluster using the command ``CLUSTER SLOTS``.

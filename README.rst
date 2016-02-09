@@ -27,7 +27,7 @@ import redis;
     # Configuration.
     Object db(
         LOCATION, CONNECTION_TIMEOUT, CONNECTION_TTL, COMMAND_TIMEOUT, COMMAND_RETRIES,
-        SHARED_CONTEXTS, MAX_CONTEXTS, CLUSTERED, MAX_CLUSTER_HOPS)
+        SHARED_CONTEXTS, MAX_CONTEXTS, PASSWORD, CLUSTERED, MAX_CLUSTER_HOPS)
     Method VOID .add_server(LOCATION)
 
     # Command execution.
@@ -79,7 +79,7 @@ Single server
     sub vcl_init {
         # VMOD configuration: simple case, keeping up to one Redis connection
         # per Varnish worker thread.
-        new db = redis.db("192.168.1.100:6379", 500, 0, 0, 0, , false, 1, false, 0);
+        new db = redis.db("192.168.1.100:6379", 500, 0, 0, 0, false, 1, "", false, 0);
     }
 
     sub vcl_deliver {
@@ -122,8 +122,8 @@ Multiple servers
         # VMOD configuration: master-slave replication, keeping up to two
         # Redis connections per Varnish worker thread (up to one to the master
         # server & up to one to a randomly selected slave server).
-        new master = redis.db("192.168.1.100:6379", 500, 0, 0, 0, false, 1, false, 0);
-        new slave = redis.db("192.168.1.101:6379", 500, 0, 0, 0, false, 1, false, 0);
+        new master = redis.db("192.168.1.100:6379", 500, 0, 0, 0, false, 1, "", false, 0);
+        new slave = redis.db("192.168.1.101:6379", 500, 0, 0, 0, false, 1, "", false, 0);
         slave.add_server("192.168.1.102:6379");
         slave.add_server("192.168.1.103:6379");
     }
@@ -152,7 +152,7 @@ Clustered setup
         # connections per server, all shared between all Varnish worker threads.
         # Two initial cluster servers are provided; remaining servers are
         # automatically discovered.
-        new cluster = redis.db("192.168.1.100:6379", 500, 0, 0, 0, true, 100, true, 16);
+        new cluster = redis.db("192.168.1.100:6379", 500, 0, 0, 0, true, 100, "", true, 16);
         cluster.add_server("192.168.1.101:6379");
     }
 
@@ -192,4 +192,4 @@ Implementation of the SHA-1 and CRC-16 cryptographic hash functions embedded in 
 * http://download.redis.io/redis-stable/src/config.h
 * http://download.redis.io/redis-stable/src/solarisfixes.h
 
-Copyright (c) 2014-2015 Carlos Abalde <carlos.abalde@gmail.com>
+Copyright (c) 2014-2016 Carlos Abalde <carlos.abalde@gmail.com>
