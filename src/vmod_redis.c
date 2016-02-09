@@ -65,7 +65,8 @@ vmod_db__init(
     VRT_CTX, struct vmod_redis_db **db, const char *vcl_name,
     VCL_STRING location, VCL_INT connection_timeout, VCL_INT context_ttl,
     VCL_INT command_timeout, VCL_INT command_retries, VCL_BOOL shared_contexts,
-    VCL_INT max_contexts, VCL_BOOL clustered, VCL_INT max_cluster_hops)
+    VCL_INT max_contexts, VCL_STRING password, VCL_BOOL clustered,
+    VCL_INT max_cluster_hops)
 {
     // Assert input.
     CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
@@ -74,7 +75,8 @@ vmod_db__init(
 
     // Check input.
     if ((location != NULL) && (strlen(location) > 0) &&
-        (max_contexts > 0)) {
+        (max_contexts > 0) &&
+        (password != NULL)) {
         // Initializations.
         struct timeval connection_timeout_tv;
         connection_timeout_tv.tv_sec = connection_timeout / 1000;
@@ -87,7 +89,7 @@ vmod_db__init(
         struct vmod_redis_db *instance = new_vmod_redis_db(
             vcl_name, connection_timeout_tv, context_ttl, command_timeout_tv,
             command_retries, shared_contexts, max_contexts,
-            clustered, max_cluster_hops);
+            password, clustered, max_cluster_hops);
 
         // Add initial server.
         redis_server_t *server = unsafe_add_redis_server(ctx, instance, location);

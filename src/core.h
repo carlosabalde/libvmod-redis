@@ -87,6 +87,7 @@ struct vmod_redis_db {
     unsigned command_retries;
     unsigned shared_contexts;
     unsigned max_contexts;
+    const char *password;
 
     // Redis Cluster options / state.
     struct {
@@ -229,8 +230,8 @@ void free_redis_context(redis_context_t *context);
 struct vmod_redis_db *new_vmod_redis_db(
     const char *name, struct timeval connection_timeout, unsigned context_ttl,
     struct timeval command_timeout, unsigned command_retries,
-    unsigned shared_contexts, unsigned max_contexts, unsigned clustered,
-    unsigned max_cluster_hops);
+    unsigned shared_contexts, unsigned max_contexts, const char *password,
+    unsigned clustered, unsigned max_cluster_hops);
 void free_vmod_redis_db(struct vmod_redis_db *db);
 
 thread_state_t *new_thread_state();
