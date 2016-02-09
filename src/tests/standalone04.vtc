@@ -9,8 +9,8 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
-        new master1 = redis.db("${redis_master1_address}", 500, 0, 0, 0, true, 1, false, 0);
-        new master2 = redis.db("${redis_master2_address}", 500, 0, 0, 0, true, 1, false, 0);
+        new master1 = redis.db("${redis_master1_address}", 500, 0, 0, 0, true, 1, "", false, 0);
+        new master2 = redis.db("${redis_master2_address}", 500, 0, 0, 0, true, 1, "", false, 0);
     }
 
     sub vcl_deliver {

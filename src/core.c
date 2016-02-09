@@ -139,8 +139,8 @@ struct vmod_redis_db *
 new_vmod_redis_db(
     const char *name, struct timeval connection_timeout, unsigned context_ttl,
     struct timeval command_timeout, unsigned command_retries,
-    unsigned shared_contexts, unsigned max_contexts, unsigned clustered,
-    unsigned max_cluster_hops)
+    unsigned shared_contexts, unsigned max_contexts, const char *password,
+    unsigned clustered, unsigned max_cluster_hops)
 {
     struct vmod_redis_db *result;
     ALLOC_OBJ(result, VMOD_REDIS_DB_MAGIC);
@@ -158,6 +158,12 @@ new_vmod_redis_db(
     result->command_retries = command_retries;
     result->shared_contexts = shared_contexts;
     result->max_contexts = max_contexts;
+    if (!clustered && (strlen(password) > 0)) {
+        result->password = strdup(password);
+        AN(result->password);
+    } else {
+        result->password = NULL;
+    }
 
     result->cluster.enabled = clustered;
     result->cluster.max_hops = max_cluster_hops;
@@ -208,6 +214,10 @@ free_vmod_redis_db(struct vmod_redis_db *db)
     db->command_retries = 0;
     db->shared_contexts = 0;
     db->max_contexts = 0;
+    if (db->password != NULL) {
+        free((void *) db->password);
+        db->password = NULL;
+    }
 
     db->cluster.enabled = 0;
     db->cluster.max_hops = 0;
@@ -576,7 +586,6 @@ new_rcontext(
     AN(result);
 
     // Check created context.
-    AZ(pthread_mutex_lock(&db->mutex));
     if (result->err) {
         REDIS_LOG(ctx,
             "Failed to establish Redis connection (%d): %s",
@@ -584,9 +593,52 @@ new_rcontext(
             result->errstr);
         redisFree(result);
         result = NULL;
-        db->stats.connections.failed++;
-    } else {
+    }
+
+    // Submit AUTH command.
+    if ((result != NULL) && (db->password != NULL)) {
+        // Send command.
+        redisReply *reply = redisCommand(result, "AUTH %s", db->password);
+
+        // Check reply.
+        if ((result->err) ||
+            (reply == NULL) ||
+            (reply->type != REDIS_REPLY_STATUS) ||
+            (strcmp(reply->str, "OK") != 0)) {
+            if (result->err) {
+                REDIS_LOG(ctx,
+                    "Failed to authenticate Redis connection (%d): %s",
+                    result->err,
+                    result->errstr);
+            } else if ((reply != NULL) &&
+                       ((reply->type == REDIS_REPLY_ERROR) ||
+                        (reply->type == REDIS_REPLY_STATUS) ||
+                        (reply->type == REDIS_REPLY_STRING))) {
+                REDIS_LOG(ctx,
+                    "Failed to authenticate Redis connection (%d): %s",
+                    reply->type,
+                    reply->str);
+            } else {
+                REDIS_LOG(ctx,
+                    "Failed to authenticate Redis connection: %s",
+                    "-");
+            }
+            redisFree(result);
+            result = NULL;
+        }
+
+        // Release reply.
+        if (reply != NULL) {
+            freeReplyObject(reply);
+        }
+    }
+
+    // Update stats.
+    AZ(pthread_mutex_lock(&db->mutex));
+    if (result != NULL) {
         db->stats.connections.total++;
+    } else {
+        db->stats.connections.failed++;
     }
     AZ(pthread_mutex_unlock(&db->mutex));
 
