@@ -90,8 +90,8 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
 
         # EVAL.
         set req.http.Script = {"
-            redis.call('SET', KEYS[1], ARGV[1]);
-            redis.call('SET', KEYS[2], ARGV[1]);
+            redis.call('SET', KEYS[1], ARGV[1])
+            redis.call('SET', KEYS[2], ARGV[1])
         "};
         db.command("EVAL");
         db.push(req.http.Script);

@@ -92,8 +92,8 @@ Single server
         # LUA scripting.
         db.command("EVAL");
         db.push({"
-            redis.call('SET', KEYS[1], ARGV[1]);
-            redis.call('SET', KEYS[2], ARGV[1]);
+            redis.call('SET', KEYS[1], ARGV[1])
+            redis.call('SET', KEYS[2], ARGV[1])
         "});
         db.push("2");
         db.push("foo");
