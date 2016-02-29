@@ -210,14 +210,15 @@ typedef struct vcl_priv {
 
 #define REDIS_LOG(ctx, message, ...) \
     do { \
-        char _buffer[512]; \
-        snprintf( \
-            _buffer, sizeof(_buffer), \
-            "[REDIS][%s] %s", __func__, message); \
+        char *_buffer; \
+        assert(asprintf( \
+            &_buffer, \
+            "[REDIS][%s] %s", __func__, message) > 0); \
         syslog(LOG_ERR, _buffer, ##__VA_ARGS__); \
         if ((ctx != NULL) && (ctx->vsl != NULL)) { \
-            VSLb(ctx->vsl, SLT_Error, _buffer, ##__VA_ARGS__); \
+            VSLb(ctx->vsl, SLT_VCL_Error, _buffer, ##__VA_ARGS__); \
         } \
+        free(_buffer); \
     } while (0)
 
 redis_server_t *new_redis_server(struct vmod_redis_db *db, const char *location);
