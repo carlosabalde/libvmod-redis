@@ -90,8 +90,8 @@ varnish v1 -vcl+backend {
 
         # EVAL.
         set req.http.Script = {"
-            redis.call('SET', KEYS[1], ARGV[1]);
-            redis.call('SET', KEYS[2], ARGV[1]);
+            redis.call('SET', KEYS[1], ARGV[1])
+            redis.call('SET', KEYS[2], ARGV[1])
         "};
         redis.command("EVAL");
         redis.push(req.http.Script);

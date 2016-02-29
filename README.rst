@@ -100,8 +100,8 @@ Single server
         # LUA scripting.
         redis.command("EVAL");
         redis.push({"
-            redis.call('SET', KEYS[1], ARGV[1]);
-            redis.call('SET', KEYS[2], ARGV[1]);
+            redis.call('SET', KEYS[1], ARGV[1])
+            redis.call('SET', KEYS[2], ARGV[1])
         "});
         redis.push("2");
         redis.push("foo");
