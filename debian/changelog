@@ -1,3 +1,9 @@
+libvmod-redis (0.3.6-1) unstable; urgency=low
+
+  * Improved VSL / syslog logging
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Mon, 29 Feb 2016 17:00:00 +0100
+
 libvmod-redis (0.3.5-1) unstable; urgency=low
 
   * Added AUTH support
