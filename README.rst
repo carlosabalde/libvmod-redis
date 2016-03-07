@@ -1,5 +1,5 @@
 
-.. image:: https://travis-ci.org/carlosabalde/libvmod-redis.svg?branch=4.1
+.. image:: https://travis-ci.org/carlosabalde/libvmod-redis.svg?branch=master
    :alt: Travis CI badge
    :target: https://travis-ci.org/carlosabalde/libvmod-redis/
 

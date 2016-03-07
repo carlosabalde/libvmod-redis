@@ -10,15 +10,18 @@ $script = <<SCRIPT
   apt-get update -q
   apt-get install -qq unzip apt-transport-https \
     autotools-dev automake libtool python-docutils pkg-config libpcre3-dev \
-    libeditline-dev libedit-dev make dpkg-dev
+    libeditline-dev libedit-dev make dpkg-dev git libjemalloc-dev \
+    libncurses-dev python-sphinx graphviz
   gem install redis
 
   # Varnish Cache.
-  curl https://repo.varnish-cache.org/debian/GPG-key.txt | apt-key add -
-  echo "deb https://repo.varnish-cache.org/ubuntu/ trusty varnish-4.1" > /etc/apt/sources.list.d/varnish-cache.list
-  apt-get update -q
-  apt-get install -qq varnish libvarnishapi-dev
-  sudo cp /usr/local/share/aclocal/varnish.m4 /usr/share/aclocal/
+  sudo -u vagrant bash -c '\
+    git clone https://github.com/varnish/Varnish-Cache.git /tmp/varnish; \
+    cd /tmp/varnish; \
+    ./autogen.sh; \
+    ./configure; \
+    make; \
+    sudo make PREFIX="/usr/local" install'
 
   # hiredis.
   sudo -u vagrant bash -c '\
@@ -118,7 +121,7 @@ Vagrant.configure('2') do |config|
     ]
   end
 
-  config.vm.define :v41 do |machine|
+  config.vm.define :master do |machine|
     machine.vm.box = 'ubuntu/trusty64'
     machine.vm.box_version = '=14.04'
     machine.vm.box_check_update = true
@@ -126,7 +129,7 @@ Vagrant.configure('2') do |config|
     machine.vm.provider :virtualbox do |vb|
       vb.customize [
         'modifyvm', :id,
-        '--name', 'libvmod-redis (Varnish 4.1.x)',
+        '--name', 'libvmod-redis (Varnish master)',
       ]
     end
   end
