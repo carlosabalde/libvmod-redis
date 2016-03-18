@@ -3,10 +3,8 @@ language: c
 before_install:
   - sudo apt-get update -q
   - sudo apt-get install -qq apt-transport-https python-docutils rubygems
-  - git clone https://github.com/varnish/Varnish-Cache.git ./varnish
-  - ls -l
+  - git clone https://github.com/varnishcache/varnish-cache.git ./varnish
   - cd varnish
-  - ls -l
   - ./autogen.sh
   - ./configure
   - make

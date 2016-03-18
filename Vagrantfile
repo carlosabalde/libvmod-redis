@@ -16,7 +16,7 @@ $script = <<SCRIPT
 
   # Varnish Cache.
   sudo -u vagrant bash -c '\
-    git clone https://github.com/varnish/Varnish-Cache.git /tmp/varnish; \
+    git clone https://github.com/varnishcache/varnish-cache.git /tmp/varnish; \
     cd /tmp/varnish; \
     ./autogen.sh; \
     ./configure; \
