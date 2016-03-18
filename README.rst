@@ -26,15 +26,23 @@ import redis;
 
     # Configuration.
     Object db(
-        LOCATION, CONNECTION_TIMEOUT, CONNECTION_TTL, COMMAND_TIMEOUT, COMMAND_RETRIES,
-        SHARED_CONTEXTS, MAX_CONTEXTS, PASSWORD, CLUSTERED, MAX_CLUSTER_HOPS)
-    Method VOID .add_server(LOCATION)
+        STRING location,
+        INT connection_timeout=1000,
+        INT connection_ttl=0,
+        INT command_timeout=0,
+        INT command_retries=0,
+        BOOL shared_contexts=true,
+        INT max_contexts=128,
+        STRING password="",
+        BOOL clustered=false,
+        INT max_cluster_hops=32)
+    Method VOID .add_server(STRING location)
 
     # Command execution.
-    Method VOID .command(COMMAND)
-    Method VOID .timeout(COMMAND_TIMEOUT)
-    Method VOID .retries(COMMAND_RETRIES)
-    Method VOID .push(ARGUMENT)
+    Method VOID .command(STRING name)
+    Method VOID .timeout(INT command_timeout)
+    Method VOID .retries(INT command_retries)
+    Method VOID .push(STRING arg)
     Method VOID .execute()
 
     # Access to replies.
@@ -55,18 +63,18 @@ import redis;
     Method STRING .get_string_reply()
 
     Method INT .get_array_reply_length()
-    Method BOOL .array_reply_is_error(INDEX)
-    Method BOOL .array_reply_is_nil(INDEX)
-    Method BOOL .array_reply_is_status(INDEX)
-    Method BOOL .array_reply_is_integer(INDEX)
-    Method BOOL .array_reply_is_string(INDEX)
-    Method BOOL .array_reply_is_array(INDEX)
-    Method STRING .get_array_reply_value(INDEX)
+    Method BOOL .array_reply_is_error(INT index)
+    Method BOOL .array_reply_is_nil(INT index)
+    Method BOOL .array_reply_is_status(INT index)
+    Method BOOL .array_reply_is_integer(INT index)
+    Method BOOL .array_reply_is_string(INT index)
+    Method BOOL .array_reply_is_array(INT index)
+    Method STRING .get_array_reply_value(INT index)
 
     # Other.
     Method VOID .free()
     Method STRING .stats()
-    Method INT .counter(NAME)
+    Method INT .counter(STRING name)
 
 EXAMPLES
 ========
@@ -79,7 +87,12 @@ Single server
     sub vcl_init {
         # VMOD configuration: simple case, keeping up to one Redis connection
         # per Varnish worker thread.
-        new db = redis.db("192.168.1.100:6379", 500, 0, 0, 0, false, 1, "", false, 0);
+        new db = redis.db(
+            location="192.168.1.100:6379",
+            connection_timeout=500,
+            shared_contexts=false,
+            max_contexts=1,
+            clustered=false);
     }
 
     sub vcl_deliver {
@@ -122,8 +135,18 @@ Multiple servers
         # VMOD configuration: master-slave replication, keeping up to two
         # Redis connections per Varnish worker thread (up to one to the master
         # server & up to one to a randomly selected slave server).
-        new master = redis.db("192.168.1.100:6379", 500, 0, 0, 0, false, 1, "", false, 0);
-        new slave = redis.db("192.168.1.101:6379", 500, 0, 0, 0, false, 1, "", false, 0);
+        new master = redis.db(
+            location="192.168.1.100:6379",
+            connection_timeout=500,
+            shared_contexts=false,
+            max_contexts=1
+            clustered=false);
+        new slave = redis.db(
+            location="192.168.1.101:6379",
+            connection_timeout=500,
+            shared_contexts=false,
+            max_contexts=1,
+            clustered=false);
         slave.add_server("192.168.1.102:6379");
         slave.add_server("192.168.1.103:6379");
     }
@@ -152,7 +175,13 @@ Clustered setup
         # connections per server, all shared between all Varnish worker threads.
         # Two initial cluster servers are provided; remaining servers are
         # automatically discovered.
-        new cluster = redis.db("192.168.1.100:6379", 500, 0, 0, 0, true, 100, "", true, 16);
+        new cluster = redis.db(
+            location="192.168.1.100:6379",
+            connection_timeout=500,
+            shared_contexts=true,
+            max_contexts=100,
+            clustered=true,
+            max_cluster_hops=16);
         cluster.add_server("192.168.1.101:6379");
     }
 
