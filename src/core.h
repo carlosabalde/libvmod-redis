@@ -133,14 +133,15 @@ typedef struct thread_state {
 
 #define REDIS_LOG(sp, message, ...) \
     do { \
-        char _buffer[512]; \
-        snprintf( \
-            _buffer, sizeof(_buffer), \
-            "[REDIS][%s] %s", __func__, message); \
+        char *_buffer; \
+        assert(asprintf( \
+            &_buffer, \
+            "[REDIS][%s] %s", __func__, message) > 0); \
         syslog(LOG_ERR, _buffer, ##__VA_ARGS__); \
         if (sp != NULL) { \
             WSP(sp, SLT_Error, _buffer, ##__VA_ARGS__); \
         } \
+        free(_buffer); \
     } while (0)
 
 const char *new_clustered_redis_server_tag(const char *location);

@@ -1,4 +1,4 @@
-AM_CPPFLAGS = -I$(VARNISHSRC)/include -I$(VARNISHSRC) -Wall -Werror
+AM_CPPFLAGS = -I$(VARNISHSRC)/include -I$(VARNISHSRC) -Wall -Werror -D_GNU_SOURCE=1
 
 vmoddir = $(VMODDIR)
 vmod_LTLIBRARIES = libvmod_redis.la
