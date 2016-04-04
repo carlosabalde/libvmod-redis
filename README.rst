@@ -7,8 +7,8 @@ Varnish Redis Module
 --------------------
 
 :Author: Carlos Abalde
-:Date: 2015-12-15
-:Version: 0.2.8
+:Date: 2016-04-04
+:Version: 1.0
 :Manual section: 3
 
 SYNOPSIS
@@ -615,4 +615,4 @@ Implementation of the SHA-1 and CRC-16 cryptographic hash functions embedded in 
 * http://download.redis.io/redis-stable/src/config.h
 * http://download.redis.io/redis-stable/src/solarisfixes.h
 
-Copyright (c) 2014-2015 Carlos Abalde <carlos.abalde@gmail.com>
+Copyright (c) 2014-2016 Carlos Abalde <carlos.abalde@gmail.com>
