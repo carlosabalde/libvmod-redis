@@ -1,6 +1,6 @@
 AC_PREREQ(2.59)
 AC_COPYRIGHT([Copyright (c) 2014-2016 Carlos Abalde <carlos.abalde@gmail.com>])
-AC_INIT([libvmod-redis], [0.3.6])
+AC_INIT([libvmod-redis], [3.0])
 AC_CONFIG_MACRO_DIR([m4])
 m4_ifndef([VARNISH_VMOD_INCLUDES], AC_MSG_ERROR([Need varnish.m4 -- see README.rst]))
 AC_CONFIG_SRCDIR(src/vmod_redis.vcc)
@@ -19,6 +19,7 @@ if test "x$ac_cv_prog_cc_c99" = xno; then
 fi
 AC_PROG_CPP
 
+LT_INIT([disable-static])
 AC_PROG_INSTALL
 AC_PROG_LIBTOOL
 AC_PROG_MAKE_SET
