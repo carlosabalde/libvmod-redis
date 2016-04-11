@@ -990,7 +990,8 @@ lock_private_redis_context(
     redis_context_t *icontext, *icontext_tmp;
     VTAILQ_FOREACH_SAFE(icontext, &state->contexts, list, icontext_tmp) {
         if ((icontext->server->db == db) &&
-            (!plan->master || (icontext->server->role == REDIS_SERVER_MASTER_ROLE)) &&
+            ((plan->master && (icontext->server->role == REDIS_SERVER_MASTER_ROLE)) ||
+             (!plan->master && (icontext->server->role != REDIS_SERVER_MASTER_ROLE))) &&
             ((!db->cluster.enabled) ||
              (icontext->server->cluster.slots[plan->slot]))) {
             CHECK_OBJ_NOTNULL(icontext, REDIS_CONTEXT_MAGIC);
