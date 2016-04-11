@@ -1,4 +1,4 @@
-varnishtest "Tests general execution of commands (private pool)"
+varnishtest "Tests basics using shared pool"
 
 server s1 {
    rxreq
@@ -9,19 +9,22 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
+        redis.init(subnets="");
+
         new db = redis.db(
             location="${redis_master1}",
+            type=cluster,
             connection_timeout=500,
             connection_ttl=0,
             command_timeout=0,
-            command_retries=0,
-            shared_contexts=false,
-            max_contexts=3,
+            max_command_retries=0,
+            shared_connections=true,
+            max_connections=32,
             password="",
-            clustered=true,
+            sickness_ttl=0,
             max_cluster_hops=16);
-        db.add_server("${redis_master2}");
-        db.add_server("${redis_master3}");
+        db.add_server("${redis_master2}", cluster);
+        db.add_server("${redis_master3}", cluster);
     }
 
     sub vcl_deliver {
@@ -29,7 +32,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.command("SET");
         db.push("${redis_key_in_master1}");
         db.push("hello");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_status()) {
             set resp.http.Reply-1 = db.get_status_reply();
         }
@@ -39,7 +42,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.push("${redis_key_in_master2}");
         db.push("3600");
         db.push("Hello world!");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_status()) {
             set resp.http.Reply-2 = db.get_status_reply();
         }
@@ -47,7 +50,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         # GET.
         db.command("GET");
         db.push("${redis_key_in_master2}");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_string()) {
             set resp.http.Reply-3 = db.get_string_reply();
         }
@@ -55,7 +58,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         # DEL.
         db.command("DEL");
         db.push("${redis_key_in_master2}");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_integer()) {
             set resp.http.Reply-4 = db.get_integer_reply();
         }
@@ -64,7 +67,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.command("MGET");
         db.push("${redis_key_in_master1}");
         db.push("{${redis_key_in_master1}}:other");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_array()) {
             set resp.http.Reply-5-Length = db.get_array_reply_length();
             set resp.http.Reply-5-Value-1 = db.get_array_reply_value(0);
@@ -75,7 +78,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.command("MGET");
         db.push("${redis_key_in_master1}");
         db.push("${redis_key_in_master2}");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_error()) {
             set resp.http.Reply-6 = "1";
         }
@@ -87,7 +90,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.push("Hello world!");
         db.push("field2");
         db.push("42");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_status()) {
             set resp.http.Reply-7 = db.get_status_reply();
         }
@@ -96,7 +99,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.command("HGET");
         db.push("${redis_key_in_master2}");
         db.push("field1");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_string()) {
             set resp.http.Reply-8 = db.get_string_reply();
         }
@@ -104,7 +107,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         # INCR.
         db.command("INCR");
         db.push("${redis_key_in_master1}");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_error()) {
             set resp.http.Reply-9 = db.get_error_reply();
         }
@@ -120,7 +123,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.push("${redis_key_in_master1}");
         db.push("{${redis_key_in_master1}}:other");
         db.push("Atomic!");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_nil()) {
             set resp.http.Reply-10 = "o/";
         }
@@ -132,7 +135,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.push("${redis_key_in_master1}");
         db.push("{${redis_key_in_master1}}:other");
         db.push("Atomic x 2!");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_nil()) {
             set resp.http.Reply-11 = "o/";
         }
@@ -148,7 +151,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.push("${redis_key_in_master1}");
         db.push("${redis_key_in_master2}");
         db.push("Atomic!");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_error()) {
             set resp.http.Reply-12 = "1";
         }
@@ -156,7 +159,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         # GET.
         db.command("GET");
         db.push("${redis_key_in_master1}");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_string()) {
             set resp.http.Reply-13 = db.get_string_reply();
         }
@@ -206,7 +209,7 @@ client c1 {
 
     expect resp.http.Reply-13 == "Atomic x 2!"
 
-    expect resp.http.db-servers-total == "3"
+    expect resp.http.db-servers-total == "9"
     expect resp.http.db-connections-total == "2"
     expect resp.http.db-commands-total == "13"
     expect resp.http.db-commands-error == "3"

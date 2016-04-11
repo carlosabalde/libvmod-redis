@@ -9,19 +9,22 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
+        redis.init(subnets="");
+
         new db = redis.db(
             location="${redis_master1}",
+            type=cluster,
             connection_timeout=500,
             connection_ttl=0,
             command_timeout=0,
-            command_retries=0,
-            shared_contexts=true,
-            max_contexts=32,
+            max_command_retries=0,
+            shared_connections=true,
+            max_connections=32,
             password="",
-            clustered=true,
+            sickness_ttl=0,
             max_cluster_hops=16);
-        db.add_server("${redis_master2}");
-        db.add_server("${redis_master3}");
+        db.add_server("${redis_master2}", cluster);
+        db.add_server("${redis_master3}", cluster);
     }
 
     sub vcl_deliver {
@@ -39,7 +42,7 @@ client c1 {
     txreq
     rxresp
 
-    expect resp.http.db-servers-total == "3"
+    expect resp.http.db-servers-total == "9"
     expect resp.http.db-connections-total == "0"
     expect resp.http.db-commands-total == "0"
     expect resp.http.db-cluster-discoveries-total == "1"

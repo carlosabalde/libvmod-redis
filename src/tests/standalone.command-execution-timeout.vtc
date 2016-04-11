@@ -9,16 +9,19 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
+        redis.init(subnets="");
+
         new db = redis.db(
             location="${redis_master1_address}",
+            type=master,
             connection_timeout=500,
             connection_ttl=0,
             command_timeout=0,
-            command_retries=0,
-            shared_contexts=false,
-            max_contexts=1,
+            max_command_retries=0,
+            shared_connections=false,
+            max_connections=1,
             password="",
-            clustered=false,
+            sickness_ttl=0,
             max_cluster_hops=0);
     }
 
@@ -27,7 +30,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.command("SET");
         db.push("foo");
         db.push("hello");
-        db.execute();
+        db.execute(true);
         set resp.http.Replied-1 = db.replied();
         set resp.http.Reply-1 = db.get_reply();
 
@@ -35,7 +38,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.command("DEBUG");
         db.push("sleep");
         db.push("3");
-        db.execute();
+        db.execute(true);
         set resp.http.Replied-2 = db.replied();
         set resp.http.Reply-2 = db.get_reply();
 
@@ -44,7 +47,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.push("foo");
         db.push("hello");
         db.timeout(1000);
-        db.execute();
+        db.execute(true);
         set resp.http.Replied-3 = db.replied();
         set resp.http.Reply-3 = db.get_reply();
 
@@ -53,7 +56,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.push("sleep");
         db.push("3");
         db.timeout(1000);
-        db.execute();
+        db.execute(true);
         set resp.http.Replied-4 = db.replied();
         set resp.http.Reply-4 = db.get_reply();
 
@@ -61,7 +64,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.command("SET");
         db.push("foo");
         db.push("hello");
-        db.execute();
+        db.execute(true);
         set resp.http.Replied-5 = db.replied();
         set resp.http.Reply-5 = db.get_reply();
 
@@ -69,7 +72,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.command("DEBUG");
         db.push("sleep");
         db.push("3");
-        db.execute();
+        db.execute(true);
         set resp.http.Replied-6 = db.replied();
         set resp.http.Reply-6 = db.get_reply();
 

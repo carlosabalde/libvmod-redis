@@ -1,4 +1,4 @@
-varnishtest "Test VCL temperature & discard."
+varnishtest "Test VCL temperature and discard."
 
 server s1 {
    rxreq
@@ -9,27 +9,32 @@ varnish v1 -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
+        redis.init(subnets="");
+
         new db1 = redis.db(
             location="${redis_master1_address}",
+            type=master,
             connection_timeout=500,
             connection_ttl=0,
             command_timeout=0,
-            command_retries=0,
-            shared_contexts=false,
-            max_contexts=1,
+            max_command_retries=0,
+            shared_connections=false,
+            max_connections=1,
             password="",
-            clustered=false,
+            sickness_ttl=0,
             max_cluster_hops=0);
+
         new db2 = redis.db(
             location="${redis_master2_address}",
+            type=master,
             connection_timeout=500,
             connection_ttl=0,
             command_timeout=0,
-            command_retries=0,
-            shared_contexts=true,
-            max_contexts=32,
+            max_command_retries=0,
+            shared_connections=true,
+            max_connections=32,
             password="",
-            clustered=false,
+            sickness_ttl=0,
             max_cluster_hops=0);
     }
 } -start
