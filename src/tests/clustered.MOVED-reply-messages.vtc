@@ -9,41 +9,46 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
+        redis.init(subnets={""});
+
         new db = redis.db(
-            location="${redis_master1}",
+            location="${redis_master1_ip}:${redis_master1_port}",
+            type=cluster,
             connection_timeout=500,
             connection_ttl=0,
             command_timeout=0,
-            command_retries=0,
-            shared_contexts=true,
-            max_contexts=32,
+            max_command_retries=0,
+            shared_connections=true,
+            max_connections=32,
             password="",
-            clustered=true,
+            sickness_ttl=0,
             max_cluster_hops=16);
-        db.add_server("${redis_master2}");
-        db.add_server("${redis_master3}");
+        db.add_server("${redis_master2_ip}:${redis_master2_port}", cluster);
+        db.add_server("${redis_master3_ip}:${redis_master3_port}", cluster);
 
         new master1 = redis.db(
-            location="${redis_master1}",
+            location="${redis_master1_ip}:${redis_master1_port}",
+            type=master,
             connection_timeout=500,
             connection_ttl=0,
             command_timeout=0,
-            command_retries=0,
-            shared_contexts=false,
-            max_contexts=1,
+            max_command_retries=0,
+            shared_connections=false,
+            max_connections=1,
             password="",
-            clustered=false,
+            sickness_ttl=0,
             max_cluster_hops=0);
         new master2 = redis.db(
-            location="${redis_master2}",
+            location="${redis_master2_ip}:${redis_master2_port}",
+            type=master,
             connection_timeout=500,
             connection_ttl=0,
             command_timeout=0,
-            command_retries=0,
-            shared_contexts=false,
-            max_contexts=1,
+            max_command_retries=0,
+            shared_connections=false,
+            max_connections=1,
             password="",
-            clustered=false,
+            sickness_ttl=0,
             max_cluster_hops=0);
     }
 
@@ -52,7 +57,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.command("SET");
         db.push("${redis_key_in_master1}");
         db.push("hello");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_status()) {
             set resp.http.Reply-1 = db.get_status_reply();
         }
@@ -63,7 +68,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         # Get the key (should internally handle the MOVED redirection).
         db.command("GET");
         db.push("${redis_key_in_master1}");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_string()) {
             set resp.http.Reply-2 = db.get_string_reply();
         }
@@ -83,7 +88,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         master1.command("CLUSTER");
         master1.push("KEYSLOT");
         master1.push("${redis_key_in_master1}");
-        master1.execute();
+        master1.execute(true);
         if (master1.reply_is_integer()) {
             set resp.http.Migration-Slot = master1.get_integer_reply();
         }
@@ -91,9 +96,9 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         # Get the ID for the original node (master1).
         master1.command("CLUSTER");
         master1.push("NODES");
-        master1.execute();
+        master1.execute(true);
         if (master1.reply_is_string()) {
-            set resp.http.Migration-NodeOrig = regsub(master1.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master1} .*$", "\1");
+            set resp.http.Migration-NodeOrig = regsub(master1.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master1_ip}:${redis_master1_port} .*$", "\1");
             if (resp.http.Migration-NodeOrig !~ "[0-9a-f]+") {
                 unset resp.http.Migration-NodeOrig;
             }
@@ -102,9 +107,9 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         # Get the ID for the destination node (master2).
         master1.command("CLUSTER");
         master1.push("NODES");
-        master1.execute();
+        master1.execute(true);
         if (master1.reply_is_string()) {
-            set resp.http.Migration-NodeDest = regsub(master1.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master2} .*$", "\1");
+            set resp.http.Migration-NodeDest = regsub(master1.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master2_ip}:${redis_master2_port} .*$", "\1");
             if (resp.http.Migration-NodeDest !~ "[0-9a-f]+") {
                 unset resp.http.Migration-NodeDest;
             }
@@ -116,7 +121,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         master2.push(resp.http.Migration-Slot);
         master2.push("IMPORTING");
         master2.push(resp.http.Migration-NodeOrig);
-        master2.execute();
+        master2.execute(true);
         if (master2.reply_is_status()) {
             set resp.http.Migration-Reply-4 = master2.get_status_reply();
         }
@@ -127,19 +132,19 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         master1.push(resp.http.Migration-Slot);
         master1.push("MIGRATING");
         master1.push(resp.http.Migration-NodeDest);
-        master1.execute();
+        master1.execute(true);
         if (master1.reply_is_status()) {
             set resp.http.Migration-Reply-5 = master1.get_status_reply();
         }
 
         # Migrate key.
         master1.command("MIGRATE");
-        master1.push(regsub("${redis_master2}", "([\d\.]*):([\d]*)", "\1"));
-        master1.push(regsub("${redis_master2}", "([\d\.]*):([\d]*)", "\2"));
+        master1.push(regsub("${redis_master2_ip}:${redis_master2_port}", "([\d\.]*):([\d]*)", "\1"));
+        master1.push(regsub("${redis_master2_ip}:${redis_master2_port}", "([\d\.]*):([\d]*)", "\2"));
         master1.push("${redis_key_in_master1}");
         master1.push("0");
         master1.push("0");
-        master1.execute();
+        master1.execute(true);
         if (master1.reply_is_status()) {
             set resp.http.Migration-Reply-6 = master1.get_status_reply();
         }
@@ -151,7 +156,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         master1.push(resp.http.Migration-Slot);
         master1.push("NODE");
         master1.push(resp.http.Migration-NodeDest);
-        master1.execute();
+        master1.execute(true);
         if (master1.reply_is_status()) {
             set resp.http.Migration-Reply-7 = master1.get_status_reply();
         }
@@ -161,7 +166,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         master2.push(resp.http.Migration-Slot);
         master2.push("NODE");
         master2.push(resp.http.Migration-NodeDest);
-        master2.execute();
+        master2.execute(true);
         if (master2.reply_is_status()) {
             set resp.http.Migration-Reply-8 = master2.get_status_reply();
         }
@@ -169,7 +174,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         # Check that the original node replies with a MOVED redirection.
         master1.command("GET");
         master1.push("${redis_key_in_master1}");
-        master1.execute();
+        master1.execute(true);
         if (master1.reply_is_error()) {
             if (master1.get_error_reply() ~ "^MOVED ") {
                 set resp.http.Migration-Reply-9 = "MOVED";
@@ -196,7 +201,7 @@ client c1 {
 
     expect resp.http.Reply-2 == "hello"
 
-    expect resp.http.db-servers-total == "3"
+    expect resp.http.db-servers-total == "9"
     expect resp.http.db-connections-total == "2"
     expect resp.http.db-commands-total == "3"
     expect resp.http.db-cluster-discoveries-total == "2"

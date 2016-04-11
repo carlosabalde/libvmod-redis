@@ -4,6 +4,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <hiredis/hiredis.h>
+#include <arpa/inet.h>
 
 #include "vcl.h"
 #include "vrt.h"
@@ -23,6 +24,8 @@ static pthread_key_t thread_key;
 static thread_state_t *get_thread_state(VRT_CTX, unsigned flush);
 static void flush_thread_state(thread_state_t *state);
 static void make_thread_key();
+
+static void parse_subnets(VRT_CTX, vcl_priv_t *config, const char *subnets);
 
 static const char *get_reply(VRT_CTX, redisReply *reply);
 
@@ -61,7 +64,8 @@ event_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
             break;
 
         case VCL_EVENT_COLD:
-            // Close connections in shared pools.
+            // Close connections in shared pools. Connections binded to worker
+            // threads cannot be closed this way.
             handle_vcl_cold_event(ctx, config);
             break;
 
@@ -74,15 +78,34 @@ event_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
 }
 
 /******************************************************************************
+ * redis.init();
+ *****************************************************************************/
+
+VCL_VOID
+vmod_init(VRT_CTX, struct vmod_priv *vcl_priv, VCL_STRING subnets)
+{
+    // Initializations.
+    vcl_priv_t *config = vcl_priv->priv;
+
+    // Try to initialize subnets using the input parameter.
+    parse_subnets(ctx, config, subnets);
+
+    // Try to initialize subnets using the environment variable?
+    if (VTAILQ_EMPTY(&config->subnets)) {
+        parse_subnets(ctx, config, getenv("VMOD_REDIS_SUBNETS"));
+    }
+}
+
+/******************************************************************************
  * DB OBJECT.
  *****************************************************************************/
 
 VCL_VOID
 vmod_db__init(
     VRT_CTX, struct vmod_redis_db **db, const char *vcl_name, struct vmod_priv *vcl_priv,
-    VCL_STRING location, VCL_INT connection_timeout, VCL_INT context_ttl,
-    VCL_INT command_timeout, VCL_INT command_retries, VCL_BOOL shared_contexts,
-    VCL_INT max_contexts, VCL_STRING password, VCL_BOOL clustered,
+    VCL_STRING location, VCL_ENUM type, VCL_INT connection_timeout, VCL_INT connection_ttl,
+    VCL_INT command_timeout, VCL_INT max_command_retries, VCL_BOOL shared_connections,
+    VCL_INT max_connections, VCL_STRING password, VCL_INT sickness_ttl,
     VCL_INT max_cluster_hops)
 {
     // Assert input.
@@ -92,8 +115,14 @@ vmod_db__init(
 
     // Check input.
     if ((location != NULL) && (strlen(location) > 0) &&
-        (max_contexts > 0) &&
-        (password != NULL)) {
+        (connection_timeout >= 0) &&
+        (connection_ttl >= 0) &&
+        (command_timeout >= 0) &&
+        (max_command_retries >= 0) &&
+        (max_connections >= 0) &&
+        (password != NULL) &&
+        (sickness_ttl >= 0) &&
+        (max_cluster_hops >= 0)) {
         // Initializations.
         vcl_priv_t *config = vcl_priv->priv;
         struct timeval connection_timeout_tv;
@@ -103,18 +132,72 @@ vmod_db__init(
         command_timeout_tv.tv_sec = command_timeout / 1000;
         command_timeout_tv.tv_usec = (command_timeout % 1000) * 1000;
 
+        // Extract role & clustering flag.
+        // XXX: future releases may also accept type 'auto' in order to allow
+        // role discovery when clustering is disabled (when enabled role
+        // discovery is implicit). In order to accept this new type an extra
+        // parameter would be required: 'sentinels'. This would contain a
+        // comma-delimited list of Sentinel servers used to launch a separate
+        // management thread in charge of discovering roles and listening
+        // Sentinel events and updating roles and healthy of servers in
+        // the db->servers[][] lists accordingly.
+        //
+        // Some open questions / implications:
+        //   - How to provide list list Sentinel servers? UNIX sockets
+        //   should be supported? Should this be a redis.init() option?
+        //   - How to provide the master name?
+        //   - How to integrate the idea of unreachable servers.
+        //   - While this feature is not available,
+        //      + Unreachable servers will generate errors until manually
+        //      removed from VCL. Depending on the specific setup, the
+        //      sickness flag could help here.
+        //      + Servers changing role from slave to master won't be
+        //      problematic.
+        //      + Servers changing role from master to slave will trigger
+        //      errors until manually fixed the role in VCL.
+        //   - AFAIK this feature cannot be implemented when clustering is
+        //   enabled because there isn't a way to get notified about changes
+        //   in the topology of the cluster. Anyway, this wouldn't be useful:
+        //      + Unreachable servers will generate errors until a cluster
+        //      rediscovery -implicit or explicit restarting Varnish- is
+        //      executed. An unreachable server will be a server with an empty
+        //      list of slots associated. Again, depending on the specific
+        //      setup, the sickness flag could help here.
+        //      + Servers changing role from slave to master won't be
+        //      problematic because READONLY and READWRITE operations are
+        //      silently ignored in master servers.
+        //      + Servers changing role from master to slave will answer
+        //      with redirects to all operations because the READONLY and
+        //      READWRITE commands are not being submitted. This will trigger
+        //      a rediscovery of the cluster that will fix the situation
+        //      immediately.
+        unsigned clustered;
+        enum REDIS_SERVER_ROLE role;
+        if (strcmp(type, "master") == 0) {
+            role = REDIS_SERVER_MASTER_ROLE;
+            clustered = 0;
+        } else if (strcmp(type, "slave") == 0) {
+            role = REDIS_SERVER_SLAVE_ROLE;
+            clustered = 0;
+        } else if (strcmp(type, "cluster") == 0) {
+            role = REDIS_SERVER_TBD_ROLE;
+            clustered = 1;
+        } else {
+            WRONG("Invalid server type value.");
+        }
+
         // Create new database instance.
         struct vmod_redis_db *instance = new_vmod_redis_db(
-            vcl_name, connection_timeout_tv, context_ttl, command_timeout_tv,
-            command_retries, shared_contexts, max_contexts,
-            password, clustered, max_cluster_hops);
+            config, vcl_name, connection_timeout_tv, connection_ttl,
+            command_timeout_tv, max_command_retries, shared_connections, max_connections,
+            password, sickness_ttl, clustered, max_cluster_hops);
 
         // Add initial server.
-        redis_server_t *server = unsafe_add_redis_server(ctx, instance, location);
+        redis_server_t *server = unsafe_add_redis_server(ctx, instance, location, role);
 
         // Do not continue if we failed to create the server instance.
         if (server != NULL) {
-            // Populate the slots-servers mapping.
+            // Launch initial discovery of the cluster topology?
             if (instance->cluster.enabled) {
                 discover_cluster_slots(ctx, instance, server);
             }
@@ -148,11 +231,26 @@ vmod_db__fini(struct vmod_redis_db **db)
  *****************************************************************************/
 
 VCL_VOID
-vmod_db_add_server(VRT_CTX, struct vmod_redis_db *db, VCL_STRING location)
+vmod_db_add_server(
+    VRT_CTX, struct vmod_redis_db *db, VCL_STRING location, VCL_ENUM type)
 {
-    if ((location != NULL) && (strlen(location) > 0)) {
+    if ((location != NULL) && (strlen(location) > 0) &&
+        ((!db->cluster.enabled || strcmp(type, "cluster") == 0))) {
+        // Extract role.
+        enum REDIS_SERVER_ROLE role;
+        if (strcmp(type, "master") == 0) {
+            role = REDIS_SERVER_MASTER_ROLE;
+        } else if (strcmp(type, "slave") == 0) {
+            role = REDIS_SERVER_SLAVE_ROLE;
+        } else if (strcmp(type, "cluster") == 0) {
+            role = REDIS_SERVER_TBD_ROLE;
+        } else {
+            WRONG("Invalid server type value.");
+        }
+
+        // Add server.
         AZ(pthread_mutex_lock(&db->mutex));
-        unsafe_add_redis_server(ctx, db, location);
+        unsafe_add_redis_server(ctx, db, location, role);
         AZ(pthread_mutex_unlock(&db->mutex));
     }
 }
@@ -171,7 +269,7 @@ vmod_db_command(VRT_CTX, struct vmod_redis_db *db, VCL_STRING name)
         // Initialize.
         state->command.db = db;
         state->command.timeout = db->command_timeout;
-        state->command.retries = db->command_retries;
+        state->command.max_retries = db->max_command_retries;
         state->command.argc = 1;
         state->command.argv[0] = WS_Copy(ctx->ws, name, -1);
         if (state->command.argv[0] == NULL) {
@@ -206,7 +304,7 @@ vmod_db_timeout(VRT_CTX, struct vmod_redis_db *db, VCL_INT command_timeout)
  *****************************************************************************/
 
 VCL_VOID
-vmod_db_retries(VRT_CTX, struct vmod_redis_db *db, VCL_INT command_retries)
+vmod_db_retries(VRT_CTX, struct vmod_redis_db *db, VCL_INT max_command_retries)
 {
     // Fetch local thread state.
     thread_state_t *state = get_thread_state(ctx, 0);
@@ -214,7 +312,7 @@ vmod_db_retries(VRT_CTX, struct vmod_redis_db *db, VCL_INT command_retries)
     // Do not continue if the initial call to .command() was not executed
     // or if running this in a different database.
     if ((state->command.argc >= 1) && (state->command.db == db)) {
-        state->command.retries = command_retries;
+        state->command.max_retries = max_command_retries;
     }
 }
 
@@ -258,7 +356,7 @@ vmod_db_push(VRT_CTX, struct vmod_redis_db *db, VCL_STRING arg)
  *****************************************************************************/
 
 VCL_VOID
-vmod_db_execute(VRT_CTX, struct vmod_redis_db *db)
+vmod_db_execute(VRT_CTX, struct vmod_redis_db *db, VCL_BOOL master)
 {
     // Fetch local thread state.
     thread_state_t *state = get_thread_state(ctx, 0);
@@ -269,33 +367,39 @@ vmod_db_execute(VRT_CTX, struct vmod_redis_db *db)
     if ((state->command.argc >= 1) &&
         (state->command.db == db) &&
         (!WS_Overflowed(ctx->ws))) {
-        // Clustered vs. classic execution.
+        // Initializations.
+        unsigned retries = 0;
+
+        // Force execution of LUA scripts in a master server when Redis Cluster
+        // support is enabled. It's responsibility of the caller to avoid
+        // execution of LUA scripts in slaves servers when clustering is
+        // enabled. However, due it's counter-intuitiveness and the hidden and
+        // expensive side effects (redirections followed by executions of
+        // discoveries of the cluster topology) we enforce this here.
+        if (db->cluster.enabled &&
+            !master &&
+            ((strcasecmp(state->command.argv[0], "EVAL") == 0) ||
+             (strcasecmp(state->command.argv[0], "EVALSHA") == 0))) {
+            master = 1;
+        }
+
+        // Clustered vs. standalone execution.
         if (db->cluster.enabled) {
             state->command.reply = cluster_execute(
                 ctx, db, state, version,
-                state->command.timeout, state->command.retries,
-                state->command.argc, state->command.argv);
+                state->command.timeout, state->command.max_retries,
+                state->command.argc, state->command.argv,
+                &retries, master);
         } else {
-            int tries = 1 + state->command.retries;
-            while ((tries > 0) &&
-                   (state->command.reply == NULL) &&
-                   (!WS_Overflowed(ctx->ws))) {
-                state->command.reply = redis_execute(
-                    ctx, db, state, NULL, version,
-                    state->command.timeout,
-                    state->command.argc, state->command.argv, 0);
-                tries--;
-            }
-
-            if (tries < state->command.retries) {
-                AZ(pthread_mutex_lock(&db->mutex));
-                db->stats.commands.retried += state->command.retries - tries;
-                AZ(pthread_mutex_unlock(&db->mutex));
-            }
+            state->command.reply = redis_execute(
+                ctx, db, state, version,
+                state->command.timeout, state->command.max_retries,
+                state->command.argc, state->command.argv,
+                &retries, NULL, master, 0);
         }
 
         // Log error replies (other errors are already logged while executing
-        // commands).
+        // commands, retries, redirections, etc.).
         if ((state->command.reply != NULL) &&
             (state->command.reply->type == REDIS_REPLY_ERROR)) {
             REDIS_LOG(ctx,
@@ -504,7 +608,8 @@ vmod_db_stats(VRT_CTX, struct vmod_redis_db *db)
               "\"hung_up\": %d,"
               "\"overflow\": %d,"
               "\"ttl\": %d,"
-              "\"version\": %d"
+              "\"version\": %d,"
+              "\"sick\": %d"
             "}"
           "},"
           "\"workers\": {"
@@ -537,6 +642,7 @@ vmod_db_stats(VRT_CTX, struct vmod_redis_db *db)
         db->stats.connections.dropped.overflow,
         db->stats.connections.dropped.ttl,
         db->stats.connections.dropped.version,
+        db->stats.connections.dropped.sick,
         db->stats.workers.blocked,
         db->stats.commands.total,
         db->stats.commands.failed,
@@ -576,6 +682,8 @@ vmod_db_counter(VRT_CTX, struct vmod_redis_db *db, VCL_STRING name)
         return db->stats.connections.dropped.ttl;
     } else if (strcmp(name, "connections.dropped.version") == 0) {
         return db->stats.connections.dropped.version;
+    } else if (strcmp(name, "connections.dropped.sick") == 0) {
+        return db->stats.connections.dropped.sick;
     } else if (strcmp(name, "workers.blocked") == 0) {
         return db->stats.workers.blocked;
     } else if (strcmp(name, "commands.total") == 0) {
@@ -636,7 +744,7 @@ flush_thread_state(thread_state_t *state)
 {
     state->command.db = NULL;
     state->command.timeout = (struct timeval){ 0 };
-    state->command.retries = 0;
+    state->command.max_retries = 0;
     state->command.argc = 0;
     if (state->command.reply != NULL) {
         freeReplyObject(state->command.reply);
@@ -648,6 +756,86 @@ static void
 make_thread_key()
 {
     AZ(pthread_key_create(&thread_key, (void *) free_thread_state));
+}
+
+static void
+parse_subnets(VRT_CTX, vcl_priv_t *config, const char *subnets)
+{
+    if (subnets != NULL) {
+        // Initializations
+        char buffer[32];
+        int weight;
+        struct in_addr ia4;
+        int bits;
+        vcl_priv_subnet_t *subnet;
+        unsigned error = 0;
+
+        // Parse input.
+        const char *p = subnets;
+        const char *q;
+        while (*p != '\0') {
+            // Parse weight.
+            weight = strtoul(p, (char **)&q, 10);
+            if ((p == q) || (weight < 0) || (weight >= NREDIS_SERVER_WEIGHTS)) {
+                error = 10;
+                break;
+            }
+
+            // Parse address in the mask.
+            p = q;
+            while (isspace(*p)) p++;
+            q = p;
+            while (*q != '\0' && *q != '/') {
+                q++;
+            }
+            if ((p == q) || (*q != '/') || (q - p >= sizeof(buffer))) {
+                error = 20;
+                break;
+            }
+            memcpy(buffer, p, q - p);
+            buffer[q - p] = '\0';
+            if (inet_pton(AF_INET, buffer, &ia4) == 0) {
+                error = 30;
+                break;
+            }
+
+            // Parse number of bits in the mask.
+            p = q + 1;
+            if (!isdigit(*p)) {
+                error = 40;
+                break;
+            }
+            bits = strtoul(p, (char **)&q, 10);
+            if ((p == q) || (bits < 0) || (bits > 32)) {
+                error = 50;
+                break;
+            }
+
+            // Store parsed subnet.
+            subnet = new_vcl_priv_subnet(weight, ia4, bits);
+            VTAILQ_INSERT_TAIL(&config->subnets, subnet, list);
+
+            // More items?
+            p = q;
+            while (isspace(*p) || (*p == ',')) p++;
+        }
+
+        // Check error flag.
+        if (error) {
+            // Release parsed subnets.
+            vcl_priv_subnet_t *isubnet;
+            while (!VTAILQ_EMPTY(&config->subnets)) {
+                isubnet = VTAILQ_FIRST(&config->subnets);
+                VTAILQ_REMOVE(&config->subnets, isubnet, list);
+                free_vcl_priv_subnet(isubnet);
+            }
+
+            // Log error.
+            REDIS_LOG(ctx,
+                "Got error while parsing subnets (%d)",
+                error);
+        }
+    }
 }
 
 static const char *
@@ -704,27 +892,31 @@ handle_vcl_cold_event(VRT_CTX, vcl_priv_t *config)
 
             // Release contexts in all pools.
             redis_server_t *iserver;
-            VTAILQ_FOREACH(iserver, &idb->db->servers, list) {
-                // Get pool lock.
-                AZ(pthread_mutex_lock(&iserver->pool.mutex));
+            for (unsigned iweight = 0; iweight < NREDIS_SERVER_WEIGHTS; iweight++) {
+                for (enum REDIS_SERVER_ROLE irole = 0; irole < NREDIS_SERVER_ROLES; irole++) {
+                    VTAILQ_FOREACH(iserver, &(idb->db->servers[iweight][irole]), list) {
+                        // Get pool lock.
+                        AZ(pthread_mutex_lock(&iserver->pool.mutex));
 
-                // Release all contexts (both free an busy; this method is
-                // assumed to be called when threads are not using the pool).
-                iserver->pool.ncontexts = 0;
-                redis_context_t *icontext;
-                while (!VTAILQ_EMPTY(&iserver->pool.free_contexts)) {
-                    icontext = VTAILQ_FIRST(&iserver->pool.free_contexts);
-                    VTAILQ_REMOVE(&iserver->pool.free_contexts, icontext, list);
-                    free_redis_context(icontext);
-                }
-                while (!VTAILQ_EMPTY(&iserver->pool.busy_contexts)) {
-                    icontext = VTAILQ_FIRST(&iserver->pool.busy_contexts);
-                    VTAILQ_REMOVE(&iserver->pool.busy_contexts, icontext, list);
-                    free_redis_context(icontext);
-                }
+                        // Release all contexts (both free an busy; this method is
+                        // assumed to be called when threads are not using the pool).
+                        iserver->pool.ncontexts = 0;
+                        redis_context_t *icontext;
+                        while (!VTAILQ_EMPTY(&iserver->pool.free_contexts)) {
+                            icontext = VTAILQ_FIRST(&iserver->pool.free_contexts);
+                            VTAILQ_REMOVE(&iserver->pool.free_contexts, icontext, list);
+                            free_redis_context(icontext);
+                        }
+                        while (!VTAILQ_EMPTY(&iserver->pool.busy_contexts)) {
+                            icontext = VTAILQ_FIRST(&iserver->pool.busy_contexts);
+                            VTAILQ_REMOVE(&iserver->pool.busy_contexts, icontext, list);
+                            free_redis_context(icontext);
+                        }
 
-                // Release pool lock.
-                AZ(pthread_mutex_unlock(&iserver->pool.mutex));
+                        // Release pool lock.
+                        AZ(pthread_mutex_unlock(&iserver->pool.mutex));
+                    }
+                }
             }
 
             // Release database lock.

@@ -1,4 +1,4 @@
-varnishtest "Tests general execution of commands (private pool)"
+varnishtest "Tests basics using private pool"
 
 server s1 {
    rxreq
@@ -9,16 +9,19 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
+        redis.init(subnets={""});
+
         new db = redis.db(
-            location="${redis_master1_address}",
+            location="${redis_master1_ip}:${redis_master1_port}",
+            type=master,
             connection_timeout=500,
             connection_ttl=0,
             command_timeout=0,
-            command_retries=0,
-            shared_contexts=false,
-            max_contexts=1,
+            max_command_retries=0,
+            shared_connections=false,
+            max_connections=1,
             password="",
-            clustered=false,
+            sickness_ttl=0,
             max_cluster_hops=0);
     }
 
@@ -27,7 +30,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.command("SET");
         db.push("foo");
         db.push("hello");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_status()) {
             set resp.http.Reply-1 = db.get_status_reply();
         }
@@ -37,7 +40,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.push("bar");
         db.push("3600");
         db.push("Hello world!");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_status()) {
             set resp.http.Reply-2 = db.get_status_reply();
         }
@@ -45,7 +48,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         # GET.
         db.command("GET");
         db.push("bar");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_string()) {
             set resp.http.Reply-3 = db.get_string_reply();
         }
@@ -53,7 +56,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         # DEL.
         db.command("DEL");
         db.push("bar");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_integer()) {
             set resp.http.Reply-4 = db.get_integer_reply();
         }
@@ -62,7 +65,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.command("MGET");
         db.push("foo");
         db.push("bar");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_array()) {
             set resp.http.Reply-5-Length = db.get_array_reply_length();
             set resp.http.Reply-5-Value-1 = db.get_array_reply_value(0);
@@ -76,7 +79,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.push("Hello world!");
         db.push("field2");
         db.push("42");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_status()) {
             set resp.http.Reply-6 = db.get_status_reply();
         }
@@ -85,7 +88,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.command("HGET");
         db.push("bar");
         db.push("field1");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_string()) {
             set resp.http.Reply-7 = db.get_string_reply();
         }
@@ -93,7 +96,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         # INCR.
         db.command("INCR");
         db.push("foo");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_error()) {
             set resp.http.Reply-8 = db.get_error_reply();
         }
@@ -109,7 +112,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.push("foo");
         db.push("bar");
         db.push("Atomic!");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_nil()) {
             set resp.http.Reply-9 = "o/";
         }
@@ -121,7 +124,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.push("foo");
         db.push("bar");
         db.push("Atomic x 2!");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_nil()) {
             set resp.http.Reply-10 = "o/";
         }
@@ -129,7 +132,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         # GET.
         db.command("GET");
         db.push("foo");
-        db.execute();
+        db.execute(true);
         if (db.reply_is_string()) {
             set resp.http.Reply-11 = db.get_string_reply();
         }

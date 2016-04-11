@@ -13,22 +13,45 @@ DESCRIPTION
 VMOD using the synchronous hiredis library API to access Redis servers from VCL.
 
 $Event event_function
+
+$Function VOID init(PRIV_VCL, STRING subnets = "")
+
+Arguments
+    subnets:
+        Comma-delimited list of weights + subnet masks used to select among
+        servers associated to a database instance when executing commands.
+        Order is relevant. Only IPv4 addresses are supported.
+
+        This is useful in setups using Redis instances deployed across multiple
+        data centers. If not provided, value in the VMOD_REDIS_SUBNETS
+        environment variable will be used.
+Description
+    Initializes the global VMOD state. Using this function is not mandatory. If
+    used it must be called during ``vcl_init`` before creating any database
+    instance.
+
 $Object db(PRIV_VCL,
     STRING location,
+    ENUM { master, slave, cluster } type,
     INT connection_timeout=1000,
     INT connection_ttl=0,
     INT command_timeout=0,
-    INT command_retries=0,
-    BOOL shared_contexts=true,
-    INT max_contexts=128,
+    INT max_command_retries=0,
+    BOOL shared_connections=true,
+    INT max_connections=128,
     STRING password="",
-    BOOL clustered=false,
+    INT sickness_ttl=60,
     INT max_cluster_hops=32)
 
 Arguments
-    location: Redis connection string. Both host + port and UNIX sockets are
-    supported. Only host + port format is allowed when Redis Cluster support
+    location: Redis connection string. Both IP + port and UNIX sockets are
+    supported. Only IP + port format is allowed when Redis Cluster support
     is enabled.
+
+    type: type of the database instance referenced by ``location``. The
+    ``cluster`` value enables Redis Cluster support, automatically
+    discovering other servers in the cluster using the ``CLUSTER SLOTS``
+    command.
 
     connection_timeout: connection timeout (milliseconds; 0 means no timeout)
     to the Redis server.
@@ -42,15 +65,15 @@ Arguments
     executing a Redis command. It can be overridden during command execution
     with ``.timeout()``.
 
-    command_retries: number of retries to be executed after a failed command
+    max_command_retries: number of retries to be executed after a failed command
     execution. It can be overridden during command execution with
     ``.retries()``.
 
-    shared_contexts: if enabled, Redis connections are not local to Varnish
+    shared_connections: if enabled, Redis connections are not local to Varnish
     worker threads, but shared by all threads using one or more pools.
 
-    max_contexts:
-        When ``shared_contexts`` is enabled, the VMOD creates one pool of
+    max_connections:
+        When ``shared_connections`` is enabled, the VMOD creates one pool of
         Redis connections per location and database instance. This option sets
         the maximum number of connections in each pool. All Varnish worker
         threads using the same database instance will share connections in these
@@ -58,9 +81,9 @@ Arguments
 
         Note that when Redis Cluster support is enabled for a database, each
         server is the cluster is internally labeled by the VMOD with its
-        location (host + port).
+        location (IP + port).
 
-        When ``shared_contexts`` is disabled, Redis connections are local to
+        When ``shared_connections`` is disabled, Redis connections are local to
         each Varnish worker thread. This option sets the maximum number of Redis
         connections per Varnish worker thread. Each thread keeps up to one
         connection per location and database instance. If more than one (database,
@@ -68,41 +91,42 @@ Arguments
         Redis connections.
 
         WARNING: when creating multiple database instances, always use the same
-        value in all instances using private contexts. Otherwise you may
+        value in all instances using private connections. Otherwise you may
         experience inconsistent behavior.
 
     password: if not empty, requests for authentication using the ``AUTH``
     command will be submitted when creating new Redis connections. This argument
     is ignored when Redis Cluster support is enabled.
 
-    clustered: enables the Redis Cluster support, automatically discovering
-    other servers in the cluster using the command ``CLUSTER SLOTS``.
+    sickness_ttl: TTL (seconds) of the sickness flag (0 means no sickness flags)
+    associated to a Redis server. Once a server is flagged as sick and while the
+    flag is not flushed the module will lazily drop existing connections to that
+    server and it will try to avoid it as much as possible when creating
+    execution plans.
 
     max_cluster_hops: maximum number of redirections (0 means no limit) when
     executing a command and Redis Cluster support has been enabled.
 Description
     Creates a new database instance.
 
-$Method VOID .add_server(STRING location)
+$Method VOID .add_server(
+    STRING location,
+    ENUM { master, slave, cluster } type)
 
 Arguments
-    location: Redis connection string. Both host + port and UNIX sockets are
-    supported. If Redis Cluster support has been enabled only host + port
+    location: Redis connection string. Both IP + port and UNIX sockets are
+    supported. If Redis Cluster support has been enabled only IP + port
     format is allowed.
+
+    type: type of the database instance referenced by ``location``. If Redis
+    Cluster support has been enabled ``cluster`` is the only allowed value.
 Description
     Adds an extra Redis server.
 
-    When a command is submitted using ``.execute()`` and more than one Redis
-    server is available, the destination server is randomly selected. A
-    randomly selected connection will be used (if the worker thread /
-    corresponding pool already has any Redis connection established and
-    available), or a new connection to a randomly selected server will be
-    established.
-
     If Redis Cluster support has been enabled other servers in the cluster are
     automatically discovered by the VMOD using the ``CLUSTER SLOTS`` command.
-    Anyway, knowing more cluster servers during startup increases the chances
-    of discover the cluster topology if some server is failing.
+    In any case, knowing more cluster servers during startup increases the
+    chances of discover the cluster topology if some server is failing.
 
 $Method VOID .command(STRING name)
 
@@ -124,16 +148,16 @@ Arguments
     used when executing a specific Redis command.
 Description
     Allows overriding the default command timeout provided when calling
-    ``redis.db()``.
+    ``.db()``.
 
-$Method VOID .retries(INT command_retries)
+$Method VOID .retries(INT max_command_retries)
 
 Arguments
-    command_retries: number of retries to be executed after a failed command
+    max_command_retries: number of retries to be executed after a failed command
     execution.
 Description
     Allows overriding the default number of retries provided when calling
-    ``redis.db()``.
+    ``.db()``.
 
 $Method VOID .push(STRING arg)
 
@@ -142,61 +166,93 @@ Arguments
 Description
     Provides an argument to a previously enqueued Redis command.
 
-$Method VOID .execute()
+$Method VOID .execute(BOOL master=true)
 
+Arguments
+    master: when enabled slave servers are not considered for execution.
 Return value
     VOID
 Description
     Executes a previously enqueued Redis command.
 
+    When more than one Redis server is available, the destination server
+    is selected according with ``master`` and with the list of weights +
+    subnet masks provided when calling ``init()``.
+
+    WARNING: allowing execution of commands in slave servers (i.e. ``master ==
+    false``) must be carefully used:
+
+    - When Redis Cluster support is disabled, sending a read-write command to
+      a read-only slave server will result in an error reply.
+
+    - It's safe to send read-only LUA scripts using ``EVAL`` or ``EVALSHA``
+      commands to a read-only slave server when Redis Cluster support is
+      disabled. Being a read-only slave server does not block writes in the
+      script cache.
+
+    - When Redis Cluster support is enabled, sending a read-write command to
+      a slave server will result in a redirection to the right master server.
+      This kind of redirections trigger an internal rediscovery of the cluster
+      topology. The client side won't notice the redirection, but triggering
+      such an expensive operation on every command is a **terrible idea**.
+
+    - **It's not safe to send read-only LUA scripts using ``EVAL`` or ``EVALSHA``
+      commands to a slave server when Redis Cluster support is enabled**. Redis
+      Cluster handles ``EVAL`` and ``EVALSHA1`` command as write operations that
+      must be redirected to a master server. Therefore, this would result on a
+      rediscovery of the cluster topology on every command execution. The VMOD
+      internally forces ``master == true`` when Redis Cluster support is enabled
+      and ``EVAL`` or ``EVALSHA`` command are submitted in order to avoid this
+      counterintuitive scenario.
+
 $Method BOOL .replied()
 
 Return value
-    TRUE if a previously executed Redis command using
-    ``.execute()`` returned any reply. Not returning a reply usually means
-    a failed connection, a connection timeout, etc.
+    TRUE if a previously executed Redis command using ``.execute()`` returned
+    any reply. Not returning a reply usually means a failed connection, a
+    connection timeout, etc.
 
 $Method BOOL .reply_is_error()
 
 Return value
-    TRUE if a previously executed Redis command using
-    ``.execute()`` returned an error reply.
+    TRUE if a previously executed Redis command using ``.execute()`` returned
+    an error reply.
 
 $Method BOOL .reply_is_nil()
 
 Return value
-    TRUE if a previously executed Redis command using
-    ``.execute()`` returned a nil reply.
+    TRUE if a previously executed Redis command using ``.execute()`` returned
+    a nil reply.
 
 $Method BOOL .reply_is_status()
 
 Return value
-    TRUE if a previously executed Redis command using
-    ``.execute()`` returned a status reply.
+    TRUE if a previously executed Redis command using ``.execute()`` returned
+    a status reply.
 
 $Method BOOL .reply_is_integer()
 
 Return value
-    TRUE if a previously executed Redis command
-    ``.execute()`` returned an integer reply.
+    TRUE if a previously executed Redis command ``.execute()`` returned an
+    integer reply.
 
 $Method BOOL .reply_is_string()
 
 Return value
-    TRUE if a previously executed Redis command
-    ``.execute()`` returned a string reply.
+    TRUE if a previously executed Redis command ``.execute()`` returned a
+    string reply.
 
 $Method BOOL .reply_is_array()
 
 Return value
-    TRUE if a previously executed Redis command using
-    ``.execute()`` returned an array reply.
+    TRUE if a previously executed Redis command using ``.execute()`` returned
+    an array reply.
 
 $Method STRING .get_reply()
 
 Return value
-    A string representation of the reply of a previously executed
-    Redis command using ``.execute()``.
+    A string representation of the reply of a previously executed Redis command
+    using ``.execute()``.
 Description
     Do not use this function to access to array replies.
 
@@ -222,7 +278,7 @@ Return value
 $Method STRING .get_string_reply()
 
 Return value
-    If a previously executed Redis command using ``.execute()`` returned
+    If a previously executed Redis command using ``.execute()`` returned a
     string reply, this function returns a string representation of that reply.
 
 $Method INT .get_array_reply_length()
@@ -304,7 +360,7 @@ Description
 $Method STRING .stats()
 
 Description
-    Returns internal stats.
+    Returns internal stats represented as a JSON string.
 
 $Method INT .counter(STRING name)
 

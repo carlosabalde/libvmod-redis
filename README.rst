@@ -10,8 +10,9 @@ Highlights:
 * **Full support for execution of LUA scripts** (i.e. ``EVAL`` command), including optimistic automatic execution of ``EVALSHA`` commands.
 * **All Redis reply data types are supported**, including partial support to access to components of simple (i.e. not nested) array replies.
 * **Redis pipelines are not (and won't be) supported**. LUA scripting, which is fully supported by the VMOD, it's a much more flexible alternative to pipelines for atomic execution and minimizing latency. Pipelines are hard to use and error prone, specially when using the ``WATCH`` command.
-* **Support for classic Redis deployments** using multiple Redis servers (replicated or standalone) **and for clustered deployments based on Redis Cluster**.
-* **Support for multiple Redis connections**, local to each Varnish worker thread, or shared using one or more pools.
+* **Support for classic Redis deployments** using multiple replicated Redis servers **and for clustered deployments based on Redis Cluster**.
+* **Support for multiple databases and multiple Redis connections**, local to each Varnish worker thread, or shared using one or more pools.
+* **Support for smart command execution**, selecting the destination server according with the preferred role (i.e. master or slave) and with distance and healthiness metrics collected during execution.
 
 Please, check out `the project wiki <https://github.com/carlosabalde/libvmod-redis/wiki>`_ for some extra information and useful links.
 
@@ -24,26 +25,32 @@ import redis;
 
 ::
 
+    # Initialization.
+    Function init(STRING subnets="")
+
     # Configuration.
     Object db(
         STRING location,
+        ENUM { master, slave, cluster } type,
         INT connection_timeout=1000,
         INT connection_ttl=0,
         INT command_timeout=0,
-        INT command_retries=0,
-        BOOL shared_contexts=true,
-        INT max_contexts=128,
+        INT max_command_retries=0,
+        BOOL shared_connections=true,
+        INT max_connections=128,
         STRING password="",
-        BOOL clustered=false,
+        INT sickness_ttl=60,
         INT max_cluster_hops=32)
-    Method VOID .add_server(STRING location)
+    Method VOID .add_server(
+        STRING location,
+        ENUM { master, slave, cluster } type)
 
     # Command execution.
     Method VOID .command(STRING name)
     Method VOID .timeout(INT command_timeout)
-    Method VOID .retries(INT command_retries)
+    Method VOID .retries(INT max_command_retries)
     Method VOID .push(STRING arg)
-    Method VOID .execute()
+    Method VOID .execute(BOOL master=true)
 
     # Access to replies.
     Method BOOL .replied()
@@ -90,8 +97,8 @@ Single server
         new db = redis.db(
             location="192.168.1.100:6379",
             connection_timeout=500,
-            shared_contexts=false,
-            max_contexts=1,
+            shared_connections=false,
+            max_connections=1,
             clustered=false);
     }
 
@@ -134,35 +141,32 @@ Multiple servers
     sub vcl_init {
         # VMOD configuration: master-slave replication, keeping up to two
         # Redis connections per Varnish worker thread (up to one to the master
-        # server & up to one to a randomly selected slave server).
-        new master = redis.db(
+        # server & up to one to a randomly selected -because subnets information
+        # is not provided- slave server).
+        new db = redis.db(
             location="192.168.1.100:6379",
+            type=master,
             connection_timeout=500,
-            shared_contexts=false,
-            max_contexts=1
+            shared_connections=false,
+            max_connections=2
             clustered=false);
-        new slave = redis.db(
-            location="192.168.1.101:6379",
-            connection_timeout=500,
-            shared_contexts=false,
-            max_contexts=1,
-            clustered=false);
-        slave.add_server("192.168.1.102:6379");
-        slave.add_server("192.168.1.103:6379");
+        db.add_server("192.168.1.101:6379", slave);
+        db.add_server("192.168.1.102:6379", slave);
+        db.add_server("192.168.1.103:6379", slave);
     }
 
     sub vcl_deliver {
         # SET submitted to the master server.
-        master.command("SET");
-        master.push("foo");
-        master.push("Hello world!");
-        master.execute();
+        db.command("SET");
+        db.push("foo");
+        db.push("Hello world!");
+        db.execute();
 
         # GET submitted to one of the slave servers.
-        slave.command("GET");
-        slave.push("foo");
-        slave.execute();
-        set req.http.X-Foo = slave.get_string_reply();
+        db.command("GET");
+        db.push("foo");
+        db.execute(false);
+        set req.http.X-Foo = db.get_string_reply();
     }
 
 Clustered setup
@@ -175,28 +179,28 @@ Clustered setup
         # connections per server, all shared between all Varnish worker threads.
         # Two initial cluster servers are provided; remaining servers are
         # automatically discovered.
-        new cluster = redis.db(
+        new db = redis.db(
             location="192.168.1.100:6379",
+            type=cluster,
             connection_timeout=500,
-            shared_contexts=true,
-            max_contexts=100,
-            clustered=true,
+            shared_connections=true,
+            max_connections=128,
             max_cluster_hops=16);
-        cluster.add_server("192.168.1.101:6379");
+        cluster.add_server("192.168.1.101:6379", cluster);
     }
 
     sub vcl_deliver {
         # SET internally routed to the destination server.
-        cluster.command("SET");
-        cluster.push("foo");
-        cluster.push("Hello world!");
-        cluster.execute();
+        db.command("SET");
+        db.push("foo");
+        db.push("Hello world!");
+        db.execute();
 
         # GET internally routed to the destination server.
-        cluster.command("GET");
-        cluster.push("foo");
-        cluster.execute();
-        set req.http.X-Foo = cluster.get_string_reply();
+        db.command("GET");
+        db.push("foo");
+        db.execute(false);
+        set req.http.X-Foo = db.get_string_reply();
     }
 
 INSTALLATION

@@ -1,0 +1,83 @@
+varnishtest "Tests subnets using shared pool"
+
+server s1 {
+   rxreq
+   txresp
+} -repeat 1 -start
+
+varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
+    import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
+
+    sub vcl_init {
+        redis.init(subnets={"
+            1 ${redis_slave1_1_ip}/32,
+            0 ${redis_slave1_2_ip}/32
+        "});
+
+        new db = redis.db(
+            location="${redis_master1_ip}:${redis_master1_port}",
+            type=master,
+            connection_timeout=500,
+            connection_ttl=0,
+            command_timeout=0,
+            max_command_retries=0,
+            shared_connections=true,
+            max_connections=1,
+            password="",
+            sickness_ttl=0,
+            max_cluster_hops=0);
+        db.add_server("${redis_slave1_1_ip}:${redis_slave1_1_port}", slave);
+        db.add_server("${redis_slave1_2_ip}:${redis_slave1_2_port}", slave);
+    }
+
+    sub vcl_deliver {
+        # INFO (master).
+        db.command("INFO");
+        db.execute(true);
+        if (db.reply_is_string()) {
+            set resp.http.Reply-1 = regsub(
+                db.get_string_reply(),
+                "(?s)^.*\nrole:([^\s]+)\s.*$", "\1");
+            set resp.http.Reply-2 = regsub(
+                db.get_string_reply(),
+                "(?s)^.*\ntcp_port:([^\s]+)\s.*$", "\1");
+        }
+
+        # INFO (slave).
+        db.command("INFO");
+        db.execute(false);
+        if (db.reply_is_string()) {
+            set resp.http.Reply-3 = regsub(
+                db.get_string_reply(),
+                "(?s)^.*\nrole:([^\s]+)\s.*$", "\1");
+            set resp.http.Reply-4 = regsub(
+                db.get_string_reply(),
+                "(?s)^.*\ntcp_port:([^\s]+)\s.*$", "\1");
+        }
+
+        # Stats.
+        set resp.http.db-stats = db.stats();
+        set resp.http.db-servers-total = db.counter("servers.total");
+        set resp.http.db-connections-total = db.counter("connections.total");
+        set resp.http.db-commands-total = db.counter("commands.total");
+        set resp.http.db-commands-error = db.counter("commands.error");
+    }
+} -start
+
+client c1 {
+    txreq
+    rxresp
+
+    expect resp.http.Reply-1 == "master"
+    expect resp.http.Reply-2 == "${redis_master1_port}"
+
+    expect resp.http.Reply-3 == "slave"
+    expect resp.http.Reply-4 == "${redis_slave1_2_port}"
+
+    expect resp.http.db-servers-total == "3"
+    expect resp.http.db-connections-total == "2"
+    expect resp.http.db-commands-total == "2"
+    expect resp.http.db-commands-error == "0"
+} -run
+
+varnish v1 -expect client_req == 1

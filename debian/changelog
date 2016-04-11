@@ -1,3 +1,13 @@
+libvmod-redis (3.1-1) unstable; urgency=low
+
+  * Added support for smart command execution
+  * Added redis.init(), including weights + subnet masks
+  * Added type (master, slave, cluster) and sickness TTL to redis.db()
+  * Added master / slave selection to .execute()
+  * Improvements & fixes
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Mon, 11 Apr 2016 17:00:00 +0200
+
 libvmod-redis (3.0-1) unstable; urgency=low
 
   * New version numbering scheme

@@ -1,4 +1,4 @@
-varnishtest "Tests multiple servers (private pool)"
+varnishtest "Tests basics with multiple servers and private pool"
 
 server s1 {
    rxreq
@@ -9,27 +9,32 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
+        redis.init(subnets={""});
+
         new master1 = redis.db(
-            location="${redis_master1_address}",
+            location="${redis_master1_ip}:${redis_master1_port}",
+            type=master,
             connection_timeout=500,
             connection_ttl=0,
             command_timeout=0,
-            command_retries=0,
-            shared_contexts=false,
-            max_contexts=1,
+            max_command_retries=0,
+            shared_connections=false,
+            max_connections=1,
             password="",
-            clustered=false,
+            sickness_ttl=0,
             max_cluster_hops=0);
+
         new master2 = redis.db(
-            location="${redis_master2_address}",
+            location="${redis_master2_ip}:${redis_master2_port}",
+            type=master,
             connection_timeout=500,
             connection_ttl=0,
             command_timeout=0,
-            command_retries=0,
-            shared_contexts=false,
-            max_contexts=1,
+            max_command_retries=0,
+            shared_connections=false,
+            max_connections=1,
             password="",
-            clustered=false,
+            sickness_ttl=0,
             max_cluster_hops=0);
     }
 
@@ -38,32 +43,32 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         master1.command("SET");
         master1.push("foo");
         master1.push("Hello world!");
-        master1.execute();
+        master1.execute(true);
 
         master1.command("GET");
         master1.push("foo");
-        master1.execute();
+        master1.execute(true);
         set resp.http.Reply-1 = master1.get_reply();
 
         master2.command("GET");
         master2.push("foo");
-        master2.execute();
+        master2.execute(true);
         set resp.http.Reply-2 = master2.get_reply();
 
         # SET (master2) -> GET (master2) -> GET (master1).
         master2.command("SET");
         master2.push("bar");
         master2.push("Hello world!");
-        master2.execute();
+        master2.execute(true);
 
         master2.command("GET");
         master2.push("bar");
-        master2.execute();
+        master2.execute(true);
         set resp.http.Reply-3 = master2.get_reply();
 
         master1.command("GET");
         master1.push("bar");
-        master1.execute();
+        master1.execute(true);
         set resp.http.Reply-4 = master1.get_reply();
 
         # Stats.

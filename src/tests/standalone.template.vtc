@@ -9,19 +9,20 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
+        redis.init(subnets={""});
+
         new db = redis.db(
-            location="${redis_master1}",
+            location="${redis_master1_ip}:${redis_master1_port}",
+            type=master,
             connection_timeout=500,
             connection_ttl=0,
             command_timeout=0,
-            command_retries=0,
-            shared_contexts=true,
-            max_contexts=32,
+            max_command_retries=0,
+            shared_connections=false,
+            max_connections=1,
             password="",
-            clustered=true,
-            max_cluster_hops=16);
-        db.add_server("${redis_master2}");
-        db.add_server("${redis_master3}");
+            sickness_ttl=0,
+            max_cluster_hops=0);
     }
 
     sub vcl_deliver {
@@ -29,9 +30,6 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         set resp.http.db-servers-total = db.counter("servers.total");
         set resp.http.db-connections-total = db.counter("connections.total");
         set resp.http.db-commands-total = db.counter("commands.total");
-        set resp.http.db-cluster-discoveries-total = db.counter("cluster.discoveries.total");
-        set resp.http.db-cluster-replies-moved = db.counter("cluster.replies.moved");
-        set resp.http.db-cluster-replies-ask = db.counter("cluster.replies.ask");
     }
 } -start
 
@@ -39,12 +37,9 @@ client c1 {
     txreq
     rxresp
 
-    expect resp.http.db-servers-total == "3"
+    expect resp.http.db-servers-total == "1"
     expect resp.http.db-connections-total == "0"
     expect resp.http.db-commands-total == "0"
-    expect resp.http.db-cluster-discoveries-total == "1"
-    expect resp.http.db-cluster-replies-moved == "0"
-    expect resp.http.db-cluster-replies-ask == "0"
 } -run
 
 varnish v1 -expect client_req == 1
