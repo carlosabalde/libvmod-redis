@@ -9,10 +9,10 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
-        redis.init(subnets="");
+        redis.init(subnets={""});
 
         new master1 = redis.db(
-            location="${redis_master1_address}",
+            location="${redis_master1_ip}:${redis_master1_port}",
             type=master,
             connection_timeout=500,
             connection_ttl=0,
@@ -25,7 +25,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
             max_cluster_hops=0);
 
         new master2 = redis.db(
-            location="${redis_master2_address}",
+            location="${redis_master2_ip}:${redis_master2_port}",
             type=master,
             connection_timeout=500,
             connection_ttl=0,

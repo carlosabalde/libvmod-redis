@@ -57,35 +57,39 @@ if [[ $2 =~ ^.*standalone\.[^\.]*\.vtc$ ]]; then
     if [ -x "$(command -v redis-cli)" ]; then
         SKIP=0
         for MASTER_INDEX in $(seq 1 $REDIS_STANDALONE_MASTER_SERVERS); do
+            MASTER_IP=127.0.0.$MASTER_INDEX
             MASTER_PORT=$((REDIS_STANDALONE_START_PORT+MASTER_INDEX))
             cat > "$TMP/redis-master$MASTER_INDEX.conf" <<EOF
             daemonize yes
-            port $MASTER_PORT
-            bind 127.0.0.1
             dir $TMP
+            bind $MASTER_IP
+            port $MASTER_PORT
             unixsocket $TMP/redis-master$MASTER_INDEX.sock
             pidfile $TMP/redis-master$MASTER_INDEX.pid
 EOF
             redis-server "$TMP/redis-master$MASTER_INDEX.conf"
             CONTEXT="\
                 $CONTEXT \
-                -Dredis_master${MASTER_INDEX}_address=127.0.0.1:$MASTER_PORT \
+                -Dredis_master${MASTER_INDEX}_ip=$MASTER_IP \
+                -Dredis_master${MASTER_INDEX}_port=$MASTER_PORT \
                 -Dredis_master${MASTER_INDEX}_socket=$TMP/redis-master$MASTER_INDEX.sock"
             for SLAVE_INDEX in $(seq 1 $REDIS_STANDALONE_SLAVE_SERVERS); do
+                SLAVE_IP=127.0.$MASTER_INDEX.$SLAVE_INDEX
                 SLAVE_PORT=$((REDIS_STANDALONE_START_PORT+REDIS_STANDALONE_MASTER_SERVERS+(MASTER_INDEX-1)*REDIS_STANDALONE_SLAVE_SERVERS+SLAVE_INDEX))
                 cat > "$TMP/redis-slave${MASTER_INDEX}_$SLAVE_INDEX.conf" <<EOF
                 daemonize yes
-                port $SLAVE_PORT
-                bind 127.0.0.1
                 dir $TMP
+                bind $SLAVE_IP
+                port $SLAVE_PORT
                 unixsocket $TMP/redis-slave${MASTER_INDEX}_$SLAVE_INDEX.sock
                 pidfile $TMP/redis-slave${MASTER_INDEX}_$SLAVE_INDEX.pid
-                slaveof 127.0.0.1 $MASTER_PORT
+                slaveof $MASTER_IP $MASTER_PORT
 EOF
                 redis-server "$TMP/redis-slave${MASTER_INDEX}_$SLAVE_INDEX.conf"
                 CONTEXT="\
                     $CONTEXT \
-                    -Dredis_slave${MASTER_INDEX}_${SLAVE_INDEX}_address=127.0.0.1:$SLAVE_PORT \
+                    -Dredis_slave${MASTER_INDEX}_${SLAVE_INDEX}_ip=$SLAVE_IP \
+                    -Dredis_slave${MASTER_INDEX}_${SLAVE_INDEX}_port=$SLAVE_PORT \
                     -Dredis_slave${MASTER_INDEX}_${SLAVE_INDEX}_socket=$TMP/redis-slave${MASTER_INDEX}_$SLAVE_INDEX.sock"
             done
         done
@@ -101,9 +105,9 @@ elif [[ $2 =~ ^.*clustered\.[^\.]*\.vtc$ ]]; then
         for INDEX in $(seq 1 $REDIS_CLUSTER_SERVERS); do
             cat > "$TMP/redis-server$INDEX.conf" <<EOF
             daemonize yes
-            port $((REDIS_CLUSTER_START_PORT+INDEX))
-            bind 127.0.0.1
             dir $TMP
+            port $((REDIS_CLUSTER_START_PORT+INDEX))
+            bind 127.0.0.$INDEX
             unixsocket $TMP/redis-server$INDEX.sock
             pidfile $TMP/redis-server$INDEX.pid
             cluster-enabled yes
@@ -111,14 +115,14 @@ elif [[ $2 =~ ^.*clustered\.[^\.]*\.vtc$ ]]; then
             cluster-node-timeout 5000
             cluster-slave-validity-factor 0
             cluster-require-full-coverage yes
-            dir $TMP
 EOF
             redis-server "$TMP/redis-server$INDEX.conf"
             CONTEXT="\
                 $CONTEXT \
-                -Dredis_server${INDEX}_address=127.0.0.1:$((REDIS_CLUSTER_START_PORT+INDEX)) \
+                -Dredis_server${INDEX}_ip=127.0.0.$INDEX \
+                -Dredis_server${INDEX}_port=$((REDIS_CLUSTER_START_PORT+INDEX)) \
                 -Dredis_server${INDEX}_socket=$TMP/redis-server$INDEX.sock"
-            SERVERS="$SERVERS 127.0.0.1:$((REDIS_CLUSTER_START_PORT+INDEX))"
+            SERVERS="$SERVERS 127.0.0.$INDEX:$((REDIS_CLUSTER_START_PORT+INDEX))"
         done
 
         yes yes | redis-trib.rb create --replicas $REDIS_CLUSTER_REPLICAS $SERVERS > /dev/null
@@ -135,7 +139,8 @@ EOF
         while read LINE; do
             CONTEXT="\
                 $CONTEXT \
-                -Dredis_master${INDEX}=$(echo $LINE | cut -f 2 -d ' ') \
+                -Dredis_master${INDEX}_ip=$(echo $LINE | cut -f 2 -d ' ' | cut -f 1 -d ':') \
+                -Dredis_master${INDEX}_port=$(echo $LINE | cut -f 2 -d ' ' | cut -f 2 -d ':') \
                 -Dredis_key_in_master${INDEX}=$(grep "^$(echo $LINE | cut -f 9 -d ' ' | cut -f 1 -d '-'): " tests/hashslot-keys.txt | cut -f 2 -d ' ')"
             INDEX=$(( INDEX + 1 ))
         done <<< "$(redis-cli -p $((REDIS_CLUSTER_START_PORT+1)) CLUSTER NODES | grep master | sort -k 9 -n)"
