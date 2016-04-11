@@ -24,6 +24,7 @@ SYNOPSIS
 import redis;
 
 ::
+
     # Initialization.
     Function init(STRING subnets="")
 
