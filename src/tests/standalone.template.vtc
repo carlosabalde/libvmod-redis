@@ -12,7 +12,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         redis.init(subnets={""});
 
         new db = redis.db(
-            location="${redis_master1_address}",
+            location="${redis_master1_ip}:${redis_master1_port}",
             type=master,
             connection_timeout=500,
             connection_ttl=0,
