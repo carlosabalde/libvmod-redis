@@ -4,10 +4,19 @@
 #include <syslog.h>
 #include <pthread.h>
 #include <hiredis/hiredis.h>
+#include <netinet/in.h>
 
 #include "vqueue.h"
 
-#define MAX_REDIS_CLUSTER_SLOTS 16384
+#define NREDIS_SERVER_ROLES 3
+#define NREDIS_SERVER_WEIGHTS 4
+#define NREDIS_CLUSTER_SLOTS 16384
+
+enum REDIS_SERVER_ROLE {
+    REDIS_SERVER_SLAVE_ROLE = 0,
+    REDIS_SERVER_MASTER_ROLE = 1,
+    REDIS_SERVER_TBD_ROLE = 2
+};
 
 enum REDIS_SERVER_LOCATION_TYPE {
     REDIS_SERVER_LOCATION_HOST_TYPE,
@@ -19,7 +28,7 @@ typedef struct redis_server {
 #define REDIS_SERVER_MAGIC 0xac587b11
     unsigned magic;
 
-    // Database (useful when storing contexts in the thread state).
+    // Database.
     struct vmod_redis_db *db;
 
     // Location (allocated in the heap).
@@ -35,6 +44,12 @@ typedef struct redis_server {
         } parsed;
     } location;
 
+    // Role.
+    enum REDIS_SERVER_ROLE role;
+
+    // Weight.
+    unsigned weight;
+
     // Shared pool.
     struct {
         // Mutex & condition variable.
@@ -46,6 +61,14 @@ typedef struct redis_server {
         VTAILQ_HEAD(,redis_context) free_contexts;
         VTAILQ_HEAD(,redis_context) busy_contexts;
     } pool;
+
+    // Redis Cluster state.
+    struct {
+        unsigned slots[NREDIS_CLUSTER_SLOTS];
+    } cluster;
+
+    // Sickness timestamp.
+    time_t sickness_tst;
 
     // Tail queue.
     VTAILQ_ENTRY(redis_server) list;
@@ -68,6 +91,9 @@ typedef struct redis_context {
     VTAILQ_ENTRY(redis_context) list;
 } redis_context_t;
 
+struct vcl_priv;
+typedef struct vcl_priv vcl_priv_t;
+
 struct vmod_redis_db {
     // Object marker.
     unsigned magic;
@@ -76,24 +102,29 @@ struct vmod_redis_db {
     // Mutex.
     pthread_mutex_t mutex;
 
-    // Redis servers (allocated in the heap).
-    VTAILQ_HEAD(,redis_server) servers;
+    // Configuration.
+    // XXX: required because PRIV_VCL pointers are not available when invoking
+    // object methods. This should be fixed in future Varnish releases.
+    vcl_priv_t *config;
 
     // General options (allocated in the heap).
     const char *name;
     struct timeval connection_timeout;
-    unsigned context_ttl;
+    unsigned connection_ttl;
     struct timeval command_timeout;
-    unsigned command_retries;
-    unsigned shared_contexts;
-    unsigned max_contexts;
+    unsigned max_command_retries;
+    unsigned shared_connections;
+    unsigned max_connections;
     const char *password;
+    time_t sickness_ttl;
 
-    // Redis Cluster options / state.
+    // Redis servers (allocated in the heap), clustered by weight & role.
+    VTAILQ_HEAD(,redis_server) servers[NREDIS_SERVER_WEIGHTS][NREDIS_SERVER_ROLES];
+
+    // Redis Cluster options.
     struct {
         unsigned enabled;
         unsigned max_hops;
-        redis_server_t *slots[MAX_REDIS_CLUSTER_SLOTS];
     } cluster;
 
     // Stats.
@@ -117,6 +148,7 @@ struct vmod_redis_db {
                 unsigned overflow;
                 unsigned ttl;
                 unsigned version;
+                unsigned sick;
             } dropped;
         } connections;
 
@@ -180,12 +212,30 @@ typedef struct thread_state {
     struct {
         struct vmod_redis_db *db;
         struct timeval timeout;
-        unsigned retries;
+        unsigned max_retries;
         unsigned argc;
         const char *argv[MAX_REDIS_COMMAND_ARGS];
         redisReply *reply;
     } command;
 } thread_state_t;
+
+typedef struct vcl_priv_subnet {
+    // Object marker.
+#define VCL_PRIV_SUBNET_MAGIC 0x27facd57
+    unsigned magic;
+
+    // Weight.
+    unsigned weight;
+
+    // Address and mask stored in unsigned 32 bit variables (in_addr.s_addr)
+    // using host byte oder.
+    // XXX: only IPv4 subnets supported.
+    struct in_addr address;
+    struct in_addr mask;
+
+    // Tail queue.
+    VTAILQ_ENTRY(vcl_priv_subnet) list;
+} vcl_priv_subnet_t;
 
 typedef struct vcl_priv_db {
     // Object marker.
@@ -204,6 +254,9 @@ typedef struct vcl_priv {
 #define VCL_PRIV_MAGIC 0x77feec11
     unsigned magic;
 
+    // Subnets.
+    VTAILQ_HEAD(,vcl_priv_subnet) subnets;
+
     // Databases.
     VTAILQ_HEAD(,vcl_priv_db) dbs;
 } vcl_priv_t;
@@ -221,7 +274,8 @@ typedef struct vcl_priv {
         free(_buffer); \
     } while (0)
 
-redis_server_t *new_redis_server(struct vmod_redis_db *db, const char *location);
+redis_server_t *new_redis_server(
+    struct vmod_redis_db *db, const char *location, enum REDIS_SERVER_ROLE role);
 void free_redis_server(redis_server_t *server);
 
 redis_context_t *new_redis_context(
@@ -229,10 +283,10 @@ redis_context_t *new_redis_context(
 void free_redis_context(redis_context_t *context);
 
 struct vmod_redis_db *new_vmod_redis_db(
-    const char *name, struct timeval connection_timeout, unsigned context_ttl,
-    struct timeval command_timeout, unsigned command_retries,
-    unsigned shared_contexts, unsigned max_contexts, const char *password,
-    unsigned clustered, unsigned max_cluster_hops);
+    vcl_priv_t *config, const char *name, struct timeval connection_timeout,
+    unsigned connection_ttl, struct timeval command_timeout, unsigned max_command_retries,
+    unsigned shared_connections, unsigned max_connections, const char *password,
+    unsigned sickness_ttl, unsigned clustered, unsigned max_cluster_hops);
 void free_vmod_redis_db(struct vmod_redis_db *db);
 
 thread_state_t *new_thread_state();
@@ -241,15 +295,18 @@ void free_thread_state(thread_state_t *state);
 vcl_priv_t *new_vcl_priv();
 void free_vcl_priv(vcl_priv_t *priv);
 
+vcl_priv_subnet_t *new_vcl_priv_subnet(unsigned weight, struct in_addr ia4, unsigned bits);
+void free_vcl_priv_subnet(vcl_priv_subnet_t *subnet);
+
 vcl_priv_db_t *new_vcl_priv_db(struct vmod_redis_db *db);
 void free_vcl_priv_db(vcl_priv_db_t *db);
 
 redisReply *redis_execute(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    redis_server_t *server, unsigned version, struct timeval timeout,
-    unsigned argc, const char *argv[], unsigned asking);
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, unsigned version,
+    struct timeval timeout, unsigned max_retries, unsigned argc, const char *argv[],
+    unsigned *retries, redis_server_t *server, unsigned master, unsigned slot);
 
 redis_server_t * unsafe_add_redis_server(
-    VRT_CTX, struct vmod_redis_db *db, const char *location);
+    VRT_CTX, struct vmod_redis_db *db, const char *location, enum REDIS_SERVER_ROLE role);
 
 #endif
