@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 3.1
+Version: 3.2
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,6 +36,8 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Tue Apr 12 2016 Carlos Abalde <carlos.abalde@gmail.com> - 3.2-1.20160412
+- Improvements & fixes.
 * Mon Apr 11 2016 Carlos Abalde <carlos.abalde@gmail.com> - 3.1-1.20160411
 - Added support for smart command execution.
 - Added redis.init(), including weights + subnet masks.

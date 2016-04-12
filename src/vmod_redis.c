@@ -25,7 +25,7 @@ static thread_state_t *get_thread_state(VRT_CTX, unsigned flush);
 static void flush_thread_state(thread_state_t *state);
 static void make_thread_key();
 
-static void parse_subnets(VRT_CTX, vcl_priv_t *config, const char *subnets);
+static void unsafe_parse_subnets(VRT_CTX, vcl_priv_t *config, const char *subnets);
 
 static const char *get_reply(VRT_CTX, redisReply *reply);
 
@@ -61,6 +61,9 @@ event_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
             AZ(pthread_mutex_lock(&mutex));
             version++;
             AZ(pthread_mutex_unlock(&mutex));
+            REDIS_LOG_INFO(ctx,
+                "Internal version increased (value=%d)",
+                version);
             break;
 
         case VCL_EVENT_COLD:
@@ -87,13 +90,22 @@ vmod_init(VRT_CTX, struct vmod_priv *vcl_priv, VCL_STRING subnets)
     // Initializations.
     vcl_priv_t *config = vcl_priv->priv;
 
-    // Try to initialize subnets using the input parameter.
-    parse_subnets(ctx, config, subnets);
+    // Get configuration lock.
+    AZ(pthread_mutex_lock(&config->mutex));
 
-    // Try to initialize subnets using the environment variable?
-    if (VTAILQ_EMPTY(&config->subnets)) {
-        parse_subnets(ctx, config, getenv("VMOD_REDIS_SUBNETS"));
+    // Silently ignore calls to this function if any database instance has
+    // already been registered.
+    if (VTAILQ_EMPTY(&config->dbs)) {
+        // Try to initialize subnets (first using the input parameter; then
+        // using the environment variable).
+        unsafe_parse_subnets(ctx, config, subnets);
+        if (VTAILQ_EMPTY(&config->subnets)) {
+            unsafe_parse_subnets(ctx, config, getenv("VMOD_REDIS_SUBNETS"));
+        }
     }
+
+    // Release configuration lock.
+    AZ(pthread_mutex_unlock(&config->mutex));
 }
 
 /******************************************************************************
@@ -205,8 +217,15 @@ vmod_db__init(
             // Register & return the new database instance.
             // XXX: is there a better way to keep track of database instances?
             vcl_priv_db_t *vcl_priv_db = new_vcl_priv_db(instance);
+            AZ(pthread_mutex_lock(&config->mutex));
             VTAILQ_INSERT_TAIL(&config->dbs, vcl_priv_db, list);
+            AZ(pthread_mutex_unlock(&config->mutex));
             *db = instance;
+
+            // Log event.
+            REDIS_LOG_INFO(ctx,
+                "New database instance registered (name=%s)",
+                instance->name);
         } else {
             free_vmod_redis_db(instance);
             *db = NULL;
@@ -221,8 +240,27 @@ vmod_db__fini(struct vmod_redis_db **db)
     AN(db);
     AN(*db);
 
-    // Release database instance.
-    free_vmod_redis_db(*db);
+    // Log event.
+    syslog(LOG_INFO,
+        "[REDIS] Unregistering database instance (name=%s)",
+        (*db)->name);
+
+    // Keep config reference before releasing the instance.
+    vcl_priv_t *config = (*db)->config;
+
+    // Unregister database instance.
+    // XXX: is there a better way to keep track of database instances?
+    AZ(pthread_mutex_lock(&config->mutex));
+    vcl_priv_db_t *idb;
+    VTAILQ_FOREACH(idb, &config->dbs, list) {
+        CHECK_OBJ_NOTNULL(idb, VCL_PRIV_DB_MAGIC);
+        if (idb->db == *db) {
+            VTAILQ_REMOVE(&config->dbs, idb, list);
+            free_vcl_priv_db(idb);
+            break;
+        }
+    }
+    AZ(pthread_mutex_unlock(&config->mutex));
     *db = NULL;
 }
 
@@ -273,7 +311,7 @@ vmod_db_command(VRT_CTX, struct vmod_redis_db *db, VCL_STRING name)
         state->command.argc = 1;
         state->command.argv[0] = WS_Copy(ctx->ws, name, -1);
         if (state->command.argv[0] == NULL) {
-            REDIS_LOG(ctx,
+            REDIS_LOG_ERROR(ctx,
                 "Failed to allocate memory in workspace (%p)",
                 ctx->ws);
             flush_thread_state(state);
@@ -339,13 +377,13 @@ vmod_db_push(VRT_CTX, struct vmod_redis_db *db, VCL_STRING arg)
             state->command.argv[state->command.argc++] = WS_Copy(ctx->ws, "", -1);
         }
         if (state->command.argv[state->command.argc - 1] == NULL) {
-            REDIS_LOG(ctx,
+            REDIS_LOG_ERROR(ctx,
                 "Failed to allocate memory in workspace (%p)",
                 ctx->ws);
             flush_thread_state(state);
         }
     } else {
-        REDIS_LOG(ctx,
+        REDIS_LOG_ERROR(ctx,
             "Failed to push Redis argument (limit is %d)",
             MAX_REDIS_COMMAND_ARGS);
     }
@@ -395,14 +433,14 @@ vmod_db_execute(VRT_CTX, struct vmod_redis_db *db, VCL_BOOL master)
                 ctx, db, state, version,
                 state->command.timeout, state->command.max_retries,
                 state->command.argc, state->command.argv,
-                &retries, NULL, master, 0);
+                &retries, NULL, 0, master, 0);
         }
 
         // Log error replies (other errors are already logged while executing
         // commands, retries, redirections, etc.).
         if ((state->command.reply != NULL) &&
             (state->command.reply->type == REDIS_REPLY_ERROR)) {
-            REDIS_LOG(ctx,
+            REDIS_LOG_ERROR(ctx,
                 "Got error reply while executing Redis command (%s): %s",
                 state->command.argv[0],
                 state->command.reply->str);
@@ -498,7 +536,7 @@ vmod_db_get_ ## lower ## _reply(VRT_CTX, struct vmod_redis_db *db) \
         (state->command.reply->type == REDIS_REPLY_ ## upper)) { \
         char *result = WS_Copy(ctx->ws, state->command.reply->str, state->command.reply->len + 1); \
         if (result == NULL) { \
-            REDIS_LOG(ctx, \
+            REDIS_LOG_ERROR(ctx, \
                 "Failed to allocate memory in workspace (%p)", \
                 ctx->ws); \
         } \
@@ -705,7 +743,7 @@ vmod_db_counter(VRT_CTX, struct vmod_redis_db *db, VCL_STRING name)
     } else if (strcmp(name, "cluster.replies.ask") == 0) {
         return db->stats.cluster.replies.ask;
     } else {
-        REDIS_LOG(ctx,
+        REDIS_LOG_ERROR(ctx,
             "Failed to fetch counter '%s'",
             name);
         return 0;
@@ -759,7 +797,7 @@ make_thread_key()
 }
 
 static void
-parse_subnets(VRT_CTX, vcl_priv_t *config, const char *subnets)
+unsafe_parse_subnets(VRT_CTX, vcl_priv_t *config, const char *subnets)
 {
     if (subnets != NULL) {
         // Initializations
@@ -831,7 +869,7 @@ parse_subnets(VRT_CTX, vcl_priv_t *config, const char *subnets)
             }
 
             // Log error.
-            REDIS_LOG(ctx,
+            REDIS_LOG_ERROR(ctx,
                 "Got error while parsing subnets (%d)",
                 error);
         }
@@ -851,7 +889,7 @@ get_reply(VRT_CTX, redisReply *reply)
         case REDIS_REPLY_STRING:
             result = WS_Copy(ctx->ws, reply->str, reply->len + 1);
             if (result == NULL) {
-                REDIS_LOG(ctx,
+                REDIS_LOG_ERROR(ctx,
                     "Failed to allocate memory in workspace (%p)",
                     ctx->ws);
             }
@@ -860,7 +898,7 @@ get_reply(VRT_CTX, redisReply *reply)
         case REDIS_REPLY_INTEGER:
             result = WS_Printf(ctx->ws, "%lld", reply->integer);
             if (result == NULL) {
-                REDIS_LOG(ctx,
+                REDIS_LOG_ERROR(ctx,
                     "Failed to allocate memory in workspace (%p)",
                     ctx->ws);
             }
@@ -882,45 +920,67 @@ get_reply(VRT_CTX, redisReply *reply)
 static void
 handle_vcl_cold_event(VRT_CTX, vcl_priv_t *config)
 {
+    // Initializations.
+    unsigned dbs = 0;
+    unsigned connections = 0;
+
+    // Get configuration lock.
+    AZ(pthread_mutex_lock(&config->mutex));
+
     // Iterate through registered database instances and close connections in
     // shared pools.
     vcl_priv_db_t *idb;
     VTAILQ_FOREACH(idb, &config->dbs, list) {
-        if ((idb != NULL) && (idb->magic == VCL_PRIV_DB_MAGIC)) {
-            // Get database lock.
-            AZ(pthread_mutex_lock(&idb->db->mutex));
+        CHECK_OBJ_NOTNULL(idb, VCL_PRIV_DB_MAGIC);
+        dbs++;
 
-            // Release contexts in all pools.
-            redis_server_t *iserver;
-            for (unsigned iweight = 0; iweight < NREDIS_SERVER_WEIGHTS; iweight++) {
-                for (enum REDIS_SERVER_ROLE irole = 0; irole < NREDIS_SERVER_ROLES; irole++) {
-                    VTAILQ_FOREACH(iserver, &(idb->db->servers[iweight][irole]), list) {
-                        // Get pool lock.
-                        AZ(pthread_mutex_lock(&iserver->pool.mutex));
+        // Get database lock.
+        AZ(pthread_mutex_lock(&idb->db->mutex));
 
-                        // Release all contexts (both free an busy; this method is
-                        // assumed to be called when threads are not using the pool).
-                        iserver->pool.ncontexts = 0;
-                        redis_context_t *icontext;
-                        while (!VTAILQ_EMPTY(&iserver->pool.free_contexts)) {
-                            icontext = VTAILQ_FIRST(&iserver->pool.free_contexts);
-                            VTAILQ_REMOVE(&iserver->pool.free_contexts, icontext, list);
-                            free_redis_context(icontext);
-                        }
-                        while (!VTAILQ_EMPTY(&iserver->pool.busy_contexts)) {
-                            icontext = VTAILQ_FIRST(&iserver->pool.busy_contexts);
-                            VTAILQ_REMOVE(&iserver->pool.busy_contexts, icontext, list);
-                            free_redis_context(icontext);
-                        }
+        // Release contexts in all pools.
+        redis_server_t *iserver;
+        for (unsigned iweight = 0; iweight < NREDIS_SERVER_WEIGHTS; iweight++) {
+            for (enum REDIS_SERVER_ROLE irole = 0; irole < NREDIS_SERVER_ROLES; irole++) {
+                VTAILQ_FOREACH(iserver, &(idb->db->servers[iweight][irole]), list) {
+                    CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
 
-                        // Release pool lock.
-                        AZ(pthread_mutex_unlock(&iserver->pool.mutex));
+                    // Get pool lock.
+                    AZ(pthread_mutex_lock(&iserver->pool.mutex));
+
+                    // Release all contexts (both free an busy; this method is
+                    // assumed to be called when threads are not using the pool).
+                    iserver->pool.ncontexts = 0;
+                    redis_context_t *icontext;
+                    while (!VTAILQ_EMPTY(&iserver->pool.free_contexts)) {
+                        icontext = VTAILQ_FIRST(&iserver->pool.free_contexts);
+                        CHECK_OBJ_NOTNULL(icontext, REDIS_CONTEXT_MAGIC);
+                        connections++;
+                        VTAILQ_REMOVE(&iserver->pool.free_contexts, icontext, list);
+                        free_redis_context(icontext);
                     }
+                    while (!VTAILQ_EMPTY(&iserver->pool.busy_contexts)) {
+                        icontext = VTAILQ_FIRST(&iserver->pool.busy_contexts);
+                        CHECK_OBJ_NOTNULL(icontext, REDIS_CONTEXT_MAGIC);
+                        connections++;
+                        VTAILQ_REMOVE(&iserver->pool.busy_contexts, icontext, list);
+                        free_redis_context(icontext);
+                    }
+
+                    // Release pool lock.
+                    AZ(pthread_mutex_unlock(&iserver->pool.mutex));
                 }
             }
-
-            // Release database lock.
-            AZ(pthread_mutex_unlock(&idb->db->mutex));
         }
+
+        // Release database lock.
+        AZ(pthread_mutex_unlock(&idb->db->mutex));
     }
+
+    // Release configuration lock.
+    AZ(pthread_mutex_unlock(&config->mutex));
+
+    // Log event.
+    REDIS_LOG_INFO(ctx,
+        "Released %d pooled connections in %d database objects",
+        connections, dbs);
 }
