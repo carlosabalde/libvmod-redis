@@ -272,18 +272,35 @@ typedef struct vcl_priv {
     VTAILQ_HEAD(,vcl_priv_db) dbs;
 } vcl_priv_t;
 
-#define REDIS_LOG(ctx, message, ...) \
+#define REDIS_LOG(ctx, level, message, ...) \
     do { \
         char *_buffer; \
-        assert(asprintf( \
-            &_buffer, \
-            "[REDIS][%s] %s", __func__, message) > 0); \
-        syslog(LOG_ERR, _buffer, ##__VA_ARGS__); \
+        if (level == LOG_ERR) { \
+            assert(asprintf( \
+                &_buffer, \
+                "[REDIS][%s] %s", __func__, message) > 0); \
+        } else { \
+            assert(asprintf( \
+                &_buffer, \
+                "[REDIS] %s", message) > 0); \
+        } \
+        syslog(level, _buffer, ##__VA_ARGS__); \
         if ((ctx != NULL) && (ctx->vsl != NULL)) { \
-            VSLb(ctx->vsl, SLT_VCL_Error, _buffer, ##__VA_ARGS__); \
+            if (level == LOG_ERR) { \
+                VSLb(ctx->vsl, SLT_VCL_Error, _buffer, ##__VA_ARGS__); \
+            } else { \
+                VSLb(ctx->vsl, SLT_VCL_Log, _buffer, ##__VA_ARGS__); \
+            } \
         } \
         free(_buffer); \
     } while (0)
+
+#define REDIS_LOG_ERROR(ctx, message, ...) \
+    REDIS_LOG(ctx, LOG_ERR, message, ##__VA_ARGS__)
+#define REDIS_LOG_WARNING(ctx, message, ...) \
+    REDIS_LOG(ctx, LOG_WARNING, message, ##__VA_ARGS__)
+#define REDIS_LOG_INFO(ctx, message, ...) \
+    REDIS_LOG(ctx, LOG_INFO, message, ##__VA_ARGS__)
 
 redis_server_t *new_redis_server(
     struct vmod_redis_db *db, const char *location, enum REDIS_SERVER_ROLE role);
@@ -315,7 +332,8 @@ void free_vcl_priv_db(vcl_priv_db_t *db);
 redisReply *redis_execute(
     VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, unsigned version,
     struct timeval timeout, unsigned max_retries, unsigned argc, const char *argv[],
-    unsigned *retries, redis_server_t *server, unsigned master, unsigned slot);
+    unsigned *retries, redis_server_t *server, unsigned asking,
+    unsigned master, unsigned slot);
 
 redis_server_t * unsafe_add_redis_server(
     VRT_CTX, struct vmod_redis_db *db, const char *location, enum REDIS_SERVER_ROLE role);
