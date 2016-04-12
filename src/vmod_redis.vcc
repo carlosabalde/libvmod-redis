@@ -28,7 +28,8 @@ Arguments
 Description
     Initializes the global VMOD state. Using this function is not mandatory. If
     used it must be called during ``vcl_init`` before creating any database
-    instance.
+    instance. If a database instance has already been created calls to this
+    function are silently ignored.
 
 $Object db(PRIV_VCL,
     STRING location,
@@ -48,9 +49,9 @@ Arguments
     supported. Only IP + port format is allowed when Redis Cluster support
     is enabled.
 
-    type: type of the database instance referenced by ``location``. The
-    ``cluster`` value enables Redis Cluster support, automatically
-    discovering other servers in the cluster using the ``CLUSTER SLOTS``
+    type: type of the Redis server referenced by ``location``. The ``cluster``
+    value enables Redis Cluster support, automatically discovering other
+    servers in the cluster and their roles using the ``CLUSTER SLOTS``
     command.
 
     connection_timeout: connection timeout (milliseconds; 0 means no timeout)
@@ -100,7 +101,7 @@ Arguments
 
     sickness_ttl: TTL (seconds) of the sickness flag (0 means no sickness flags)
     associated to a Redis server. Once a server is flagged as sick and while the
-    flag is not flushed the module will lazily drop existing connections to that
+    flag is not expired the module will lazily drop existing connections to that
     server and it will try to avoid it as much as possible when creating
     execution plans.
 
@@ -118,15 +119,17 @@ Arguments
     supported. If Redis Cluster support has been enabled only IP + port
     format is allowed.
 
-    type: type of the database instance referenced by ``location``. If Redis
-    Cluster support has been enabled ``cluster`` is the only allowed value.
+    type: type of the Redis server referenced by ``location``. If Redis Cluster
+    support has been enabled ``cluster`` is the only allowed value.
+
 Description
     Adds an extra Redis server.
 
-    If Redis Cluster support has been enabled other servers in the cluster are
-    automatically discovered by the VMOD using the ``CLUSTER SLOTS`` command.
-    In any case, knowing more cluster servers during startup increases the
-    chances of discover the cluster topology if some server is failing.
+    If Redis Cluster support has been enabled other servers in the cluster and
+    their roles are automatically discovered by the VMOD using the
+    ``CLUSTER SLOTS`` command. In any case, knowing more cluster servers during
+    startup increases the chances of discover the cluster topology if some server
+    is failing.
 
 $Method VOID .command(STRING name)
 
