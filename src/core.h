@@ -44,7 +44,7 @@ typedef struct redis_server {
         } parsed;
     } location;
 
-    // Role.
+    // Role (rw field to be protected by db->mutex).
     enum REDIS_SERVER_ROLE role;
 
     // Weight.
@@ -56,19 +56,25 @@ typedef struct redis_server {
         pthread_mutex_t mutex;
         pthread_cond_t cond;
 
-        // Contexts (allocated in the heap).
+        // Contexts (rw fields -allocated in the heap- to be protected by the
+        // associated mutex and condition variable).
         unsigned ncontexts;
         VTAILQ_HEAD(,redis_context) free_contexts;
         VTAILQ_HEAD(,redis_context) busy_contexts;
     } pool;
 
-    // Redis Cluster state.
+    // Redis Cluster state (rw fields to be protected by db->mutex).
     struct {
         unsigned slots[NREDIS_CLUSTER_SLOTS];
     } cluster;
 
-    // Sickness timestamp.
-    time_t sickness_tst;
+    // Sickness timestamps (rw fields to be protected by db->mutex): last time
+    // the server was flagged as sick, and expiration of the last sickness
+    // condition.
+    struct {
+        time_t tst;
+        time_t exp;
+    } sickness;
 
     // Tail queue.
     VTAILQ_ENTRY(redis_server) list;
@@ -103,8 +109,9 @@ struct vmod_redis_db {
     pthread_mutex_t mutex;
 
     // Configuration.
-    // XXX: required because PRIV_VCL pointers are not available when invoking
-    // object methods. This should be fixed in future Varnish releases.
+    // XXX: required because PRIV_VCL pointers are not available (1) when
+    // invoking object methods; and (2) when the VMOD releases database
+    // instances. This should be fixed in future Varnish releases.
     vcl_priv_t *config;
 
     // General options (allocated in the heap).
@@ -118,7 +125,8 @@ struct vmod_redis_db {
     const char *password;
     time_t sickness_ttl;
 
-    // Redis servers (allocated in the heap), clustered by weight & role.
+    // Redis servers (rw field -allocated in the heap- to be protected by the
+    // associated mutex), clustered by weight & role.
     VTAILQ_HEAD(,redis_server) servers[NREDIS_SERVER_WEIGHTS][NREDIS_SERVER_ROLES];
 
     // Redis Cluster options.
@@ -127,7 +135,7 @@ struct vmod_redis_db {
         unsigned max_hops;
     } cluster;
 
-    // Stats.
+    // Stats (rw fields to be protected by the associated mutex).
     struct stats {
         struct {
             // Number of successfully created servers.
@@ -254,10 +262,13 @@ typedef struct vcl_priv {
 #define VCL_PRIV_MAGIC 0x77feec11
     unsigned magic;
 
-    // Subnets.
+    // Mutex.
+    pthread_mutex_t mutex;
+
+    // Subnets (rw field to be protected by the associated mutex).
     VTAILQ_HEAD(,vcl_priv_subnet) subnets;
 
-    // Databases.
+    // Databases (rw field to be protected by the associated mutex).
     VTAILQ_HEAD(,vcl_priv_db) dbs;
 } vcl_priv_t;
 
