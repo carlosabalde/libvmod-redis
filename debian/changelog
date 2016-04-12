@@ -1,3 +1,9 @@
+libvmod-redis (3.2-1) unstable; urgency=low
+
+  * Improvements & fixes
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Tue, 12 Apr 2016 17:00:00 +0200
+
 libvmod-redis (3.1-1) unstable; urgency=low
 
   * Added support for smart command execution
