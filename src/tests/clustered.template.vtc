@@ -17,7 +17,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
             connection_timeout=500,
             connection_ttl=0,
             command_timeout=0,
-            max_command_retries=3,
+            max_command_retries=0,
             shared_connections=true,
             max_connections=32,
             password="",
@@ -28,31 +28,6 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     }
 
     sub vcl_deliver {
-        # ...
-        db.command("SET");
-        db.push("${redis_key_in_master1}");
-        db.push("hello");
-        db.execute(false);
-        if (db.reply_is_status()) {
-            set resp.http.Reply-1 = db.get_status_reply();
-        }
-
-        db.command("SET");
-        db.push("${redis_key_in_master1}");
-        db.push("hello");
-        db.execute(false);
-        if (db.reply_is_status()) {
-            set resp.http.Reply-1 = db.get_status_reply();
-        }
-
-        db.command("SET");
-        db.push("${redis_key_in_master1}");
-        db.push("hello");
-        db.execute(false);
-        if (db.reply_is_status()) {
-            set resp.http.Reply-1 = db.get_status_reply();
-        }
-
         set resp.http.db-stats = db.stats();
         set resp.http.db-servers-total = db.counter("servers.total");
         set resp.http.db-connections-total = db.counter("connections.total");
@@ -67,12 +42,12 @@ client c1 {
     txreq
     rxresp
 
-#    expect resp.http.db-servers-total == "9"
-#    expect resp.http.db-connections-total == "0"
-#    expect resp.http.db-commands-total == "0"
-#    expect resp.http.db-cluster-discoveries-total == "1"
-#    expect resp.http.db-cluster-replies-moved == "0"
-#    expect resp.http.db-cluster-replies-ask == "0"
+    expect resp.http.db-servers-total == "9"
+    expect resp.http.db-connections-total == "0"
+    expect resp.http.db-commands-total == "0"
+    expect resp.http.db-cluster-discoveries-total == "1"
+    expect resp.http.db-cluster-replies-moved == "0"
+    expect resp.http.db-cluster-replies-ask == "0"
 } -run
 
 varnish v1 -expect client_req == 1
