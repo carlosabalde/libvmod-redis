@@ -45,6 +45,7 @@ cluster_execute(
         // Initializations.
         unsigned slot = get_cluster_slot(argv[index]);
         unsigned hops = db->cluster.max_hops > 0 ? db->cluster.max_hops : UINT_MAX;
+        unsigned asking = 0;
         unsigned hop = 0;
         redis_server_t *server = NULL;
 
@@ -52,14 +53,15 @@ cluster_execute(
         // some limit.
         while ((result == NULL) && (!WS_Overflowed(ctx->ws))) {
             // Execute command:
-            //   - server != NULL ==> ignore provided slot & use 'server' + ASKING.
+            //   - server != NULL ==> only include 'server' in the execution plan.
             //   - !master ==> use READONLY + READWRITE when dealing with slaves.
             //   - unknown slot ==> random server selection.
             result = redis_execute(
                 ctx, db, state, version, timeout, max_retries, argc, argv,
-                retries, server, master, slot);
+                retries, server, asking, master, slot);
 
             // Reset flags.
+            asking = 0;
             hop = 0;
             server = NULL;
 
@@ -83,9 +85,9 @@ cluster_execute(
                     AZ(pthread_mutex_lock(&db->mutex));
 
                     // Add / fetch server.
-                    redis_server_t *aserver = unsafe_add_redis_server(
+                    server = unsafe_add_redis_server(
                         ctx, db, location, REDIS_SERVER_TBD_ROLE);
-                    AN(aserver);
+                    AN(server);
 
                     // ASK vs. MOVED.
                     if (strncmp(result->str, "MOVED", 3) == 0) {
@@ -99,17 +101,22 @@ cluster_execute(
                         // discovered even when it has not yet been propagated
                         // to the whole cluster.
                         //
+                        // Even though using 'server' in the next execution plan
+                        // is not strictly required because the cluster topology
+                        // has just been rediscovered, this allows handling in a
+                        // nice way rw commands sent to ro slaves.
+                        //
                         // XXX: at the moment this implementation may result in
                         // multiple threads executing multiple -serialized-
                         // cluster discoveries.
-                        unsafe_discover_slots(ctx, db, aserver);
+                        unsafe_discover_slots(ctx, db, server);
                     } else {
                         // Update stats.
                         db->stats.cluster.replies.ask++;
 
                         // Next attempt should send a ASKING command to the
                         // server in the ASK reply.
-                        server = aserver;
+                        asking = 1;
                     }
 
                     // Release database lock.
@@ -138,14 +145,14 @@ cluster_execute(
 
         // Too many redirections?
         if (hops == 0) {
-            REDIS_LOG(ctx,
+            REDIS_LOG_ERROR(ctx,
                 "Too many redirections while executing Redis Cluster command (%s)",
                 argv[0]);
         }
 
     // Invalid Redis Cluster command.
     } else {
-        REDIS_LOG(ctx,
+        REDIS_LOG_ERROR(ctx,
             "Invalid Redis Cluster command (%s)",
             argv[0]);
     }
@@ -182,6 +189,11 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
     CHECK_OBJ_NOTNULL(server, REDIS_SERVER_MAGIC);
     assert(server->location.type == REDIS_SERVER_LOCATION_HOST_TYPE);
 
+    // Log event.
+    REDIS_LOG_INFO(ctx,
+        "Discovering cluster topology (db=%s, server=%s)",
+        db->name, server->location.raw);
+
     // Initializations.
     int i, j;
     unsigned done = 0;
@@ -206,7 +218,7 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
         // Set command execution timeout.
         int tr = redisSetTimeout(rcontext, db->command_timeout);
         if (tr != REDIS_OK) {
-            REDIS_LOG(ctx, "Failed to set command execution timeout (%d)", tr);
+            REDIS_LOG_ERROR(ctx, "Failed to set command execution timeout (%d)", tr);
         }
 
         // Send command.
@@ -272,7 +284,7 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
             done = 1;
             db->stats.cluster.discoveries.total++;
         } else {
-            REDIS_LOG(ctx,
+            REDIS_LOG_ERROR(ctx,
                 "Failed to execute Redis command (%s)",
                 DISCOVERY_COMMAND);
             db->stats.cluster.discoveries.failed++;
@@ -283,7 +295,7 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
             freeReplyObject(reply);
         }
     } else {
-        REDIS_LOG(ctx,
+        REDIS_LOG_ERROR(ctx,
             "Failed to establish Redis connection (%d): %s",
             rcontext->err,
             rcontext->errstr);

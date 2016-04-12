@@ -433,11 +433,11 @@ redisReply *
 redis_execute(
     VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, unsigned version,
     struct timeval timeout, unsigned max_retries, unsigned argc, const char *argv[],
-    unsigned *retries, redis_server_t *server, unsigned master, unsigned slot)
+    unsigned *retries, redis_server_t *server, unsigned asking,
+    unsigned master, unsigned slot)
 {
     // Initializations.
     redisReply *result = NULL;
-    unsigned asking = (server != NULL);
 
     // Build the execution plan.
     assert(*retries <= max_retries);
@@ -465,7 +465,7 @@ redis_execute(
                     argv[0] = WS_Copy(ctx->ws, "EVALSHA", -1);
                     if (argv[0] == NULL) {
                         *retries = max_retries;
-                        REDIS_LOG(ctx,
+                        REDIS_LOG_ERROR(ctx,
                             "Failed to allocate memory in workspace (%p)",
                             ctx->ws);
                         goto unlock;
@@ -491,7 +491,7 @@ redis_execute(
                         argv[0] = WS_Copy(ctx->ws, "EVAL", -1);
                         if (argv[0] == NULL) {
                             *retries = max_retries;
-                            REDIS_LOG(ctx,
+                            REDIS_LOG_ERROR(ctx,
                                 "Failed to allocate memory in workspace (%p)",
                                 ctx->ws);
                             goto unlock;
@@ -521,13 +521,13 @@ redis_execute(
 
                 // Log failed executions.
                 if (context->rcontext->err) {
-                    REDIS_LOG(ctx,
+                    REDIS_LOG_ERROR(ctx,
                         "Failed to execute Redis command (%s): [%d] %s",
                         argv[0],
                         context->rcontext->err,
                         context->rcontext->errstr);
                 } else if (result == NULL) {
-                    REDIS_LOG(ctx,
+                    REDIS_LOG_ERROR(ctx,
                         "Failed to execute Redis command (%s)",
                         argv[0]);
                 }
@@ -537,7 +537,7 @@ redis_execute(
 
             // Redis context not available.
             } else {
-                REDIS_LOG(ctx,
+                REDIS_LOG_ERROR(ctx,
                     "Failed to execute Redis command (%s): context not available",
                     argv[0]);
             }
@@ -567,7 +567,7 @@ redis_execute(
     // Execution plan not available.
     } else {
         *retries = max_retries;
-        REDIS_LOG(ctx,
+        REDIS_LOG_ERROR(ctx,
             "Failed to execute Redis command (%s): execution plan not available",
             argv[0]);
     }
@@ -631,10 +631,15 @@ unsafe_add_redis_server(
                 result->weight = 0;
             }
 
+            // Log event.
+            REDIS_LOG_INFO(ctx,
+                "New server registered (db=%s, location=%s, role=%d, weight=%d)",
+                db->name, result->location.raw, result->role, result->weight);
+
             // Update stats.
             db->stats.servers.total++;
         } else {
-            REDIS_LOG(ctx,
+            REDIS_LOG_ERROR(ctx,
                 "Failed to add server '%s'",
                 location);
             db->stats.servers.failed++;
@@ -649,6 +654,11 @@ unsafe_add_redis_server(
 
         // Flush the sickness flag.
         result->sickness.exp = time(NULL);
+
+        // Log event.
+        REDIS_LOG_INFO(ctx,
+            "Existing server updated (db=%s, location=%s, role=%d, weight=%d)",
+            db->name, result->location.raw, result->role, result->weight);
     }
 
     // Register server instance in the right list.
@@ -728,7 +738,7 @@ new_execution_plan(VRT_CTX, struct vmod_redis_db *db, unsigned max_size)
 {
     struct plan *result = (void *)WS_Alloc(ctx->ws, sizeof(struct plan));
     if (result == NULL) {
-        REDIS_LOG(ctx,
+        REDIS_LOG_ERROR(ctx,
             "Failed to allocate memory in workspace (%p)",
             ctx->ws);
         return NULL;
@@ -739,7 +749,7 @@ new_execution_plan(VRT_CTX, struct vmod_redis_db *db, unsigned max_size)
     if (!db->shared_connections) {
         result->contexts.list = (void *)WS_Alloc(ctx->ws, max_size * sizeof(redis_server_t *));;
         if (result->contexts.list == NULL) {
-            REDIS_LOG(ctx,
+            REDIS_LOG_ERROR(ctx,
                 "Failed to allocate memory in workspace (%p)",
                 ctx->ws);
             return NULL;
@@ -752,7 +762,7 @@ new_execution_plan(VRT_CTX, struct vmod_redis_db *db, unsigned max_size)
     result->servers.next = 0;
     result->servers.list = (void *)WS_Alloc(ctx->ws, max_size * sizeof(redis_server_t *));;
     if (result->servers.list == NULL) {
-        REDIS_LOG(ctx,
+        REDIS_LOG_ERROR(ctx,
             "Failed to allocate memory in workspace (%p)",
             ctx->ws);
         return NULL;
@@ -872,11 +882,11 @@ populate_execution_plan(
                     remaining > 0 && irole < NREDIS_SERVER_ROLES;
                     irole++) {
                     if ((!master) ||
-                        ((round == 1) &&
-                         (irole == REDIS_SERVER_MASTER_ROLE)) ||
-                        ((round == 2) &&
-                         ((irole == REDIS_SERVER_MASTER_ROLE) ||
-                          (irole == REDIS_SERVER_TBD_ROLE)))) {
+                        (((round == 1) &&
+                          (irole == REDIS_SERVER_MASTER_ROLE)) ||
+                         ((round == 2) &&
+                          ((irole == REDIS_SERVER_MASTER_ROLE) ||
+                           (irole == REDIS_SERVER_TBD_ROLE))))) {
                         unsigned nservers = plan->servers.n;
                         VTAILQ_FOREACH(iserver, &db->servers[iweight][irole], list) {
                             CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
@@ -1025,7 +1035,7 @@ new_rcontext(VRT_CTX, redis_server_t * server, unsigned version, time_t now)
 
     // Check created context.
     if (result->err) {
-        REDIS_LOG(ctx,
+        REDIS_LOG_ERROR(ctx,
             "Failed to establish Redis connection (%d): %s",
             result->err,
             result->errstr);
@@ -1044,7 +1054,7 @@ new_rcontext(VRT_CTX, redis_server_t * server, unsigned version, time_t now)
             (reply->type != REDIS_REPLY_STATUS) ||
             (strcmp(reply->str, "OK") != 0)) {
             if (result->err) {
-                REDIS_LOG(ctx,
+                REDIS_LOG_ERROR(ctx,
                     "Failed to authenticate Redis connection (%d): %s",
                     result->err,
                     result->errstr);
@@ -1052,12 +1062,12 @@ new_rcontext(VRT_CTX, redis_server_t * server, unsigned version, time_t now)
                        ((reply->type == REDIS_REPLY_ERROR) ||
                         (reply->type == REDIS_REPLY_STATUS) ||
                         (reply->type == REDIS_REPLY_STRING))) {
-                REDIS_LOG(ctx,
+                REDIS_LOG_ERROR(ctx,
                     "Failed to authenticate Redis connection (%d): %s",
                     reply->type,
                     reply->str);
             } else {
-                REDIS_LOG(ctx,
+                REDIS_LOG_ERROR(ctx,
                     "Failed to authenticate Redis connection: %s",
                     "-");
             }
@@ -1076,12 +1086,18 @@ new_rcontext(VRT_CTX, redis_server_t * server, unsigned version, time_t now)
     if (result != NULL) {
         if (server->sickness.exp > now) {
             server->sickness.exp = now;
+            REDIS_LOG_INFO(ctx,
+                "Server sickness tag cleared (db=%s, location=%s, reason=context)",
+                server->db->name, server->location.raw);
         }
         server->db->stats.connections.total++;
     } else {
         server->sickness.tst = now;
         server->sickness.exp = now + server->db->sickness_ttl;
         server->db->stats.connections.failed++;
+        REDIS_LOG_INFO(ctx,
+            "Server sickness tag set (db=%s, location=%s, reason=context)",
+            server->db->name, server->location.raw);
     }
     AZ(pthread_mutex_unlock(&server->db->mutex));
 
@@ -1271,7 +1287,7 @@ get_redis_repy(
     // Set command execution timeout.
     int tr = redisSetTimeout(context->rcontext, timeout);
     if (tr != REDIS_OK) {
-        REDIS_LOG(ctx, "Failed to set command execution timeout (%d)", tr);
+        REDIS_LOG_ERROR(ctx, "Failed to set command execution timeout (%d)", tr);
     }
 
     // Prepare pipeline.
@@ -1340,7 +1356,7 @@ sha1(VRT_CTX, const char *script)
             ptr += 2;
         }
     } else {
-        REDIS_LOG(ctx,
+        REDIS_LOG_ERROR(ctx,
             "Failed to allocate memory in workspace (%p)",
             ctx->ws);
     }
