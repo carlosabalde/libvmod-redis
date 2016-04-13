@@ -46,7 +46,6 @@ event_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
     switch (e) {
         case VCL_EVENT_LOAD: name = "load"; break;
         case VCL_EVENT_WARM: name = "warm"; break;
-        case VCL_EVENT_USE: name = "use"; break;
         case VCL_EVENT_COLD: name = "cold"; break;
         case VCL_EVENT_DISCARD: name = "discard"; break;
         default: name = "-";
