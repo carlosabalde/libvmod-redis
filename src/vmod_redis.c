@@ -41,6 +41,20 @@ event_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
     // Initializations.
     vcl_priv_t *config = vcl_priv->priv;
 
+    // Log event.
+    const char *name;
+    switch (e) {
+        case VCL_EVENT_LOAD: name = "load"; break;
+        case VCL_EVENT_WARM: name = "warm"; break;
+        case VCL_EVENT_USE: name = "use"; break;
+        case VCL_EVENT_COLD: name = "cold"; break;
+        case VCL_EVENT_DISCARD: name = "discard"; break;
+        default: name = "-";
+    }
+    REDIS_LOG_INFO(ctx,
+        "VCL event triggered (event=%s)",
+        name);
+
     // Check event.
     switch (e) {
         case VCL_EVENT_LOAD:
@@ -61,9 +75,6 @@ event_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
             AZ(pthread_mutex_lock(&mutex));
             version++;
             AZ(pthread_mutex_unlock(&mutex));
-            REDIS_LOG_INFO(ctx,
-                "Internal version increased (value=%d)",
-                version);
             break;
 
         case VCL_EVENT_COLD:
@@ -241,8 +252,8 @@ vmod_db__fini(struct vmod_redis_db **db)
     AN(*db);
 
     // Log event.
-    syslog(LOG_INFO,
-        "[REDIS] Unregistering database instance (name=%s)",
+    REDIS_LOG_INFO(NULL,
+        "Unregistering database instance (name=%s)",
         (*db)->name);
 
     // Keep config reference before releasing the instance.

@@ -12,6 +12,8 @@
 #define NREDIS_SERVER_WEIGHTS 4
 #define NREDIS_CLUSTER_SLOTS 16384
 
+// WARNING: ordering of roles in this enumeration is relevant when populating
+// an execution plan.
 enum REDIS_SERVER_ROLE {
     REDIS_SERVER_SLAVE_ROLE = 0,
     REDIS_SERVER_MASTER_ROLE = 1,
@@ -274,24 +276,34 @@ typedef struct vcl_priv {
 
 #define REDIS_LOG(ctx, level, message, ...) \
     do { \
+        const struct vrt_ctx *_ctx = ctx; \
+        \
         char *_buffer; \
+        const char *_vcl = (_ctx != NULL) ? VCL_Name(_ctx->vcl) : "-"; \
         if (level == LOG_ERR) { \
             assert(asprintf( \
                 &_buffer, \
-                "[REDIS][%s] %s", __func__, message) > 0); \
+                "[REDIS][%s][%s] %s", _vcl, __func__, message) > 0); \
         } else { \
             assert(asprintf( \
                 &_buffer, \
-                "[REDIS] %s", message) > 0); \
+                "[REDIS][%s] %s", _vcl, message) > 0); \
         } \
+        \
         syslog(level, _buffer, ##__VA_ARGS__); \
-        if ((ctx != NULL) && (ctx->vsl != NULL)) { \
-            if (level == LOG_ERR) { \
-                VSLb(ctx->vsl, SLT_VCL_Error, _buffer, ##__VA_ARGS__); \
-            } else { \
-                VSLb(ctx->vsl, SLT_VCL_Log, _buffer, ##__VA_ARGS__); \
-            } \
+        \
+        unsigned _tag; \
+        if (level == LOG_ERR) { \
+            _tag = SLT_VCL_Error; \
+        } else { \
+            _tag = SLT_VCL_Log; \
         } \
+        if ((_ctx != NULL) && (_ctx->vsl != NULL)) { \
+            VSLb(_ctx->vsl, _tag, _buffer, ##__VA_ARGS__); \
+        } else { \
+            VSL(_tag, 0, _buffer, ##__VA_ARGS__); \
+        } \
+        \
         free(_buffer); \
     } while (0)
 
