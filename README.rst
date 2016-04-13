@@ -141,8 +141,12 @@ Multiple servers
     sub vcl_init {
         # VMOD configuration: master-slave replication, keeping up to two
         # Redis connections per Varnish worker thread (up to one to the master
-        # server & up to one to a randomly selected -because subnets information
-        # is not provided- slave server).
+        # server & up to one to the closest slave server).
+        redis.init(subnets={"
+            0 192.168.1.102/32,
+            1 192.168.1.103/32,
+            2 0.0.0.0/32
+        "});
         new db = redis.db(
             location="192.168.1.100:6379",
             type=master,
