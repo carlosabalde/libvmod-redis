@@ -279,15 +279,14 @@ typedef struct vcl_priv {
         const struct vrt_ctx *_ctx = ctx; \
         \
         char *_buffer; \
-        const char *_vcl = (_ctx != NULL) ? VCL_Name(_ctx->vcl) : "-"; \
         if (level == LOG_ERR) { \
             assert(asprintf( \
                 &_buffer, \
-                "[REDIS][%s][%s] %s", _vcl, __func__, message) > 0); \
+                "[REDIS][%s] %s", __func__, message) > 0); \
         } else { \
             assert(asprintf( \
                 &_buffer, \
-                "[REDIS][%s] %s", _vcl, message) > 0); \
+                "[REDIS] %s", message) > 0); \
         } \
         \
         syslog(level, _buffer, ##__VA_ARGS__); \
