@@ -734,7 +734,7 @@ is_valid_redis_context(redis_context_t *context, unsigned version, time_t now)
 }
 
 static struct plan *
-new_execution_plan(VRT_CTX, struct vmod_redis_db *db, unsigned max_size)
+new_execution_plan(VRT_CTX, struct vmod_redis_db *db)
 {
     struct plan *result = (void *)WS_Alloc(ctx->ws, sizeof(struct plan));
     if (result == NULL) {
@@ -746,40 +746,27 @@ new_execution_plan(VRT_CTX, struct vmod_redis_db *db, unsigned max_size)
 
     result->contexts.n = 0;
     result->contexts.next = 0;
-    if (!db->shared_connections) {
-        result->contexts.list = (void *)WS_Alloc(ctx->ws, max_size * sizeof(redis_server_t *));;
-        if (result->contexts.list == NULL) {
-            REDIS_LOG_ERROR(ctx,
-                "Failed to allocate memory in workspace (%p)",
-                ctx->ws);
-            return NULL;
-        }
-    } else {
-        result->contexts.list = NULL;
-    }
+    result->contexts.list = NULL;
 
     result->servers.n = 0;
     result->servers.next = 0;
-    result->servers.list = (void *)WS_Alloc(ctx->ws, max_size * sizeof(redis_server_t *));;
-    if (result->servers.list == NULL) {
-        REDIS_LOG_ERROR(ctx,
-            "Failed to allocate memory in workspace (%p)",
-            ctx->ws);
-        return NULL;
-    }
+    result->servers.list = NULL;
 
     return result;
 }
 
 void
 populate_simple_execution_plan(
-    struct plan *plan, struct vmod_redis_db *db, thread_state_t *state,
+    VRT_CTX, struct plan *plan, struct vmod_redis_db *db, thread_state_t *state,
     unsigned version, unsigned max_size, redis_server_t *server)
 {
     // Populate list of contexts?
     if (!db->shared_connections) {
         // Initializations.
         time_t now = time(NULL);
+        unsigned free_ws = WS_Reserve(ctx->ws, 0);
+        unsigned used_ws = 0;
+        plan->contexts.list = (redis_context_t **) ctx->ws->f;
         plan->contexts.n = 0;
 
         // Search for contexts matching the requested conditions.
@@ -789,9 +776,19 @@ populate_simple_execution_plan(
             if ((icontext->server->db == db) &&
                 (icontext->server == server)) {
                 if (is_valid_redis_context(icontext, version, now)) {
-                    plan->contexts.list[plan->contexts.n++] = icontext;
-                    if (plan->contexts.n == max_size) {
-                        break;
+                    if (free_ws >= sizeof(redis_context_t *)) {
+                        used_ws += sizeof(redis_context_t *);
+                        plan->contexts.list[plan->contexts.n++] = icontext;
+                        if (plan->contexts.n == max_size) {
+                            break;
+                        }
+                    } else {
+                        WS_Release(ctx->ws, used_ws);
+                        WS_MarkOverflow(ctx->ws);
+                        REDIS_LOG_ERROR(ctx,
+                            "Failed to allocate memory in workspace (%p)",
+                            ctx->ws);
+                        return;
                     }
                 } else {
                     VTAILQ_REMOVE(&state->contexts, icontext, list);
@@ -800,16 +797,30 @@ populate_simple_execution_plan(
                 }
             }
         }
+
+        // Done!
+        WS_Release(ctx->ws, used_ws);
     }
 
     // Build list of servers.
-    plan->servers.n = 1;
-    plan->servers.list[0] = server;
+    unsigned free_ws = WS_Reserve(ctx->ws, 0);
+    if (free_ws >= sizeof(redis_server_t *)) {
+        plan->servers.list = (redis_server_t **) ctx->ws->f;
+        plan->servers.n = 1;
+        plan->servers.list[0] = server;
+        WS_Release(ctx->ws, sizeof(redis_server_t *));
+    } else {
+        WS_Release(ctx->ws, 0);
+        WS_MarkOverflow(ctx->ws);
+        REDIS_LOG_ERROR(ctx,
+            "Failed to allocate memory in workspace (%p)",
+            ctx->ws);
+    }
 }
 
 void
 populate_execution_plan(
-    struct plan *plan, struct vmod_redis_db *db, thread_state_t *state,
+    VRT_CTX, struct plan *plan, struct vmod_redis_db *db, thread_state_t *state,
     unsigned version, unsigned max_size, unsigned master, unsigned slot)
 {
     // Initializations.
@@ -818,6 +829,9 @@ populate_execution_plan(
     // Populate list of contexts?
     if (!db->shared_connections) {
         // Initializations.
+        unsigned free_ws = WS_Reserve(ctx->ws, 0);
+        unsigned used_ws = 0;
+        plan->contexts.list = (redis_context_t **) ctx->ws->f;
         plan->contexts.n = 0;
 
         // Search for contexts matching the requested conditions.
@@ -830,9 +844,19 @@ populate_execution_plan(
                 ((!db->cluster.enabled) ||
                  (icontext->server->cluster.slots[slot]))) {
                 if (is_valid_redis_context(icontext, version, now)) {
-                    plan->contexts.list[plan->contexts.n++] = icontext;
-                    if (plan->contexts.n == max_size) {
-                        break;
+                    if (free_ws >= sizeof(redis_context_t *)) {
+                        used_ws += sizeof(redis_context_t *);
+                        plan->contexts.list[plan->contexts.n++] = icontext;
+                        if (plan->contexts.n == max_size) {
+                            break;
+                        }
+                    } else {
+                        WS_Release(ctx->ws, used_ws);
+                        WS_MarkOverflow(ctx->ws);
+                        REDIS_LOG_ERROR(ctx,
+                            "Failed to allocate memory in workspace (%p)",
+                            ctx->ws);
+                        return;
                     }
                 } else {
                     VTAILQ_REMOVE(&state->contexts, icontext, list);
@@ -849,6 +873,9 @@ populate_execution_plan(
             VTAILQ_REMOVE(&state->contexts, plan->contexts.list[0], list);
             VTAILQ_INSERT_TAIL(&state->contexts, plan->contexts.list[0], list);
         }
+
+        // Done!
+        WS_Release(ctx->ws, used_ws);
     }
 
     // Populate list of servers?
@@ -859,6 +886,9 @@ populate_execution_plan(
         enum REDIS_SERVER_ROLE irole;
         redis_server_t *iserver;
         unsigned remaining = max_size - plan->contexts.n;
+        unsigned free_ws = WS_Reserve(ctx->ws, 0);
+        unsigned used_ws = 0;
+        plan->servers.list = (redis_server_t **) ctx->ws->f;
         plan->servers.n = 0;
 
         // Get database lock.
@@ -900,9 +930,19 @@ populate_execution_plan(
                                   (((master) &&
                                     (iserver->role == REDIS_SERVER_TBD_ROLE)) ||
                                    (iserver->sickness.exp > now))))) {
-                                plan->servers.list[plan->servers.n++] = iserver;
-                                if (--remaining == 0) {
-                                    break;
+                                if (free_ws >= sizeof(redis_server_t *)) {
+                                    used_ws += sizeof(redis_server_t *);
+                                    plan->servers.list[plan->servers.n++] = iserver;
+                                    if (--remaining == 0) {
+                                        break;
+                                    }
+                                } else {
+                                    WS_Release(ctx->ws, used_ws);
+                                    WS_MarkOverflow(ctx->ws);
+                                    REDIS_LOG_ERROR(ctx,
+                                        "Failed to allocate memory in workspace (%p)",
+                                        ctx->ws);
+                                    return;
                                 }
                             }
                         }
@@ -952,9 +992,19 @@ populate_execution_plan(
                                  (iserver->sickness.exp <= now)) ||
                                 ((round == 4) &&
                                  (iserver->sickness.exp > now))) {
-                                plan->servers.list[plan->servers.n++] = iserver;
-                                if (--remaining == 0) {
-                                    break;
+                                if (free_ws >= sizeof(redis_server_t *)) {
+                                    used_ws += sizeof(redis_server_t *);
+                                    plan->servers.list[plan->servers.n++] = iserver;
+                                    if (--remaining == 0) {
+                                        break;
+                                    }
+                                } else {
+                                    WS_Release(ctx->ws, used_ws);
+                                    WS_MarkOverflow(ctx->ws);
+                                    REDIS_LOG_ERROR(ctx,
+                                        "Failed to allocate memory in workspace (%p)",
+                                        ctx->ws);
+                                    return;
                                 }
                             }
                         }
@@ -965,6 +1015,9 @@ populate_execution_plan(
 
         // Release database lock.
         AZ(pthread_mutex_unlock(&db->mutex));
+
+        // Done!
+        WS_Release(ctx->ws, used_ws);
     }
 }
 
@@ -974,15 +1027,15 @@ plan_execution(
     unsigned max_size, redis_server_t *server, unsigned master, unsigned slot)
 {
     // Initializations.
-    struct plan *result = new_execution_plan(ctx, db, max_size);
+    struct plan *result = new_execution_plan(ctx, db);
 
     // Do not continue if something failed while creating an empty execution
     // plan.
     if (result != NULL) {
         if (server != NULL) {
-            populate_simple_execution_plan(result, db, state, version, max_size, server);
+            populate_simple_execution_plan(ctx, result, db, state, version, max_size, server);
         } else {
-            populate_execution_plan(result, db, state, version, max_size, master, slot);
+            populate_execution_plan(ctx, result, db, state, version, max_size, master, slot);
         }
     }
 
