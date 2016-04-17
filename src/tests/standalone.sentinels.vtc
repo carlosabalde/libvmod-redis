@@ -19,7 +19,7 @@ varnish v1 -vcl+backend {
             locations={"
                 ${redis_sentinel1_ip}:${redis_sentinel1_port},
                 ${redis_sentinel2_ip}:${redis_sentinel2_port},
-                ${redis_sentinel3_ip}:${redis_sentinel3_port},
+                ${redis_sentinel3_ip}:${redis_sentinel3_port}
             "},
             period=2,
             connection_timeout=500,
