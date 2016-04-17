@@ -1,11 +1,14 @@
-varnishtest "Minimal test template"
+varnishtest "Test Sentinels."
 
 server s1 {
    rxreq
    txresp
 } -repeat 1 -start
 
-varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
+# Let Sentinels discover all master and slave servers.
+delay 15
+
+varnish v1 -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
 
     sub vcl_init {
@@ -13,41 +16,52 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
             masks={""});
 
         redis.sentinels(
-            locations={""},
-            period=0,
+            locations={"
+                ${redis_sentinel1_ip}:${redis_sentinel1_port},
+                ${redis_sentinel2_ip}:${redis_sentinel2_port},
+                ${redis_sentinel3_ip}:${redis_sentinel3_port},
+            "},
+            period=2,
             connection_timeout=500,
             command_timeout=0);
 
         new db = redis.db(
             location="${redis_master1_ip}:${redis_master1_port}",
-            type=master,
+            type=auto,
             connection_timeout=500,
             connection_ttl=0,
             command_timeout=0,
             max_command_retries=0,
             shared_connections=false,
-            max_connections=1,
+            max_connections=2,
             password="",
             sickness_ttl=0,
             max_cluster_hops=0);
+        db.add_server("${redis_slave1_1_ip}:${redis_slave1_1_port}", auto);
+        db.add_server("${redis_slave1_2_ip}:${redis_slave1_2_port}", auto);
     }
 
     sub vcl_deliver {
+        # Simulate unreachable master.
+        db.command("DEBUG");
+        db.push("sleep");
+        db.push("10");
+        db.execute(true);
+
         # Stats.
         set resp.http.db-stats = db.stats();
-        set resp.http.db-servers-total = db.counter("servers.total");
-        set resp.http.db-connections-total = db.counter("connections.total");
-        set resp.http.db-commands-total = db.counter("commands.total");
     }
 } -start
+
+delay 1
 
 client c1 {
     txreq
     rxresp
-
-    expect resp.http.db-servers-total == "1"
-    expect resp.http.db-connections-total == "0"
-    expect resp.http.db-commands-total == "0"
 } -run
+
+delay 10
+
+# XXX: not really an useful test at the moment.
 
 varnish v1 -expect client_req == 1

@@ -14,26 +14,56 @@ VMOD using the synchronous hiredis library API to access Redis servers from VCL.
 
 $Event event_function
 
-$Function VOID init(PRIV_VCL, STRING subnets = "")
+$Function VOID subnets(PRIV_VCL,
+    STRING masks="")
 
 Arguments
     subnets:
         Comma-delimited list of weights + subnet masks used to select among
         servers associated to a database instance when executing commands.
-        Order is relevant. Only IPv4 addresses are supported.
+        Order is relevant. Only IPv4 addresses are supported. If not provided,
+        value in the VMOD_REDIS_SUBNETS environment variable will be used.
 
         This is useful in setups using Redis instances deployed across multiple
-        data centers. If not provided, value in the VMOD_REDIS_SUBNETS
-        environment variable will be used.
+        data centers.
 Description
-    Initializes the global VMOD state. Using this function is not mandatory. If
-    used it must be called during ``vcl_init`` before creating any database
-    instance. If a database instance has already been created calls to this
-    function are silently ignored.
+    Using this function is not mandatory. If used, it must be called during
+    ``vcl_init`` before creating any database instance. If a database instance
+    has already been created calls to this function are silently ignored.
+
+$Function VOID sentinels(PRIV_VCL,
+    STRING locations="",
+    INT period=60,
+    INT connection_timeout=500,
+    INT command_timeout=0)
+
+Arguments
+    locations:
+        Comma-delimited list of Redis Sentinel servers. Only IP + port format
+        is allowed. Only IPv4 addresses are supported. If not provided, value
+        in the VMOD_REDIS_SENTINELS environment variable will be used.
+
+        This is useful in setups using non-clustered Redis instances in order
+        to (1) keep roles (i.e. master / slave) updated; and (2) decrease
+        priority of unreachable servers when creating execution plans. This is
+        **not** designed for auto-discovery of Redis Servers.
+
+    period: how frequently (seconds) the Redis Sentinel checks are executed
+    (0 means no Sentinel checks).
+
+    connection_timeout: connection timeout (milliseconds; 0 means no timeout)
+    to the Redis Sentinel servers.
+
+    command_timeout: command timeout (milliseconds; 0 means no timeout) when
+    executing Redis Sentinel commands.
+Description
+    Using this function is not mandatory. If used, it must be called during
+    ``vcl_init`` before creating any database instance. If a database instance
+    has already been created calls to this function are silently ignored.
 
 $Object db(PRIV_VCL,
     STRING location,
-    ENUM { master, slave, cluster } type,
+    ENUM { master, slave, auto, cluster } type,
     INT connection_timeout=1000,
     INT connection_ttl=0,
     INT command_timeout=0,
@@ -49,10 +79,15 @@ Arguments
     supported. Only IP + port format is allowed when Redis Cluster support
     is enabled.
 
-    type: type of the Redis server referenced by ``location``. The ``cluster``
-    value enables Redis Cluster support, automatically discovering other
-    servers in the cluster and their roles using the ``CLUSTER SLOTS``
-    command.
+    type: type of the Redis server referenced by ``location``:
+
+    - The ``auto`` value  enables automatic discovery of the current role
+      of the server. This requires adding at least one Sentinel using
+      ``redis.sentinels()`` and using the IP + port format.
+
+    - The ``cluster`` value enables Redis Cluster support, automatically
+      discovering other servers in the cluster and their roles using the
+      ``CLUSTER SLOTS`` command.
 
     connection_timeout: connection timeout (milliseconds; 0 means no timeout)
     to the Redis server.
@@ -103,7 +138,8 @@ Arguments
     associated to a Redis server. Once a server is flagged as sick and while the
     flag is not expired the module will lazily drop existing connections to that
     server and it will try to avoid it as much as possible when creating
-    execution plans.
+    execution plans. This TTL is overridden when Redis Sentinel servers are
+    configured and some Sentinel discovers an unreachable server.
 
     max_cluster_hops: maximum number of redirections (0 means no limit) when
     executing a command and Redis Cluster support has been enabled.
@@ -112,15 +148,21 @@ Description
 
 $Method VOID .add_server(
     STRING location,
-    ENUM { master, slave, cluster } type)
+    ENUM { master, slave, auto, cluster } type)
 
 Arguments
     location: Redis connection string. Both IP + port and UNIX sockets are
     supported. If Redis Cluster support has been enabled only IP + port
     format is allowed.
 
-    type: type of the Redis server referenced by ``location``. If Redis Cluster
-    support has been enabled ``cluster`` is the only allowed value.
+    type: type of the Redis server referenced by ``location``:
+
+    - The ``auto`` value  enables automatic discovery of the current role
+      of the server. This requires adding at least one Sentinel using
+      ``redis.sentinels()`` and using the IP + port format.
+
+    - If Redis Cluster support has been enabled ``cluster`` is the only
+      allowed value.
 
 Description
     Adds an extra Redis server.
@@ -180,7 +222,7 @@ Description
 
     When more than one Redis server is available, the destination server
     is selected according with ``master`` and with the list of weights +
-    subnet masks provided when calling ``init()``.
+    subnet masks provided when calling ``redis.subnets()``.
 
     WARNING: allowing execution of commands in slave servers (i.e. ``master ==
     false``) must be carefully used:

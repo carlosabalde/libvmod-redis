@@ -12,6 +12,7 @@ libvmod_redis_la_SOURCES = \
     sha1.c sha1.h \
     cluster.c cluster.h \
     core.c core.h \
+    sentinel.c sentinel.h \
     vmod_redis.c
 
 nodist_libvmod_redis_la_SOURCES = \

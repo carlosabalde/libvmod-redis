@@ -272,6 +272,20 @@ typedef struct vcl_priv {
 
     // Databases (rw field to be protected by the associated mutex).
     VTAILQ_HEAD(,vcl_priv_db) dbs;
+
+    // Sentinel (rw fields to be protected by the associated mutex).
+    struct {
+        // Raw configuration.
+        const char *locations;
+        unsigned period;
+        struct timeval connection_timeout;
+        struct timeval command_timeout;
+
+        // Thread reference + shared state.
+        pthread_t thread;
+        unsigned active;
+        unsigned discovery;
+    } sentinels;
 } vcl_priv_t;
 
 #define REDIS_LOG(ctx, level, message, ...) \
