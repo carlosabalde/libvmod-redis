@@ -146,15 +146,15 @@ cluster_execute(
         // Too many redirections?
         if (hops == 0) {
             REDIS_LOG_ERROR(ctx,
-                "Too many redirections while executing Redis Cluster command (%s)",
-                argv[0]);
+                "Too many redirections while executing cluster command (command=%s, db=%s)",
+                argv[0], db->name);
         }
 
     // Invalid Redis Cluster command.
     } else {
         REDIS_LOG_ERROR(ctx,
-            "Invalid Redis Cluster command (%s)",
-            argv[0]);
+            "Invalid cluster command (command=%s, db=%s)",
+            argv[0], db->name);
     }
 
     // Done!
@@ -194,7 +194,7 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
 
     // Log event.
     REDIS_LOG_INFO(ctx,
-        "Discovering cluster topology (db=%s, server=%s)",
+        "Discovery of cluster topology started (db=%s, server=%s)",
         db->name, server->location.raw);
 
     // Initializations.
@@ -220,7 +220,9 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
         // Set command execution timeout.
         int tr = redisSetTimeout(rcontext, db->command_timeout);
         if (tr != REDIS_OK) {
-            REDIS_LOG_ERROR(ctx, "Failed to set command execution timeout (%d)", tr);
+            REDIS_LOG_ERROR(ctx,
+                "Failed to set cluster discovery command execution timeout (error=%d, db=%s, server=%s)",
+                tr, server->db->name, server->location.raw);
         }
 
         // Send command.
@@ -287,8 +289,8 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
             db->stats.cluster.discoveries.total++;
         } else {
             REDIS_LOG_ERROR(ctx,
-                "Failed to execute Redis command (%s)",
-                DISCOVERY_COMMAND);
+                "Failed to execute cluster discovery command (db=%s, server=%s)",
+                db->name, server->location.raw);
             db->stats.cluster.discoveries.failed++;
         }
 
@@ -298,9 +300,8 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
         }
     } else {
         REDIS_LOG_ERROR(ctx,
-            "Failed to establish Redis connection (%d): %s",
-            rcontext->err,
-            rcontext->errstr);
+            "Failed to establish cluster discovery connection (error=%d, db=%s, server=%s): %s",
+            rcontext->err, db->name, server->location.raw, rcontext->errstr);
         db->stats.cluster.discoveries.failed++;
     }
 

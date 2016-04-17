@@ -191,7 +191,7 @@ sentinel_loop(void *object)
         }
 
         // Is time to execute a new discovery?
-        // XXX: simple pooling-based implementation using information provided
+        // XXX: simple polling-based implementation using information provided
         // by the last contacted Sentinel server. To be explored a better
         // implementation based on pub/sub.
         if ((state->config->sentinels.discovery) ||
@@ -405,8 +405,8 @@ unsafe_set_locations(struct state *state, const char *locations)
 
         // Log error.
         REDIS_LOG_ERROR(NULL,
-            "Got error while parsing Sentinels (%d)",
-            error);
+            "Got error while parsing Sentinels (error=%d, locations=%s)",
+            error, locations);
     }
 }
 
@@ -550,8 +550,8 @@ update_state(struct state *state)
             int tr = redisSetTimeout(rcontext, state->command_timeout);
             if (tr != REDIS_OK) {
                 REDIS_LOG_ERROR(NULL,
-                    "Failed to set Redis Sentinel command execution timeout (%d)",
-                    tr);
+                    "Failed to set Sentinel command execution timeout (error=%d, sentinel=%s:%d)",
+                    tr, isentinel->host, isentinel->port);
             }
 
             // Send 'SENTINEL masters' command in order to get a list of
@@ -573,14 +573,14 @@ update_state(struct state *state)
                                 freeReplyObject(reply2);
                             } else {
                                 REDIS_LOG_ERROR(NULL,
-                                    "Failed to execute Redis Sentinel 'slaves' command (%s)",
-                                    master_names[i]);
+                                    "Failed to execute Sentinel slaves command (master_name=%s, sentinel=%s:%d)",
+                                    master_names[i], isentinel->host, isentinel->port);
                             }
                         } else {
                             REDIS_LOG_ERROR(NULL,
-                                "Failed to reuse Redis Sentinel connection (%d): %s",
-                                rcontext->err,
-                                rcontext->errstr);
+                                "Failed to reuse Sentinel connection (error=%d, sentinel=%s:%d): %s",
+                                rcontext->err, isentinel->host,
+                                isentinel->port, rcontext->errstr);
                             break;
                         }
                     }
@@ -590,14 +590,14 @@ update_state(struct state *state)
                 freeReplyObject(reply1);
             } else {
                 REDIS_LOG_ERROR(NULL,
-                    "Failed to execute Redis Sentinel '%s' command",
-                    "masters");
+                    "Failed to execute Sentinel masters command (sentinel=%s:%d)",
+                    isentinel->host, isentinel->port);
             }
         } else {
             REDIS_LOG_ERROR(NULL,
-                "Failed to establish Redis Sentinel connection (%d): %s",
-                rcontext->err,
-                rcontext->errstr);
+                "Failed to establish Sentinel connection (error=%d, sentinel=%s:%d): %s",
+                rcontext->err, isentinel->host,
+                isentinel->port, rcontext->errstr);
         }
 
         // Release context.
@@ -640,7 +640,7 @@ unsafe_update_dbs_aux(struct state *state, redis_server_t *server, time_t now)
                     server,
                     list);
                 REDIS_LOG_INFO(NULL,
-                    "Server role updated (db=%s, location=%s, sentinel=%s:%d, role=%d)",
+                    "Server role updated (db=%s, server=%s, sentinel=%s:%d, role=%d)",
                     server->db->name, server->location.raw,
                     is->sentinel->host, is->sentinel->port,
                     role);
@@ -659,7 +659,7 @@ unsafe_update_dbs_aux(struct state *state, redis_server_t *server, time_t now)
                 if (sick) {
                     server->sickness.exp = UINT_MAX;
                     REDIS_LOG_INFO(NULL,
-                        "Server sickness tag set (db=%s, location=%s, sentinel=%s:%d)",
+                        "Server sickness tag set (db=%s, server=%s, sentinel=%s:%d)",
                         server->db->name, server->location.raw,
                         is->sentinel->host, is->sentinel->port);
                 }
@@ -667,7 +667,7 @@ unsafe_update_dbs_aux(struct state *state, redis_server_t *server, time_t now)
                 if (!sick) {
                     server->sickness.exp = now;
                     REDIS_LOG_INFO(NULL,
-                        "Server sickness tag cleared (db=%s, location=%s, sentinel=%s:%d)",
+                        "Server sickness tag cleared (db=%s, server=%s, sentinel=%s:%d)",
                         server->db->name, server->location.raw,
                         is->sentinel->host, is->sentinel->port);
                 }
@@ -677,7 +677,7 @@ unsafe_update_dbs_aux(struct state *state, redis_server_t *server, time_t now)
             if (is->flags &
                 (FAILOVER_IN_PROGRESS_FLAG_MASK | RECONF_INPROG_FLAG_MASK)) {
                 REDIS_LOG_INFO(NULL,
-                    "Early Sentinel discovery scheduled (db=%s, location=%s, sentinel=%s:%d)",
+                    "Early Sentinel discovery scheduled (db=%s, server=%s, sentinel=%s:%d)",
                     server->db->name, server->location.raw,
                     is->sentinel->host, is->sentinel->port);
                 return 1;
