@@ -11,6 +11,7 @@
 #include "cache/cache.h"
 
 #include "sha1.h"
+#include "sentinel.h"
 #include "core.h"
 
 struct plan {
@@ -133,11 +134,13 @@ free_redis_server(redis_server_t *server)
     redis_context_t *icontext;
     while (!VTAILQ_EMPTY(&server->pool.free_contexts)) {
         icontext = VTAILQ_FIRST(&server->pool.free_contexts);
+        CHECK_OBJ_NOTNULL(icontext, REDIS_CONTEXT_MAGIC);
         VTAILQ_REMOVE(&server->pool.free_contexts, icontext, list);
         free_redis_context(icontext);
     }
     while (!VTAILQ_EMPTY(&server->pool.busy_contexts)) {
         icontext = VTAILQ_FIRST(&server->pool.busy_contexts);
+        CHECK_OBJ_NOTNULL(icontext, REDIS_CONTEXT_MAGIC);
         VTAILQ_REMOVE(&server->pool.busy_contexts, icontext, list);
         free_redis_context(icontext);
     }
@@ -253,11 +256,12 @@ free_vmod_redis_db(struct vmod_redis_db *db)
 
     db->config = NULL;
 
-    redis_server_t *iserver;
     for (unsigned weight = 0; weight < NREDIS_SERVER_WEIGHTS; weight++) {
         for (enum REDIS_SERVER_ROLE role = 0; role < NREDIS_SERVER_ROLES; role++) {
+            redis_server_t *iserver;
             while (!VTAILQ_EMPTY(&db->servers[weight][role])) {
                 iserver = VTAILQ_FIRST(&db->servers[weight][role]);
+                CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
                 VTAILQ_REMOVE(&db->servers[weight][role], iserver, list);
                 free_redis_server(iserver);
             }
@@ -331,6 +335,7 @@ free_thread_state(thread_state_t *state)
     redis_context_t *icontext;
     while (!VTAILQ_EMPTY(&state->contexts)) {
         icontext = VTAILQ_FIRST(&state->contexts);
+        CHECK_OBJ_NOTNULL(icontext, REDIS_CONTEXT_MAGIC);
         VTAILQ_REMOVE(&state->contexts, icontext, list);
         free_redis_context(icontext);
     }
@@ -359,6 +364,14 @@ new_vcl_priv()
 
     VTAILQ_INIT(&result->dbs);
 
+    result->sentinels.locations = NULL;
+    result->sentinels.period = 0;
+    result->sentinels.connection_timeout = (struct timeval){ 0 };
+    result->sentinels.command_timeout = (struct timeval){ 0 };
+    result->sentinels.thread = 0;
+    result->sentinels.active = 0;
+    result->sentinels.discovery = 0;
+
     return result;
 }
 
@@ -370,6 +383,7 @@ free_vcl_priv(vcl_priv_t *priv)
     vcl_priv_subnet_t *isubnet;
     while (!VTAILQ_EMPTY(&priv->subnets)) {
         isubnet = VTAILQ_FIRST(&priv->subnets);
+        CHECK_OBJ_NOTNULL(isubnet, VCL_PRIV_SUBNET_MAGIC);
         VTAILQ_REMOVE(&priv->subnets, isubnet, list);
         free_vcl_priv_subnet(isubnet);
     }
@@ -377,9 +391,21 @@ free_vcl_priv(vcl_priv_t *priv)
     vcl_priv_db_t *idb;
     while (!VTAILQ_EMPTY(&priv->dbs)) {
         idb = VTAILQ_FIRST(&priv->dbs);
+        CHECK_OBJ_NOTNULL(idb, VCL_PRIV_DB_MAGIC);
         VTAILQ_REMOVE(&priv->dbs, idb, list);
         free_vcl_priv_db(idb);
     }
+
+    if (priv->sentinels.locations != NULL) {
+        free((void *) priv->sentinels.locations);
+        priv->sentinels.locations = NULL;
+    }
+    priv->sentinels.period = 0;
+    priv->sentinels.connection_timeout = (struct timeval){ 0 };
+    priv->sentinels.command_timeout = (struct timeval){ 0 };
+    priv->sentinels.thread = 0;
+    priv->sentinels.active = 0;
+    priv->sentinels.discovery = 0;
 
     FREE_OBJ(priv);
 }
@@ -436,11 +462,13 @@ redis_execute(
     unsigned *retries, redis_server_t *server, unsigned asking,
     unsigned master, unsigned slot)
 {
+    // Assertions.
+    assert(*retries <= max_retries);
+
     // Initializations.
     redisReply *result = NULL;
 
     // Build the execution plan.
-    assert(*retries <= max_retries);
     struct plan *plan = plan_execution(
         ctx, db, state, version,
         (*retries > 0) ? max_retries - *retries : 1 + max_retries - *retries,
@@ -580,18 +608,21 @@ redis_server_t *
 unsafe_add_redis_server(
     VRT_CTX, struct vmod_redis_db *db, const char *location, enum REDIS_SERVER_ROLE role)
 {
+    // Assertions.
+    //   - db->mutex locked.
+
     // Initializations.
     redis_server_t *result = NULL;
 
     // Look for a server matching the location. If found, remove if from the
     // list. It would be reinserted later, perhaps in a different list.
-    redis_server_t *iserver;
     for (unsigned iweight = 0;
          result == NULL && iweight < NREDIS_SERVER_WEIGHTS;
          iweight++) {
         for (enum REDIS_SERVER_ROLE irole = 0;
              result == NULL && irole < NREDIS_SERVER_ROLES;
              irole++) {
+            redis_server_t *iserver;
             VTAILQ_FOREACH(iserver, &db->servers[iweight][irole], list) {
                 CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
                 if (strcmp(iserver->location.raw, location) == 0) {
@@ -657,16 +688,21 @@ unsafe_add_redis_server(
 
         // Log event.
         REDIS_LOG_INFO(ctx,
-            "Existing server updated (db=%s, location=%s, role=%d, weight=%d)",
+            "Server updated (db=%s, location=%s, role=%d, weight=%d)",
             db->name, result->location.raw, result->role, result->weight);
     }
 
-    // Register server instance in the right list.
+    // Do not continue if a server instance is not available.
     if (result != NULL) {
+        // Register server instance in the right list.
         VTAILQ_INSERT_TAIL(
             &db->servers[result->weight][result->role],
             result,
             list);
+        // Trigger Sentinel discovery?
+        if ((db->config->sentinels.active) && (!db->cluster.enabled)) {
+            unsafe_sentinel_discovery(db->config);
+        }
     }
 
     // Done!
@@ -881,10 +917,6 @@ populate_execution_plan(
     // Populate list of servers?
     if (plan->contexts.n < max_size) {
         // Initializations.
-        unsigned round;
-        unsigned iweight;
-        enum REDIS_SERVER_ROLE irole;
-        redis_server_t *iserver;
         unsigned remaining = max_size - plan->contexts.n;
         unsigned free_ws = WS_Reserve(ctx->ws, 0);
         unsigned used_ws = 0;
@@ -904,13 +936,13 @@ populate_execution_plan(
         //       + Skip slave & TBD servers if 'master' is set.
         //   - Second round:
         //       + Consider sick and TBD servers skipped during the first round.
-        for (round = 1; round <= 2; round++) {
-            for (iweight = 0;
-                remaining > 0 && iweight < NREDIS_SERVER_WEIGHTS;
-                iweight++) {
-                for (irole = 0;
-                    remaining > 0 && irole < NREDIS_SERVER_ROLES;
-                    irole++) {
+        for (unsigned round = 1; round <= 2; round++) {
+            for (unsigned iweight = 0;
+                 remaining > 0 && iweight < NREDIS_SERVER_WEIGHTS;
+                 iweight++) {
+                for (enum REDIS_SERVER_ROLE irole = 0;
+                     remaining > 0 && irole < NREDIS_SERVER_ROLES;
+                     irole++) {
                     if ((!master) ||
                         (((round == 1) &&
                           (irole == REDIS_SERVER_MASTER_ROLE)) ||
@@ -918,6 +950,7 @@ populate_execution_plan(
                           ((irole == REDIS_SERVER_MASTER_ROLE) ||
                            (irole == REDIS_SERVER_TBD_ROLE))))) {
                         unsigned nservers = plan->servers.n;
+                        redis_server_t *iserver;
                         VTAILQ_FOREACH(iserver, &db->servers[iweight][irole], list) {
                             CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
                             assert(iserver->weight == iweight);
@@ -977,13 +1010,14 @@ populate_execution_plan(
         //   - Skip sick servers during the third round.
         //   - Skip healthy servers during the fourth round.
         if ((db->cluster.enabled) && (plan->servers.n == 0)) {
-            for (round = 3; round <= 4; round++) {
-                for (iweight = 0;
-                    remaining > 0 && iweight < NREDIS_SERVER_WEIGHTS;
-                    iweight++) {
-                    for (irole = 0;
-                        remaining > 0 && irole < NREDIS_SERVER_ROLES;
-                        irole++) {
+            for (unsigned round = 3; round <= 4; round++) {
+                for (unsigned iweight = 0;
+                     remaining > 0 && iweight < NREDIS_SERVER_WEIGHTS;
+                     iweight++) {
+                    for (enum REDIS_SERVER_ROLE irole = 0;
+                         remaining > 0 && irole < NREDIS_SERVER_ROLES;
+                         irole++) {
+                        redis_server_t *iserver;
                         VTAILQ_FOREACH(iserver, &db->servers[iweight][irole], list) {
                             CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
                             assert(iserver->weight == iweight);
@@ -1140,7 +1174,7 @@ new_rcontext(VRT_CTX, redis_server_t * server, unsigned version, time_t now)
         if (server->sickness.exp > now) {
             server->sickness.exp = now;
             REDIS_LOG_INFO(ctx,
-                "Server sickness tag cleared (db=%s, location=%s, reason=context)",
+                "Server sickness tag cleared (db=%s, location=%s)",
                 server->db->name, server->location.raw);
         }
         server->db->stats.connections.total++;
@@ -1149,14 +1183,15 @@ new_rcontext(VRT_CTX, redis_server_t * server, unsigned version, time_t now)
         server->sickness.exp = now + server->db->sickness_ttl;
         server->db->stats.connections.failed++;
         REDIS_LOG_INFO(ctx,
-            "Server sickness tag set (db=%s, location=%s, reason=context)",
+            "Server sickness tag set (db=%s, location=%s)",
             server->db->name, server->location.raw);
     }
     AZ(pthread_mutex_unlock(&server->db->mutex));
 
 #if HIREDIS_MAJOR >= 0 && HIREDIS_MINOR >= 12
     // Enable TCP keep-alive.
-    if ((result != NULL) && (server->location.type == REDIS_SERVER_LOCATION_HOST_TYPE)) {
+    if ((result != NULL) &&
+        (server->location.type == REDIS_SERVER_LOCATION_HOST_TYPE)) {
         redisEnableKeepAlive(result);
     }
 #endif
@@ -1304,7 +1339,7 @@ static void
 unlock_shared_redis_context(
     VRT_CTX, struct vmod_redis_db *db, redis_context_t *context)
 {
-    // Check input.
+    // Assertions.
     CHECK_OBJ_NOTNULL(context, REDIS_CONTEXT_MAGIC);
     CHECK_OBJ_NOTNULL(context->server, REDIS_SERVER_MAGIC);
 
@@ -1332,7 +1367,8 @@ get_redis_repy(
     struct timeval timeout, unsigned argc, const char *argv[], unsigned asking)
 {
     // Initializations.
-    redisReply *reply, *result;
+    redisReply *result = NULL;
+    redisReply *reply;
     unsigned readonly =
         ((context->server->db->cluster.enabled) &&
          (context->server->role == REDIS_SERVER_SLAVE_ROLE));
@@ -1343,7 +1379,7 @@ get_redis_repy(
         REDIS_LOG_ERROR(ctx, "Failed to set command execution timeout (%d)", tr);
     }
 
-    // Prepare pipeline.
+    // Build pipeline.
     if (readonly) {
         redisAppendCommand(context->rcontext, "READONLY");
     }
@@ -1374,7 +1410,6 @@ get_redis_repy(
     }
 
     // Fetch command reply.
-    result = NULL;
     redisGetReply(context->rcontext, (void **)&result);
 
     // Fetch READWRITE command reply?

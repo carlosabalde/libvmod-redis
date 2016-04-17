@@ -170,6 +170,9 @@ unsafe_add_slot(
     VRT_CTX, struct vmod_redis_db *db, unsigned start, unsigned stop,
     char *host, int port, enum REDIS_SERVER_ROLE role)
 {
+    // Assertions.
+    //   - db->mutex locked.
+
     // Add / update server.
     char location[256];
     snprintf(location, sizeof(location), "%s:%d", host, port);
@@ -185,8 +188,8 @@ unsafe_add_slot(
 static unsigned
 unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *server)
 {
-    // Check server.
-    CHECK_OBJ_NOTNULL(server, REDIS_SERVER_MAGIC);
+    // Assertions.
+    //   - db->mutex locked.
     assert(server->location.type == REDIS_SERVER_LOCATION_HOST_TYPE);
 
     // Log event.
@@ -195,7 +198,6 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
         db->name, server->location.raw);
 
     // Initializations.
-    int i, j;
     unsigned done = 0;
 
     // Create context.
@@ -233,7 +235,7 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
             for (unsigned iweight = 0; iweight < NREDIS_SERVER_WEIGHTS; iweight++) {
                 for (enum REDIS_SERVER_ROLE irole = 0; irole < NREDIS_SERVER_ROLES; irole++) {
                     VTAILQ_FOREACH(iserver, &db->servers[iweight][irole], list) {
-                        for (i = 0; i < NREDIS_CLUSTER_SLOTS; i++) {
+                        for (int i = 0; i < NREDIS_CLUSTER_SLOTS; i++) {
                             iserver->cluster.slots[i] = 0;
                         }
                     }
@@ -241,7 +243,7 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
             }
 
             // Extract slots.
-            for (i = 0; i < reply->elements; i++) {
+            for (int i = 0; i < reply->elements; i++) {
                 if ((reply->element[i]->type == REDIS_REPLY_ARRAY) &&
                     (reply->element[i]->elements >= 3) &&
                     (reply->element[i]->element[0]->type == REDIS_REPLY_INTEGER) &&
@@ -264,7 +266,7 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
                             REDIS_SERVER_MASTER_ROLE);
 
                         // Extract slave servers data.
-                        for (j = 3; j < reply->element[i]->elements; j++) {
+                        for (int j = 3; j < reply->element[i]->elements; j++) {
                             if ((reply->element[i]->element[j]->type == REDIS_REPLY_ARRAY) &&
                                 (reply->element[i]->element[j]->elements >= 2) &&
                                 (reply->element[i]->element[j]->element[0]->type == REDIS_REPLY_STRING) &&
@@ -313,13 +315,17 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
 static void
 unsafe_discover_slots(VRT_CTX, struct vmod_redis_db *db, redis_server_t *server)
 {
+    // Assertions.
+    //   - db->mutex locked.
+
     // Contact already known servers and try to fetch the slots-servers mapping.
     // Always use the provided server instance in the first place.
     if (!unsafe_discover_slots_aux(ctx, db, server)) {
-        redis_server_t *iserver;
         for (unsigned iweight = 0; iweight < NREDIS_SERVER_WEIGHTS; iweight++) {
             for (enum REDIS_SERVER_ROLE irole = 0; irole < NREDIS_SERVER_ROLES; irole++) {
+                redis_server_t *iserver;
                 VTAILQ_FOREACH(iserver, &db->servers[iweight][irole], list) {
+                    CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
                     if ((iserver != server) &&
                         (unsafe_discover_slots_aux(ctx, db, iserver))) {
                         // Lists of servers are only modified on a successful
