@@ -3,10 +3,10 @@
 
 #include "core.h"
 
-void unsafe_sentinel_start(vcl_priv_t *config);
+void unsafe_sentinel_start(vcl_state_t *config);
 
-void unsafe_sentinel_discovery(vcl_priv_t *config);
+void unsafe_sentinel_discovery(vcl_state_t *config);
 
-void unsafe_sentinel_stop(vcl_priv_t *config);
+void unsafe_sentinel_stop(vcl_state_t *config);
 
 #endif

@@ -14,7 +14,7 @@ typedef struct vmod_state {
 
     // Version increased on every VCL warm event (rw field protected by the
     // associated mutex on writes; it's ok to ignore the lock during reads).
-    // This will be used to (1) reestablish Redis connections binded to worker
+    // This will be used to (1) reestablish connections binded to worker
     // threads; and (2) regenerate pooled connections shared between threads.
     unsigned version;
 
@@ -27,7 +27,9 @@ typedef struct vmod_state {
     } locks;
 } vmod_state_t;
 
-vmod_state_t *vstate();
+vmod_state_t *vmod_state();
+
+#define VMOD(member) (vmod_state()->member)
 
 #define NREDIS_SERVER_ROLES 3
 #define NREDIS_SERVER_WEIGHTS 4
@@ -120,13 +122,13 @@ typedef struct redis_context {
     VTAILQ_ENTRY(redis_context) list;
 } redis_context_t;
 
-struct vcl_priv;
-typedef struct vcl_priv vcl_priv_t;
+struct vcl_state;
+typedef struct vcl_state vcl_state_t;
 
 struct vmod_redis_db {
     // Object marker.
     unsigned magic;
-#define VMOD_REDIS_DB_MAGIC 0xef35182b
+#define VMOD_REDIS_DATABASE_MAGIC 0xef35182b
 
     // Mutex.
     struct lock mutex;
@@ -135,7 +137,7 @@ struct vmod_redis_db {
     // XXX: required because PRIV_VCL pointers are not available (1) when
     // invoking object methods; and (2) when the VMOD releases database
     // instances. This should be fixed in future Varnish releases.
-    vcl_priv_t *config;
+    vcl_state_t *config;
 
     // General options (allocated in the heap).
     const char *name;
@@ -250,9 +252,9 @@ typedef struct thread_state {
     } command;
 } thread_state_t;
 
-typedef struct vcl_priv_subnet {
+typedef struct subnet {
     // Object marker.
-#define VCL_PRIV_SUBNET_MAGIC 0x27facd57
+#define SUBNET_MAGIC 0x27facd57
     unsigned magic;
 
     // Weight.
@@ -265,34 +267,34 @@ typedef struct vcl_priv_subnet {
     struct in_addr mask;
 
     // Tail queue.
-    VTAILQ_ENTRY(vcl_priv_subnet) list;
-} vcl_priv_subnet_t;
+    VTAILQ_ENTRY(subnet) list;
+} subnet_t;
 
-typedef struct vcl_priv_db {
+typedef struct database {
     // Object marker.
-#define VCL_PRIV_DB_MAGIC 0x9200fda1
+#define DATABASE_MAGIC 0x9200fda1
     unsigned magic;
 
     // Database.
     struct vmod_redis_db *db;
 
     // Tail queue.
-    VTAILQ_ENTRY(vcl_priv_db) list;
-} vcl_priv_db_t;
+    VTAILQ_ENTRY(database) list;
+} database_t;
 
-typedef struct vcl_priv {
+typedef struct vcl_state {
     // Object marker.
-#define VCL_PRIV_MAGIC 0x77feec11
+#define VCL_STATE_MAGIC 0x77feec11
     unsigned magic;
 
     // Mutex.
     struct lock mutex;
 
     // Subnets (rw field to be protected by the associated mutex).
-    VTAILQ_HEAD(,vcl_priv_subnet) subnets;
+    VTAILQ_HEAD(,subnet) subnets;
 
     // Databases (rw field to be protected by the associated mutex).
-    VTAILQ_HEAD(,vcl_priv_db) dbs;
+    VTAILQ_HEAD(,database) dbs;
 
     // Sentinel (rw fields to be protected by the associated mutex).
     struct {
@@ -307,7 +309,7 @@ typedef struct vcl_priv {
         unsigned active;
         unsigned discovery;
     } sentinels;
-} vcl_priv_t;
+} vcl_state_t;
 
 #define REDIS_LOG(ctx, level, message, ...) \
     do { \
@@ -357,7 +359,7 @@ redis_context_t *new_redis_context(
 void free_redis_context(redis_context_t *context);
 
 struct vmod_redis_db *new_vmod_redis_db(
-    vcl_priv_t *config, const char *name, struct timeval connection_timeout,
+    vcl_state_t *config, const char *name, struct timeval connection_timeout,
     unsigned connection_ttl, struct timeval command_timeout, unsigned max_command_retries,
     unsigned shared_connections, unsigned max_connections, const char *password,
     unsigned sickness_ttl, unsigned clustered, unsigned max_cluster_hops);
@@ -366,20 +368,19 @@ void free_vmod_redis_db(struct vmod_redis_db *db);
 thread_state_t *new_thread_state();
 void free_thread_state(thread_state_t *state);
 
-vcl_priv_t *new_vcl_priv();
-void free_vcl_priv(vcl_priv_t *priv);
+vcl_state_t *new_vcl_state();
+void free_vcl_state(vcl_state_t *priv);
 
-vcl_priv_subnet_t *new_vcl_priv_subnet(unsigned weight, struct in_addr ia4, unsigned bits);
-void free_vcl_priv_subnet(vcl_priv_subnet_t *subnet);
+subnet_t *new_subnet(unsigned weight, struct in_addr ia4, unsigned bits);
+void free_subnet(subnet_t *subnet);
 
-vcl_priv_db_t *new_vcl_priv_db(struct vmod_redis_db *db);
-void free_vcl_priv_db(vcl_priv_db_t *db);
+database_t *new_database(struct vmod_redis_db *db);
+void free_database(database_t *db);
 
 redisReply *redis_execute(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    struct timeval timeout, unsigned max_retries, unsigned argc, const char *argv[],
-    unsigned *retries, redis_server_t *server, unsigned asking,
-    unsigned master, unsigned slot);
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, struct timeval timeout,
+    unsigned max_retries, unsigned argc, const char *argv[], unsigned *retries,
+    redis_server_t *server, unsigned asking, unsigned master, unsigned slot);
 
 redis_server_t * unsafe_add_redis_server(
     VRT_CTX, struct vmod_redis_db *db, const char *location, enum REDIS_SERVER_ROLE role);

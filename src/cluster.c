@@ -32,9 +32,9 @@ discover_cluster_slots(VRT_CTX, struct vmod_redis_db *db, redis_server_t *server
 
 redisReply *
 cluster_execute(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    struct timeval timeout, unsigned max_retries, unsigned argc, const char *argv[],
-    unsigned *retries, unsigned master)
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, struct timeval timeout,
+    unsigned max_retries, unsigned argc, const char *argv[], unsigned *retries,
+    unsigned master)
 {
     // Initializations.
     redisReply *result = NULL;
@@ -311,7 +311,6 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
     // Done.
     return done;
 }
-
 
 static void
 unsafe_discover_slots(VRT_CTX, struct vmod_redis_db *db, redis_server_t *server)

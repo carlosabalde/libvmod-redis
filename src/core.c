@@ -14,7 +14,7 @@
 #include "sentinel.h"
 #include "core.h"
 
-static vmod_state_t vmod_state = {
+static vmod_state_t state = {
     .mutex = PTHREAD_MUTEX_INITIALIZER,
     .version = 0,
     .locks.refs = 0,
@@ -24,9 +24,9 @@ static vmod_state_t vmod_state = {
 };
 
 vmod_state_t *
-vstate()
+vmod_state()
 {
-    return &vmod_state;
+    return &state;
 }
 
 struct plan {
@@ -59,8 +59,8 @@ static void unlock_redis_context(
     VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, redis_context_t *context);
 
 static redisReply *get_redis_repy(
-    VRT_CTX, redis_context_t *context,
-    struct timeval timeout, unsigned argc, const char *argv[], unsigned asking);
+    VRT_CTX, redis_context_t *context, struct timeval timeout, unsigned argc,
+    const char *argv[], unsigned asking);
 
 static const char *sha1(VRT_CTX, const char *script);
 
@@ -97,7 +97,7 @@ new_redis_server(
 
         result->weight = 0;
 
-        Lck_New(&result->pool.mutex, vstate()->locks.pool);
+        Lck_New(&result->pool.mutex, VMOD(locks.pool));
         AZ(pthread_cond_init(&result->pool.cond, NULL));
 
         result->pool.ncontexts = 0;
@@ -178,7 +178,7 @@ new_redis_context(
 
     result->server = server;
     result->rcontext = rcontext;
-    result->version = vstate()->version;
+    result->version = VMOD(version);
     result->tst = tst;
 
     return result;
@@ -200,16 +200,16 @@ free_redis_context(redis_context_t *context)
 
 struct vmod_redis_db *
 new_vmod_redis_db(
-    vcl_priv_t *config, const char *name, struct timeval connection_timeout,
+    vcl_state_t *config, const char *name, struct timeval connection_timeout,
     unsigned connection_ttl, struct timeval command_timeout, unsigned max_command_retries,
     unsigned shared_connections, unsigned max_connections, const char *password,
     unsigned sickness_ttl, unsigned clustered, unsigned max_cluster_hops)
 {
     struct vmod_redis_db *result;
-    ALLOC_OBJ(result, VMOD_REDIS_DB_MAGIC);
+    ALLOC_OBJ(result, VMOD_REDIS_DATABASE_MAGIC);
     AN(result);
 
-    Lck_New(&result->mutex, vstate()->locks.db);
+    Lck_New(&result->mutex, VMOD(locks.db));
 
     result->config = config;
 
@@ -364,14 +364,14 @@ free_thread_state(thread_state_t *state)
     FREE_OBJ(state);
 }
 
-vcl_priv_t *
-new_vcl_priv()
+vcl_state_t *
+new_vcl_state()
 {
-    vcl_priv_t *result;
-    ALLOC_OBJ(result, VCL_PRIV_MAGIC);
+    vcl_state_t *result;
+    ALLOC_OBJ(result, VCL_STATE_MAGIC);
     AN(result);
 
-    Lck_New(&result->mutex, vstate()->locks.config);
+    Lck_New(&result->mutex, VMOD(locks.config));
 
     VTAILQ_INIT(&result->subnets);
 
@@ -389,24 +389,24 @@ new_vcl_priv()
 }
 
 void
-free_vcl_priv(vcl_priv_t *priv)
+free_vcl_state(vcl_state_t *priv)
 {
     Lck_Delete(&priv->mutex);
 
-    vcl_priv_subnet_t *isubnet;
+    subnet_t *isubnet;
     while (!VTAILQ_EMPTY(&priv->subnets)) {
         isubnet = VTAILQ_FIRST(&priv->subnets);
-        CHECK_OBJ_NOTNULL(isubnet, VCL_PRIV_SUBNET_MAGIC);
+        CHECK_OBJ_NOTNULL(isubnet, SUBNET_MAGIC);
         VTAILQ_REMOVE(&priv->subnets, isubnet, list);
-        free_vcl_priv_subnet(isubnet);
+        free_subnet(isubnet);
     }
 
-    vcl_priv_db_t *idb;
+    database_t *idb;
     while (!VTAILQ_EMPTY(&priv->dbs)) {
         idb = VTAILQ_FIRST(&priv->dbs);
-        CHECK_OBJ_NOTNULL(idb, VCL_PRIV_DB_MAGIC);
+        CHECK_OBJ_NOTNULL(idb, DATABASE_MAGIC);
         VTAILQ_REMOVE(&priv->dbs, idb, list);
-        free_vcl_priv_db(idb);
+        free_database(idb);
     }
 
     if (priv->sentinels.locations != NULL) {
@@ -423,11 +423,11 @@ free_vcl_priv(vcl_priv_t *priv)
     FREE_OBJ(priv);
 }
 
-vcl_priv_subnet_t *
-new_vcl_priv_subnet(unsigned weight, struct in_addr ia4, unsigned bits)
+subnet_t *
+new_subnet(unsigned weight, struct in_addr ia4, unsigned bits)
 {
-    vcl_priv_subnet_t *result;
-    ALLOC_OBJ(result, VCL_PRIV_SUBNET_MAGIC);
+    subnet_t *result;
+    ALLOC_OBJ(result, SUBNET_MAGIC);
     AN(result);
 
     result->weight = weight;
@@ -438,7 +438,7 @@ new_vcl_priv_subnet(unsigned weight, struct in_addr ia4, unsigned bits)
 }
 
 void
-free_vcl_priv_subnet(vcl_priv_subnet_t *subnet)
+free_subnet(subnet_t *subnet)
 {
     subnet->weight = 0;
     subnet->mask = (struct in_addr){ 0 };
@@ -447,11 +447,11 @@ free_vcl_priv_subnet(vcl_priv_subnet_t *subnet)
     FREE_OBJ(subnet);
 }
 
-vcl_priv_db_t *
-new_vcl_priv_db(struct vmod_redis_db *db)
+database_t *
+new_database(struct vmod_redis_db *db)
 {
-    vcl_priv_db_t *result;
-    ALLOC_OBJ(result, VCL_PRIV_DB_MAGIC);
+    database_t *result;
+    ALLOC_OBJ(result, DATABASE_MAGIC);
     AN(result);
 
     result->db = db;
@@ -460,7 +460,7 @@ new_vcl_priv_db(struct vmod_redis_db *db)
 }
 
 void
-free_vcl_priv_db(vcl_priv_db_t *db)
+free_database(database_t *db)
 {
     free_vmod_redis_db(db->db);
     db->db = NULL;
@@ -470,10 +470,9 @@ free_vcl_priv_db(vcl_priv_db_t *db)
 
 redisReply *
 redis_execute(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    struct timeval timeout, unsigned max_retries, unsigned argc, const char *argv[],
-    unsigned *retries, redis_server_t *server, unsigned asking,
-    unsigned master, unsigned slot)
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, struct timeval timeout,
+    unsigned max_retries, unsigned argc, const char *argv[], unsigned *retries,
+    redis_server_t *server, unsigned asking, unsigned master, unsigned slot)
 {
     // Assertions.
     assert(*retries <= max_retries);
@@ -495,7 +494,7 @@ redis_execute(
             // Initializations.
             redis_context_t *context = lock_redis_context(ctx, db, state, plan);
 
-            // Do not continue if a Redis context is not available.
+            // Do not continue if a context is not available.
             if (context != NULL) {
                 // Initializations.
                 unsigned done = 0;
@@ -521,9 +520,9 @@ redis_execute(
                     // Execute the EVALSHA command.
                     result = get_redis_repy(ctx, context, timeout, argc, argv, asking);
 
-                    // Check reply. If Redis replies with a NOSCRIPT, the original
-                    // EVAL command should be executed to register the script for
-                    // the first time in the Redis server.
+                    // Check reply. If replied with a NOSCRIPT, the original
+                    // EVAL command should be executed to register the script
+                    // for the first time in the Redis server.
                     if (!context->rcontext->err &&
                         (result != NULL) &&
                         (result->type == REDIS_REPLY_ERROR) &&
@@ -575,7 +574,7 @@ redis_execute(
                 // Release context.
                 unlock_redis_context(ctx, db, state, context);
 
-            // Redis context not available.
+            // Context not available.
             } else {
                 REDIS_LOG_ERROR(ctx,
                     "Failed to execute command (command=%s, db=%s): context not available",
@@ -656,10 +655,10 @@ unsafe_add_redis_server(
                 struct in_addr ia4;
                 if (inet_pton(AF_INET, result->location.parsed.address.host, &ia4)) {
                     result->weight = NREDIS_SERVER_WEIGHTS - 1;
-                    vcl_priv_subnet_t *isubnet;
+                    subnet_t *isubnet;
                     Lck_Lock(&db->config->mutex);
                     VTAILQ_FOREACH(isubnet, &db->config->subnets, list) {
-                        CHECK_OBJ_NOTNULL(isubnet, VCL_PRIV_SUBNET_MAGIC);
+                        CHECK_OBJ_NOTNULL(isubnet, SUBNET_MAGIC);
                         if ((ntohl(ia4.s_addr) & isubnet->mask.s_addr) ==
                             (isubnet->address.s_addr & isubnet->mask.s_addr)) {
                             result->weight = isubnet->weight;
@@ -739,7 +738,7 @@ is_valid_redis_context(redis_context_t *context, time_t now)
     }
 
     // Check if context is too old (version).
-    if (context->version != vstate()->version) {
+    if (context->version != VMOD(version)) {
         Lck_Lock(&context->server->db->mutex);
         context->server->db->stats.connections.dropped.version++;
         Lck_Unlock(&context->server->db->mutex);
@@ -1361,8 +1360,7 @@ unlock_shared_redis_context(
 
 static void
 unlock_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    redis_context_t *context)
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,  redis_context_t *context)
 {
     if (db->shared_connections) {
         return unlock_shared_redis_context(ctx, db, context);
@@ -1371,8 +1369,8 @@ unlock_redis_context(
 
 static redisReply *
 get_redis_repy(
-    VRT_CTX, redis_context_t *context,
-    struct timeval timeout, unsigned argc, const char *argv[], unsigned asking)
+    VRT_CTX, redis_context_t *context, struct timeval timeout, unsigned argc,
+    const char *argv[], unsigned asking)
 {
     // Initializations.
     redisReply *result = NULL;
