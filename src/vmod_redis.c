@@ -15,23 +15,20 @@
 #include "core.h"
 #include "sentinel.h"
 
-static unsigned version = 0;
-
-static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-
 static pthread_once_t thread_once = PTHREAD_ONCE_INIT;
 static pthread_key_t thread_key;
 
 static thread_state_t *get_thread_state(VRT_CTX, unsigned flush);
 static void flush_thread_state(thread_state_t *state);
-static void make_thread_key();
 
 static void unsafe_set_subnets(VRT_CTX, vcl_priv_t *config, const char *masks);
 
 static const char *get_reply(VRT_CTX, redisReply *reply);
 
+static void handle_vcl_load_event(VRT_CTX, struct vmod_priv *vcl_priv);
 static void handle_vcl_warm_event(VRT_CTX, vcl_priv_t *config);
 static void handle_vcl_cold_event(VRT_CTX, vcl_priv_t *config);
+static void handle_vcl_discard_event(VRT_CTX, vcl_priv_t *config);
 
 /******************************************************************************
  * VMOD INITIALIZATION.
@@ -56,14 +53,7 @@ event_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
     // Check event.
     switch (e) {
         case VCL_EVENT_LOAD:
-            // Initialize (once) the key required to store thread-specific data.
-            AZ(pthread_once(&thread_once, make_thread_key));
-
-            // Initialize the local VCL data structure and set its free function.
-            // Code initializing / freeing the VCL private data structure *is
-            // not required* to be thread safe.
-            vcl_priv->priv = new_vcl_priv();
-            vcl_priv->free = (vmod_priv_free_f *)free_vcl_priv;
+            handle_vcl_load_event(ctx, vcl_priv);
             break;
 
         case VCL_EVENT_WARM:
@@ -74,6 +64,11 @@ event_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
         case VCL_EVENT_COLD:
             AN(vcl_priv->priv);
             handle_vcl_cold_event(ctx, vcl_priv->priv);
+            break;
+
+        case VCL_EVENT_DISCARD:
+            AN(vcl_priv->priv);
+            handle_vcl_discard_event(ctx, vcl_priv->priv);
             break;
 
         default:
@@ -95,7 +90,7 @@ vmod_subnets(VRT_CTX, struct vmod_priv *vcl_priv, VCL_STRING masks)
     vcl_priv_t *config = vcl_priv->priv;
 
     // Get configuration lock.
-    AZ(pthread_mutex_lock(&config->mutex));
+    Lck_Lock(&config->mutex);
 
     // Silently ignore calls to this function if any database instance has
     // already been registered.
@@ -119,7 +114,7 @@ vmod_subnets(VRT_CTX, struct vmod_priv *vcl_priv, VCL_STRING masks)
     }
 
     // Release configuration lock.
-    AZ(pthread_mutex_unlock(&config->mutex));
+    Lck_Unlock(&config->mutex);
 }
 
 /******************************************************************************
@@ -135,7 +130,7 @@ vmod_sentinels(
     vcl_priv_t *config = vcl_priv->priv;
 
     // Get configuration lock.
-    AZ(pthread_mutex_lock(&config->mutex));
+    Lck_Lock(&config->mutex);
 
     // Silently ignore calls to this function if any database instance has
     // already been registered.
@@ -180,7 +175,7 @@ vmod_sentinels(
     }
 
     // Release configuration lock.
-    AZ(pthread_mutex_unlock(&config->mutex));
+    Lck_Unlock(&config->mutex);
 }
 
 /******************************************************************************
@@ -245,7 +240,9 @@ vmod_db__init(
             password, sickness_ttl, clustered, max_cluster_hops);
 
         // Add initial server.
+        Lck_Lock(&instance->mutex);
         redis_server_t *server = unsafe_add_redis_server(ctx, instance, location, role);
+        Lck_Unlock(&instance->mutex);
 
         // Do not continue if we failed to create the server instance.
         if (server != NULL) {
@@ -256,9 +253,9 @@ vmod_db__init(
 
             // Register & return the new database instance.
             vcl_priv_db_t *vcl_priv_db = new_vcl_priv_db(instance);
-            AZ(pthread_mutex_lock(&config->mutex));
+            Lck_Lock(&config->mutex);
             VTAILQ_INSERT_TAIL(&config->dbs, vcl_priv_db, list);
-            AZ(pthread_mutex_unlock(&config->mutex));
+            Lck_Unlock(&config->mutex);
             *db = instance;
 
             // Log event.
@@ -288,7 +285,7 @@ vmod_db__fini(struct vmod_redis_db **db)
     vcl_priv_t *config = (*db)->config;
 
     // Unregister database instance.
-    AZ(pthread_mutex_lock(&config->mutex));
+    Lck_Lock(&config->mutex);
     vcl_priv_db_t *idb;
     VTAILQ_FOREACH(idb, &config->dbs, list) {
         CHECK_OBJ_NOTNULL(idb, VCL_PRIV_DB_MAGIC);
@@ -298,7 +295,7 @@ vmod_db__fini(struct vmod_redis_db **db)
             break;
         }
     }
-    AZ(pthread_mutex_unlock(&config->mutex));
+    Lck_Unlock(&config->mutex);
     *db = NULL;
 }
 
@@ -327,9 +324,9 @@ vmod_db_add_server(
         }
 
         // Add server.
-        AZ(pthread_mutex_lock(&db->mutex));
+        Lck_Lock(&db->mutex);
         unsafe_add_redis_server(ctx, db, location, role);
-        AZ(pthread_mutex_unlock(&db->mutex));
+        Lck_Unlock(&db->mutex);
     }
 }
 
@@ -464,13 +461,13 @@ vmod_db_execute(VRT_CTX, struct vmod_redis_db *db, VCL_BOOL master)
         // Clustered vs. standalone execution.
         if (db->cluster.enabled) {
             state->command.reply = cluster_execute(
-                ctx, db, state, version,
+                ctx, db, state,
                 state->command.timeout, state->command.max_retries,
                 state->command.argc, state->command.argv,
                 &retries, master);
         } else {
             state->command.reply = redis_execute(
-                ctx, db, state, version,
+                ctx, db, state,
                 state->command.timeout, state->command.max_retries,
                 state->command.argc, state->command.argv,
                 &retries, NULL, 0, master, 0);
@@ -484,9 +481,9 @@ vmod_db_execute(VRT_CTX, struct vmod_redis_db *db, VCL_BOOL master)
                 "Got error reply while executing command (command=%s, db=%s): %s",
                 state->command.argv[0], db->name, state->command.reply->str);
 
-            AZ(pthread_mutex_lock(&db->mutex));
+            Lck_Lock(&db->mutex);
             db->stats.commands.error++;
-            AZ(pthread_mutex_unlock(&db->mutex));
+            Lck_Unlock(&db->mutex);
         }
     }
 }
@@ -670,7 +667,7 @@ vmod_db_free(VRT_CTX, struct vmod_redis_db *db)
 VCL_STRING
 vmod_db_stats(VRT_CTX, struct vmod_redis_db *db)
 {
-    AZ(pthread_mutex_lock(&db->mutex));
+    Lck_Lock(&db->mutex);
     char *result = WS_Printf(ctx->ws,
         "{"
           "\"servers\": {"
@@ -730,7 +727,7 @@ vmod_db_stats(VRT_CTX, struct vmod_redis_db *db)
         db->stats.cluster.discoveries.failed,
         db->stats.cluster.replies.moved,
         db->stats.cluster.replies.ask);
-    AZ(pthread_mutex_unlock(&db->mutex));
+    Lck_Unlock(&db->mutex);
     return result;
 }
 
@@ -839,7 +836,7 @@ static void
 unsafe_set_subnets(VRT_CTX, vcl_priv_t *config, const char *masks)
 {
     // Assertions.
-    //   - config->mutex locked.
+    Lck_AssertHeld(&config->mutex);
 
     // Initializations
     unsigned error = 0;
@@ -958,22 +955,46 @@ get_reply(VRT_CTX, redisReply *reply)
 }
 
 static void
+handle_vcl_load_event(VRT_CTX, struct vmod_priv *vcl_priv)
+{
+
+    // Initialize (once) the key required to store thread-specific data.
+    AZ(pthread_once(&thread_once, make_thread_key));
+
+    // Initialize Varnish locks.
+    if (vstate()->locks.refs == 0) {
+        vstate()->locks.config = Lck_CreateClass("redis.config");
+        AN(vstate()->locks.config);
+        vstate()->locks.db = Lck_CreateClass("redis.db");
+        AN(vstate()->locks.db);
+        vstate()->locks.pool = Lck_CreateClass("redis.pool");
+        AN(vstate()->locks.pool);
+    }
+    vstate()->locks.refs++;
+
+    // Initialize the local VCL data structure and set its free function.
+    // Code initializing / freeing the VCL private data structure *is
+    // not required* to be thread safe.
+    vcl_priv->priv = new_vcl_priv();
+    vcl_priv->free = (vmod_priv_free_f *)free_vcl_priv;
+
+}
+
+static void
 handle_vcl_warm_event(VRT_CTX, vcl_priv_t *config)
 {
-    // Increase the global version. This will be used to (1) reestablish Redis
-    // connections binded to worker threads; and (2) regenerate pooled
-    // connections shared between threads.
-    AZ(pthread_mutex_lock(&mutex));
-    version++;
-    AZ(pthread_mutex_unlock(&mutex));
+    // Increase the global version
+    AZ(pthread_mutex_lock(&vstate()->mutex));
+    vstate()->version++;
+    AZ(pthread_mutex_unlock(&vstate()->mutex));
 
     // Start Sentinel thread?
-    AZ(pthread_mutex_lock(&config->mutex));
+    Lck_Lock(&config->mutex);
     if ((config->sentinels.locations != NULL) &&
         (!config->sentinels.active)) {
         unsafe_sentinel_start(config);
     }
-    AZ(pthread_mutex_unlock(&config->mutex));
+    Lck_Unlock(&config->mutex);
 }
 
 static void
@@ -982,15 +1003,15 @@ handle_vcl_cold_event(VRT_CTX, vcl_priv_t *config)
     // If required, stop Sentinel thread and wait for termination. This
     // guarantees the Sentinel thread won't loose the config reference
     // in its internal state unexpectedly.
-    AZ(pthread_mutex_lock(&config->mutex));
+    Lck_Lock(&config->mutex);
     if (config->sentinels.active) {
         unsafe_sentinel_stop(config);
-        AZ(pthread_mutex_unlock(&config->mutex));
+        Lck_Unlock(&config->mutex);
         AN(config->sentinels.thread);
         AZ(pthread_join(config->sentinels.thread, NULL));
         config->sentinels.thread = 0;
     } else {
-        AZ(pthread_mutex_unlock(&config->mutex));
+        Lck_Unlock(&config->mutex);
     }
 
     // Iterate through registered database instances and close connections in
@@ -998,7 +1019,7 @@ handle_vcl_cold_event(VRT_CTX, vcl_priv_t *config)
     // this way.
     unsigned dbs = 0;
     unsigned connections = 0;
-    AZ(pthread_mutex_lock(&config->mutex));
+    Lck_Lock(&config->mutex);
     vcl_priv_db_t *idb;
     VTAILQ_FOREACH(idb, &config->dbs, list) {
         // Assertions.
@@ -1008,7 +1029,7 @@ handle_vcl_cold_event(VRT_CTX, vcl_priv_t *config)
         dbs++;
 
         // Get database lock.
-        AZ(pthread_mutex_lock(&idb->db->mutex));
+        Lck_Lock(&idb->db->mutex);
 
         // Release contexts in all pools.
         for (unsigned iweight = 0; iweight < NREDIS_SERVER_WEIGHTS; iweight++) {
@@ -1019,7 +1040,7 @@ handle_vcl_cold_event(VRT_CTX, vcl_priv_t *config)
                     CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
 
                     // Get pool lock.
-                    AZ(pthread_mutex_lock(&iserver->pool.mutex));
+                    Lck_Lock(&iserver->pool.mutex);
 
                     // Release all contexts (both free an busy; this method is
                     // assumed to be called when threads are not using the pool).
@@ -1041,16 +1062,31 @@ handle_vcl_cold_event(VRT_CTX, vcl_priv_t *config)
                     }
 
                     // Release pool lock.
-                    AZ(pthread_mutex_unlock(&iserver->pool.mutex));
+                    Lck_Unlock(&iserver->pool.mutex);
                 }
             }
         }
 
         // Release database lock.
-        AZ(pthread_mutex_unlock(&idb->db->mutex));
+        Lck_Unlock(&idb->db->mutex);
     }
-    AZ(pthread_mutex_unlock(&config->mutex));
+    Lck_Unlock(&config->mutex);
     REDIS_LOG_INFO(ctx,
         "Released %d pooled connections in %d database objects",
         connections, dbs);
+}
+
+static void
+handle_vcl_discard_event(VRT_CTX, vcl_priv_t *config)
+{
+    // Assertions.
+    assert(vstate()->locks.refs > 0);
+
+    // Release Varnish locks.
+    vstate()->locks.refs--;
+    if (vstate()->locks.refs == 0) {
+        VSM_Free(vstate()->locks.config);
+        VSM_Free(vstate()->locks.db);
+        VSM_Free(vstate()->locks.pool);
+    }
 }

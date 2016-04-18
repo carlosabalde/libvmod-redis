@@ -14,6 +14,21 @@
 #include "sentinel.h"
 #include "core.h"
 
+static vmod_state_t vmod_state = {
+    .mutex = PTHREAD_MUTEX_INITIALIZER,
+    .version = 0,
+    .locks.refs = 0,
+    .locks.config = NULL,
+    .locks.db = NULL,
+    .locks.pool = NULL
+};
+
+vmod_state_t *
+vstate()
+{
+    return &vmod_state;
+}
+
 struct plan {
     // Ordered list of private contexts, including a reference to the next item
     // to be considered during the execution. This is only used when the
@@ -34,16 +49,14 @@ struct plan {
 };
 
 static struct plan *plan_execution(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, unsigned version,
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
     unsigned size, redis_server_t *server, unsigned master, unsigned slot);
 
 static redis_context_t *lock_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    unsigned version, struct plan *plan);
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, struct plan *plan);
 
 static void unlock_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    redis_context_t *context);
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, redis_context_t *context);
 
 static redisReply *get_redis_repy(
     VRT_CTX, redis_context_t *context,
@@ -84,7 +97,7 @@ new_redis_server(
 
         result->weight = 0;
 
-        AZ(pthread_mutex_init(&result->pool.mutex, NULL));
+        Lck_New(&result->pool.mutex, vstate()->locks.pool);
         AZ(pthread_cond_init(&result->pool.cond, NULL));
 
         result->pool.ncontexts = 0;
@@ -127,7 +140,7 @@ free_redis_server(redis_server_t *server)
 
     server->weight = 0;
 
-    AZ(pthread_mutex_destroy(&server->pool.mutex));
+    Lck_Delete(&server->pool.mutex);
     AZ(pthread_cond_destroy(&server->pool.cond));
 
     server->pool.ncontexts = 0;
@@ -157,7 +170,7 @@ free_redis_server(redis_server_t *server)
 
 redis_context_t *
 new_redis_context(
-    redis_server_t *server, redisContext *rcontext, unsigned version, time_t tst)
+    redis_server_t *server, redisContext *rcontext, time_t tst)
 {
     redis_context_t *result;
     ALLOC_OBJ(result, REDIS_CONTEXT_MAGIC);
@@ -165,7 +178,7 @@ new_redis_context(
 
     result->server = server;
     result->rcontext = rcontext;
-    result->version = version;
+    result->version = vstate()->version;
     result->tst = tst;
 
     return result;
@@ -196,7 +209,7 @@ new_vmod_redis_db(
     ALLOC_OBJ(result, VMOD_REDIS_DB_MAGIC);
     AN(result);
 
-    AZ(pthread_mutex_init(&result->mutex, NULL));
+    Lck_New(&result->mutex, vstate()->locks.db);
 
     result->config = config;
 
@@ -252,7 +265,7 @@ new_vmod_redis_db(
 void
 free_vmod_redis_db(struct vmod_redis_db *db)
 {
-    AZ(pthread_mutex_destroy(&db->mutex));
+    Lck_Delete(&db->mutex);
 
     db->config = NULL;
 
@@ -358,7 +371,7 @@ new_vcl_priv()
     ALLOC_OBJ(result, VCL_PRIV_MAGIC);
     AN(result);
 
-    AZ(pthread_mutex_init(&result->mutex, NULL));
+    Lck_New(&result->mutex, vstate()->locks.config);
 
     VTAILQ_INIT(&result->subnets);
 
@@ -378,7 +391,7 @@ new_vcl_priv()
 void
 free_vcl_priv(vcl_priv_t *priv)
 {
-    AZ(pthread_mutex_destroy(&priv->mutex));
+    Lck_Delete(&priv->mutex);
 
     vcl_priv_subnet_t *isubnet;
     while (!VTAILQ_EMPTY(&priv->subnets)) {
@@ -457,7 +470,7 @@ free_vcl_priv_db(vcl_priv_db_t *db)
 
 redisReply *
 redis_execute(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, unsigned version,
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
     struct timeval timeout, unsigned max_retries, unsigned argc, const char *argv[],
     unsigned *retries, redis_server_t *server, unsigned asking,
     unsigned master, unsigned slot)
@@ -470,7 +483,7 @@ redis_execute(
 
     // Build the execution plan.
     struct plan *plan = plan_execution(
-        ctx, db, state, version,
+        ctx, db, state,
         (*retries > 0) ? max_retries - *retries : 1 + max_retries - *retries,
         server, master, slot);
 
@@ -480,7 +493,7 @@ redis_execute(
         // Execute command, retrying up to some limit.
         while ((result == NULL) && (!WS_Overflowed(ctx->ws))) {
             // Initializations.
-            redis_context_t *context = lock_redis_context(ctx, db, state, version, plan);
+            redis_context_t *context = lock_redis_context(ctx, db, state, plan);
 
             // Do not continue if a Redis context is not available.
             if (context != NULL) {
@@ -531,9 +544,9 @@ redis_execute(
                         result = NULL;
 
                         // Update stats.
-                        AZ(pthread_mutex_lock(&db->mutex));
+                        Lck_Lock(&db->mutex);
                         db->stats.commands.noscript++;
-                        AZ(pthread_mutex_unlock(&db->mutex));
+                        Lck_Unlock(&db->mutex);
 
                     // Command execution is completed.
                     } else {
@@ -570,7 +583,7 @@ redis_execute(
             }
 
             // Update stats.
-            AZ(pthread_mutex_lock(&db->mutex));
+            Lck_Lock(&db->mutex);
             if (*retries > 0) {
                 db->stats.commands.retried++;
             }
@@ -579,7 +592,7 @@ redis_execute(
             } else {
                 db->stats.commands.total++;
             }
-            AZ(pthread_mutex_unlock(&db->mutex));
+            Lck_Unlock(&db->mutex);
 
             // Try again?
             if (result == NULL) {
@@ -608,7 +621,7 @@ unsafe_add_redis_server(
     VRT_CTX, struct vmod_redis_db *db, const char *location, enum REDIS_SERVER_ROLE role)
 {
     // Assertions.
-    //   - db->mutex locked.
+    Lck_AssertHeld(&db->mutex);
 
     // Initializations.
     redis_server_t *result = NULL;
@@ -644,7 +657,7 @@ unsafe_add_redis_server(
                 if (inet_pton(AF_INET, result->location.parsed.address.host, &ia4)) {
                     result->weight = NREDIS_SERVER_WEIGHTS - 1;
                     vcl_priv_subnet_t *isubnet;
-                    AZ(pthread_mutex_lock(&db->config->mutex));
+                    Lck_Lock(&db->config->mutex);
                     VTAILQ_FOREACH(isubnet, &db->config->subnets, list) {
                         CHECK_OBJ_NOTNULL(isubnet, VCL_PRIV_SUBNET_MAGIC);
                         if ((ntohl(ia4.s_addr) & isubnet->mask.s_addr) ==
@@ -653,7 +666,7 @@ unsafe_add_redis_server(
                             break;
                         }
                     }
-                    AZ(pthread_mutex_unlock(&db->config->mutex));
+                    Lck_Unlock(&db->config->mutex);
                 } else {
                     result->weight = NREDIS_SERVER_WEIGHTS - 1;
                 }
@@ -700,7 +713,9 @@ unsafe_add_redis_server(
             list);
         // Trigger Sentinel discovery?
         if ((db->config->sentinels.active) && (!db->cluster.enabled)) {
+            Lck_Lock(&db->config->mutex);
             unsafe_sentinel_discovery(db->config);
+            Lck_Unlock(&db->config->mutex);
         }
     }
 
@@ -713,42 +728,42 @@ unsafe_add_redis_server(
  *****************************************************************************/
 
 static unsigned
-is_valid_redis_context(redis_context_t *context, unsigned version, time_t now)
+is_valid_redis_context(redis_context_t *context, time_t now)
 {
     // Check if context is in an error state.
     if (context->rcontext->err) {
-        AZ(pthread_mutex_lock(&context->server->db->mutex));
+        Lck_Lock(&context->server->db->mutex);
         context->server->db->stats.connections.dropped.error++;
-        AZ(pthread_mutex_unlock(&context->server->db->mutex));
+        Lck_Unlock(&context->server->db->mutex);
         return 0;
     }
 
     // Check if context is too old (version).
-    if (context->version != version) {
-        AZ(pthread_mutex_lock(&context->server->db->mutex));
+    if (context->version != vstate()->version) {
+        Lck_Lock(&context->server->db->mutex);
         context->server->db->stats.connections.dropped.version++;
-        AZ(pthread_mutex_unlock(&context->server->db->mutex));
+        Lck_Unlock(&context->server->db->mutex);
         return 0;
     }
 
     // Check if context is too old (TTL).
     if ((context->server->db->connection_ttl > 0) &&
         (now - context->tst > context->server->db->connection_ttl)) {
-        AZ(pthread_mutex_lock(&context->server->db->mutex));
+        Lck_Lock(&context->server->db->mutex);
         context->server->db->stats.connections.dropped.ttl++;
-        AZ(pthread_mutex_unlock(&context->server->db->mutex));
+        Lck_Unlock(&context->server->db->mutex);
         return 0;
     }
 
     // Check if context was created before the server was flagged
     // as sick.
     unsigned sick = 0;
-    AZ(pthread_mutex_lock(&context->server->db->mutex));
+    Lck_Lock(&context->server->db->mutex);
     if (context->tst <= context->server->sickness.tst) {
         sick = 1;
         context->server->db->stats.connections.dropped.sick++;
     }
-    AZ(pthread_mutex_unlock(&context->server->db->mutex));
+    Lck_Unlock(&context->server->db->mutex);
     if (sick) {
         return 0;
     }
@@ -758,9 +773,9 @@ is_valid_redis_context(redis_context_t *context, unsigned version, time_t now)
     fds.fd = context->rcontext->fd;
     fds.events = POLLOUT;
     if ((poll(&fds, 1, 0) != 1) || (fds.revents & POLLHUP)) {
-        AZ(pthread_mutex_lock(&context->server->db->mutex));
+        Lck_Lock(&context->server->db->mutex);
         context->server->db->stats.connections.dropped.hung_up++;
-        AZ(pthread_mutex_unlock(&context->server->db->mutex));
+        Lck_Unlock(&context->server->db->mutex);
         return 0;
     }
 
@@ -793,7 +808,7 @@ new_execution_plan(VRT_CTX, struct vmod_redis_db *db)
 void
 populate_simple_execution_plan(
     VRT_CTX, struct plan *plan, struct vmod_redis_db *db, thread_state_t *state,
-    unsigned version, unsigned max_size, redis_server_t *server)
+    unsigned max_size, redis_server_t *server)
 {
     // Populate list of contexts?
     if (!db->shared_connections) {
@@ -810,7 +825,7 @@ populate_simple_execution_plan(
             CHECK_OBJ_NOTNULL(icontext, REDIS_CONTEXT_MAGIC);
             if ((icontext->server->db == db) &&
                 (icontext->server == server)) {
-                if (is_valid_redis_context(icontext, version, now)) {
+                if (is_valid_redis_context(icontext, now)) {
                     if (free_ws >= sizeof(redis_context_t *)) {
                         used_ws += sizeof(redis_context_t *);
                         plan->contexts.list[plan->contexts.n++] = icontext;
@@ -856,7 +871,7 @@ populate_simple_execution_plan(
 void
 populate_execution_plan(
     VRT_CTX, struct plan *plan, struct vmod_redis_db *db, thread_state_t *state,
-    unsigned version, unsigned max_size, unsigned master, unsigned slot)
+    unsigned max_size, unsigned master, unsigned slot)
 {
     // Initializations.
     time_t now = time(NULL);
@@ -878,7 +893,7 @@ populate_execution_plan(
                  (!master && (icontext->server->role != REDIS_SERVER_MASTER_ROLE))) &&
                 ((!db->cluster.enabled) ||
                  (icontext->server->cluster.slots[slot]))) {
-                if (is_valid_redis_context(icontext, version, now)) {
+                if (is_valid_redis_context(icontext, now)) {
                     if (free_ws >= sizeof(redis_context_t *)) {
                         used_ws += sizeof(redis_context_t *);
                         plan->contexts.list[plan->contexts.n++] = icontext;
@@ -923,7 +938,7 @@ populate_execution_plan(
         plan->servers.n = 0;
 
         // Get database lock.
-        AZ(pthread_mutex_lock(&db->mutex));
+        Lck_Lock(&db->mutex);
 
         // Build list of servers.
         //   - First round:
@@ -1047,7 +1062,7 @@ populate_execution_plan(
         }
 
         // Release database lock.
-        AZ(pthread_mutex_unlock(&db->mutex));
+        Lck_Unlock(&db->mutex);
 
         // Done!
         WS_Release(ctx->ws, used_ws);
@@ -1056,7 +1071,7 @@ populate_execution_plan(
 
 static struct plan *
 plan_execution(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, unsigned version,
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
     unsigned max_size, redis_server_t *server, unsigned master, unsigned slot)
 {
     // Initializations.
@@ -1066,9 +1081,9 @@ plan_execution(
     // plan.
     if (result != NULL) {
         if (server != NULL) {
-            populate_simple_execution_plan(ctx, result, db, state, version, max_size, server);
+            populate_simple_execution_plan(ctx, result, db, state, max_size, server);
         } else {
-            populate_execution_plan(ctx, result, db, state, version, max_size, master, slot);
+            populate_execution_plan(ctx, result, db, state, max_size, master, slot);
         }
     }
 
@@ -1077,7 +1092,7 @@ plan_execution(
 }
 
 static redisContext *
-new_rcontext(VRT_CTX, redis_server_t * server, unsigned version, time_t now)
+new_rcontext(VRT_CTX, redis_server_t * server, time_t now)
 {
     // Create context.
     redisContext *result;
@@ -1165,7 +1180,7 @@ new_rcontext(VRT_CTX, redis_server_t * server, unsigned version, time_t now)
     }
 
     // Update stats & sickness flag.
-    AZ(pthread_mutex_lock(&server->db->mutex));
+    Lck_Lock(&server->db->mutex);
     if (result != NULL) {
         if (server->sickness.exp > now) {
             server->sickness.exp = now;
@@ -1182,7 +1197,7 @@ new_rcontext(VRT_CTX, redis_server_t * server, unsigned version, time_t now)
             "Server sickness tag set (db=%s, server=%s)",
             server->db->name, server->location.raw);
     }
-    AZ(pthread_mutex_unlock(&server->db->mutex));
+    Lck_Unlock(&server->db->mutex);
 
 #if HIREDIS_MAJOR >= 0 && HIREDIS_MINOR >= 12
     // Enable TCP keep-alive.
@@ -1198,8 +1213,7 @@ new_rcontext(VRT_CTX, redis_server_t * server, unsigned version, time_t now)
 
 static redis_context_t *
 lock_private_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    unsigned version, struct plan *plan)
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, struct plan *plan)
 {
     // Initializations.
     redis_context_t *result = NULL;
@@ -1226,16 +1240,16 @@ lock_private_redis_context(
             VTAILQ_REMOVE(&state->contexts, context, list);
             state->ncontexts--;
             free_redis_context(context);
-            AZ(pthread_mutex_lock(&db->mutex));
+            Lck_Lock(&db->mutex);
             db->stats.connections.dropped.overflow++;
-            AZ(pthread_mutex_unlock(&db->mutex));
+            Lck_Unlock(&db->mutex);
         }
 
         // Create new context using the previously selected server. If any
         // error arises discard the context and return.
-        redisContext *rcontext = new_rcontext(ctx, server, version, now);
+        redisContext *rcontext = new_rcontext(ctx, server, now);
         if (rcontext != NULL) {
-            result = new_redis_context(server, rcontext, version, now);
+            result = new_redis_context(server, rcontext, now);
             VTAILQ_INSERT_TAIL(&state->contexts, result, list);
             state->ncontexts++;
         }
@@ -1247,8 +1261,7 @@ lock_private_redis_context(
 
 static redis_context_t *
 lock_shared_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    unsigned version, struct plan *plan)
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, struct plan *plan)
 {
     // Initializations.
     redis_context_t *result = NULL;
@@ -1260,7 +1273,7 @@ lock_shared_redis_context(
     plan->servers.next = (plan->servers.next + 1) % plan->servers.n;
 
     // Get pool lock.
-    AZ(pthread_mutex_lock(&server->pool.mutex));
+    Lck_Lock(&server->pool.mutex);
 
 retry:
     // Look for an existing free context.
@@ -1274,7 +1287,7 @@ retry:
         VTAILQ_INSERT_TAIL(&server->pool.busy_contexts, result, list);
 
         // Is the context valid?
-        if (!is_valid_redis_context(result, version, now)) {
+        if (!is_valid_redis_context(result, now)) {
             // Release context.
             VTAILQ_REMOVE(&server->pool.busy_contexts, result, list);
             server->pool.ncontexts--;
@@ -1295,25 +1308,25 @@ retry:
     if (result == NULL) {
         // If an no more contexts can be created, wait for another thread.
         if (server->pool.ncontexts >= db->max_connections) {
-            AZ(pthread_cond_wait(&server->pool.cond, &server->pool.mutex));
-            AZ(pthread_mutex_lock(&db->mutex));
+            Lck_CondWait(&server->pool.cond, &server->pool.mutex, 0);
+            Lck_Lock(&db->mutex);
             db->stats.workers.blocked++;
-            AZ(pthread_mutex_unlock(&db->mutex));
+            Lck_Unlock(&db->mutex);
             goto retry;
         }
 
         // Create new context using the previously selected server. If any
         // error arises discard the context and return.
-        redisContext *rcontext = new_rcontext(ctx, server, version, now);
+        redisContext *rcontext = new_rcontext(ctx, server, now);
         if (rcontext != NULL) {
-            result = new_redis_context(server, rcontext, version, now);
+            result = new_redis_context(server, rcontext, now);
             VTAILQ_INSERT_TAIL(&server->pool.busy_contexts, result, list);
             server->pool.ncontexts++;
         }
     }
 
     // Release pool lock.
-    AZ(pthread_mutex_unlock(&server->pool.mutex));
+    Lck_Unlock(&server->pool.mutex);
 
     // Done!
     return result;
@@ -1321,13 +1334,12 @@ retry:
 
 static redis_context_t *
 lock_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    unsigned version, struct plan *plan)
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, struct plan *plan)
 {
     if (db->shared_connections) {
-        return lock_shared_redis_context(ctx, db, state, version, plan);
+        return lock_shared_redis_context(ctx, db, state, plan);
     } else {
-        return lock_private_redis_context(ctx, db, state, version, plan);
+        return lock_private_redis_context(ctx, db, state, plan);
     }
 }
 
@@ -1340,11 +1352,11 @@ unlock_shared_redis_context(
     CHECK_OBJ_NOTNULL(context->server, REDIS_SERVER_MAGIC);
 
     // Return context to the pool's free list.
-    AZ(pthread_mutex_lock(&context->server->pool.mutex));
+    Lck_Lock(&context->server->pool.mutex);
     VTAILQ_REMOVE(&context->server->pool.busy_contexts, context, list);
     VTAILQ_INSERT_TAIL(&context->server->pool.free_contexts, context, list);
     AZ(pthread_cond_signal(&context->server->pool.cond));
-    AZ(pthread_mutex_unlock(&context->server->pool.mutex));
+    Lck_Unlock(&context->server->pool.mutex);
 }
 
 static void
