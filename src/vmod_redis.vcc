@@ -39,9 +39,9 @@ $Function VOID sentinels(PRIV_VCL,
 
 Arguments
     locations:
-        Comma-delimited list of Redis Sentinel servers. Only IP + port format
-        is allowed. Only IPv4 addresses are supported. If not provided, value
-        in the VMOD_REDIS_SENTINELS environment variable will be used.
+        Comma-delimited list of Redis Sentinel servers. Only host (IP or DNS
+        name) + port format is allowed. If not provided, value in the
+        VMOD_REDIS_SENTINELS environment variable will be used.
 
         This is useful in setups using non-clustered Redis instances in order
         to (1) keep roles (i.e. master / slave) updated; and (2) decrease
@@ -75,9 +75,10 @@ $Object db(PRIV_VCL,
     INT max_cluster_hops=32)
 
 Arguments
-    location: Redis connection string. Both IP + port and UNIX sockets are
-    supported. Only IP + port format is allowed when Redis Cluster support
-    is enabled.
+    location: Redis connection string. Both host (IP or DNS name) + port and
+    UNIX sockets are supported. Only the IP + port format is allowed when Redis
+    Cluster support is enabled. If this server should be monitored using
+    Redis Sentinel do not use DNS names.
 
     type: type of the Redis server referenced by ``location``:
 
@@ -151,9 +152,10 @@ $Method VOID .add_server(
     ENUM { master, slave, auto, cluster } type)
 
 Arguments
-    location: Redis connection string. Both IP + port and UNIX sockets are
-    supported. If Redis Cluster support has been enabled only IP + port
-    format is allowed.
+    location: Redis connection string. Both host (IP or DNS name) + port and
+    UNIX sockets are supported. If Redis Cluster support has been enabled only
+    the IP + port format is allowed. If this server should be monitored using
+    Redis Sentinel do not use DNS names.
 
     type: type of the Redis server referenced by ``location``:
 
