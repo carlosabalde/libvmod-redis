@@ -68,49 +68,55 @@ redis_server_t *
 new_redis_server(
     struct vmod_redis_db *db, const char *location, enum REDIS_SERVER_ROLE role)
 {
-    // Initializations.
-    redis_server_t *result = NULL;
+    redis_server_t *result;
+    ALLOC_OBJ(result, REDIS_SERVER_MAGIC);
+    AN(result);
+
     char *ptr = strrchr(location, ':');
+    if (ptr != NULL) {
+        result->location.type = REDIS_SERVER_LOCATION_HOST_TYPE;
+        result->location.parsed.address.host = strndup(location, ptr - location);
+        AN(result->location.parsed.address.host);
+        result->location.parsed.address.port = atoi(ptr + 1);
+    } else {
+        result->location.type = REDIS_SERVER_LOCATION_SOCKET_TYPE;
+        result->location.parsed.path = strdup(location);
+        AN(result->location.parsed.path);
+    }
 
     // Do not continue if this is a clustered database but the location is not
     // provided using the IP + port format.
-    if ((!db->cluster.enabled) || (ptr != NULL)) {
-        ALLOC_OBJ(result, REDIS_SERVER_MAGIC);
-        AN(result);
-
-        result->db = db;
-
-        result->location.raw = strdup(location);
-        AN(result->location.raw);
-        if (ptr != NULL) {
-            result->location.type = REDIS_SERVER_LOCATION_HOST_TYPE;
-            result->location.parsed.address.host = strndup(location, ptr - location);
-            AN(result->location.parsed.address.host);
-            result->location.parsed.address.port = atoi(ptr + 1);
-        } else {
-            result->location.type = REDIS_SERVER_LOCATION_SOCKET_TYPE;
-            result->location.parsed.path = strdup(location);
-            AN(result->location.parsed.path);
-        }
-
-        result->role = role;
-
-        result->weight = 0;
-
-        Lck_New(&result->pool.mutex, VMOD(locks.pool));
-        AZ(pthread_cond_init(&result->pool.cond, NULL));
-
-        result->pool.ncontexts = 0;
-        VTAILQ_INIT(&result->pool.free_contexts);
-        VTAILQ_INIT(&result->pool.busy_contexts);
-
-        for (int i = 0; i < NREDIS_CLUSTER_SLOTS; i++) {
-            result->cluster.slots[i] = 0;
-        }
-
-        result->sickness.tst = 0;
-        result->sickness.exp = 0;
+    struct in_addr ia4;
+    if ((db->cluster.enabled) &&
+        ((result->location.type != REDIS_SERVER_LOCATION_HOST_TYPE) ||
+         (inet_pton(AF_INET, result->location.parsed.address.host, &ia4) == 0))) {
+        free((void *) result->location.parsed.address.host);
+        FREE_OBJ(result);
+        return NULL;
     }
+
+    result->db = db;
+
+    result->location.raw = strdup(location);
+    AN(result->location.raw);
+
+    result->role = role;
+
+    result->weight = 0;
+
+    Lck_New(&result->pool.mutex, VMOD(locks.pool));
+    AZ(pthread_cond_init(&result->pool.cond, NULL));
+
+    result->pool.ncontexts = 0;
+    VTAILQ_INIT(&result->pool.free_contexts);
+    VTAILQ_INIT(&result->pool.busy_contexts);
+
+    for (int i = 0; i < NREDIS_CLUSTER_SLOTS; i++) {
+        result->cluster.slots[i] = 0;
+    }
+
+    result->sickness.tst = 0;
+    result->sickness.exp = 0;
 
     // Done!
     return result;

@@ -271,13 +271,13 @@ free_server(struct server *server)
 }
 
 static struct sentinel *
-new_sentinel(const char *host, unsigned port)
+new_sentinel(const char *host, unsigned host_len, unsigned port)
 {
     struct sentinel *result;
     ALLOC_OBJ(result, SENTINEL_MAGIC);
     AN(result);
 
-    result->host = strdup(host);
+    result->host = strndup(host, host_len);
     AN(result->host);
     result->port = port;
 
@@ -352,39 +352,33 @@ unsafe_set_locations(struct state *state, const char *locations)
     // Parse input.
     const char *p = locations;
     while (*p != '\0') {
-        // Parse IP.
-        char ip[32];
+        // Parse host.
         while (isspace(*p)) p++;
         const char *q = p;
         while (*q != '\0' && *q != ':') {
             q++;
         }
-        if ((p == q) || (*q != ':') || (q - p >= sizeof(ip))) {
+        if ((p == q) || (*q != ':')) {
             error = 10;
             break;
         }
-        memcpy(ip, p, q - p);
-        ip[q - p] = '\0';
-        struct in_addr ia4;
-        if (inet_pton(AF_INET, ip, &ia4) == 0) {
-            error = 20;
-            break;
-        }
+        const char *host = p;
+        unsigned host_len = q - p;
 
         // Parse port.
         p = q + 1;
         if (!isdigit(*p)) {
-            error = 30;
+            error = 20;
             break;
         }
         int port = strtoul(p, (char **)&q, 10);
         if ((p == q) || (port < 0) || (port > 65536)) {
-            error = 40;
+            error = 30;
             break;
         }
 
         // Store parsed Sentinel.
-        struct sentinel *sentinel = new_sentinel(ip, port);
+        struct sentinel *sentinel = new_sentinel(host, host_len, port);
         VTAILQ_INSERT_TAIL(&state->sentinels, sentinel, list);
 
         // More items?
@@ -478,7 +472,7 @@ parse_sentinel_reply(
                         } else if (strcmp(name, "ip") == 0) {
                             host = value;
                         } else if (strcmp(name, "port") == 0) {
-                            port = strtoul(value, NULL, 10);
+                            port = atoi(value);
                         } else if (strcmp(name, "flags") == 0) {
                             if (strstr(value, MASTER_FLAG_NAME) != NULL) {
                                 flags = flags | MASTER_FLAG_MASK;
