@@ -98,7 +98,7 @@ void
 unsafe_sentinel_start(vcl_priv_t *config)
 {
     // Assertions.
-    //   - config->mutex locked.
+    Lck_AssertHeld(&config->mutex);
     AN(config->sentinels.locations);
     assert(config->sentinels.period > 0);
     AZ(config->sentinels.thread);
@@ -128,7 +128,7 @@ void
 unsafe_sentinel_discovery(vcl_priv_t *config)
 {
     // Assertions.
-    //   - config->mutex locked.
+    Lck_AssertHeld(&config->mutex);
     AN(config->sentinels.locations);
     assert(config->sentinels.period > 0);
     AN(config->sentinels.thread);
@@ -142,7 +142,7 @@ void
 unsafe_sentinel_stop(vcl_priv_t *config)
 {
     // Assertions.
-    //   - config->mutex locked.
+    Lck_AssertHeld(&config->mutex);
     AN(config->sentinels.locations);
     assert(config->sentinels.period > 0);
     AN(config->sentinels.thread);
@@ -167,12 +167,12 @@ sentinel_loop(void *object)
     CHECK_OBJ_NOTNULL(state->config, VCL_PRIV_MAGIC);
 
     // Log event.
-    AZ(pthread_mutex_lock(&state->config->mutex));
+    Lck_Lock(&state->config->mutex);
     REDIS_LOG_INFO(NULL,
         "Sentinel thread started (locations=%s, period=%d)",
         state->config->sentinels.locations,
         state->config->sentinels.period);
-    AZ(pthread_mutex_unlock(&state->config->mutex));
+    Lck_Unlock(&state->config->mutex);
 
     // Thread loop.
     while (1) {
@@ -184,9 +184,9 @@ sentinel_loop(void *object)
         time_t now = time(NULL);
 
         // Terminate the thread loop?
-        AZ(pthread_mutex_lock(&state->config->mutex));
+        Lck_Lock(&state->config->mutex);
         if (!state->config->sentinels.active) {
-            AZ(pthread_mutex_unlock(&state->config->mutex));
+            Lck_Unlock(&state->config->mutex);
             break;
         }
 
@@ -197,16 +197,16 @@ sentinel_loop(void *object)
         if ((state->config->sentinels.discovery) ||
             (state->next_discovery <= now)) {
             // The config->mutex lock is not needed while querying Sentinels.
-            AZ(pthread_mutex_unlock(&state->config->mutex));
+            Lck_Unlock(&state->config->mutex);
 
             // Query all Sentinels in order to update the internal state
             // of the thread.
             update_state(state);
 
             // Terminate the thread loop?
-            AZ(pthread_mutex_lock(&state->config->mutex));
+            Lck_Lock(&state->config->mutex);
             if (!state->config->sentinels.active) {
-                AZ(pthread_mutex_unlock(&state->config->mutex));
+                Lck_Unlock(&state->config->mutex);
                 break;
             }
 
@@ -216,9 +216,9 @@ sentinel_loop(void *object)
             // a realistic setup.
             state->config->sentinels.discovery = 0;
             state->next_discovery = now + unsafe_update_dbs(state, now);
-            AZ(pthread_mutex_unlock(&state->config->mutex));
+            Lck_Unlock(&state->config->mutex);
         } else {
-            AZ(pthread_mutex_unlock(&state->config->mutex));
+            Lck_Unlock(&state->config->mutex);
         }
 
         // Wait for the next check.
@@ -226,12 +226,12 @@ sentinel_loop(void *object)
     }
 
     // Log event.
-    AZ(pthread_mutex_lock(&state->config->mutex));
+    Lck_Lock(&state->config->mutex);
     REDIS_LOG_INFO(NULL,
         "Sentinel thread stopped (locations=%s, period=%d)",
         state->config->sentinels.locations,
         state->config->sentinels.period);
-    AZ(pthread_mutex_unlock(&state->config->mutex));
+    Lck_Unlock(&state->config->mutex);
 
     // Done!
     free_state(state);
@@ -609,8 +609,8 @@ static unsigned
 unsafe_update_dbs_aux(struct state *state, redis_server_t *server, time_t now)
 {
     // Assertions.
-    //   - config->mutex locked.
-    //   - db->mutex locked.
+    Lck_AssertHeld(&state->config->mutex);
+    Lck_AssertHeld(&server->db->mutex);
 
     // Initializations.
     unsigned result = state->period;
@@ -696,7 +696,7 @@ static unsigned
 unsafe_update_dbs(struct state *state, time_t now)
 {
     // Assertions.
-    //   - config->mutex locked.
+    Lck_AssertHeld(&state->config->mutex);
 
     // Initializations.
     unsigned result = state->period;
@@ -706,7 +706,7 @@ unsafe_update_dbs(struct state *state, time_t now)
     VTAILQ_FOREACH(idb, &state->config->dbs, list) {
         CHECK_OBJ_NOTNULL(idb, VCL_PRIV_DB_MAGIC);
         if (!idb->db->cluster.enabled) {
-            AZ(pthread_mutex_lock(&idb->db->mutex));
+            Lck_Lock(&idb->db->mutex);
             for (unsigned iweight = 0; iweight < NREDIS_SERVER_WEIGHTS; iweight++) {
                 for (enum REDIS_SERVER_ROLE irole = 0; irole < NREDIS_SERVER_ROLES; irole++) {
                     redis_server_t *iserver, *iserver_tmp;
@@ -721,7 +721,7 @@ unsafe_update_dbs(struct state *state, time_t now)
                     }
                 }
             }
-            AZ(pthread_mutex_unlock(&idb->db->mutex));
+            Lck_Unlock(&idb->db->mutex);
         }
     }
 

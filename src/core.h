@@ -8,6 +8,27 @@
 
 #include "vqueue.h"
 
+typedef struct vmod_state {
+    // Mutex.
+    pthread_mutex_t mutex;
+
+    // Version increased on every VCL warm event (rw field protected by the
+    // associated mutex on writes; it's ok to ignore the lock during reads).
+    // This will be used to (1) reestablish Redis connections binded to worker
+    // threads; and (2) regenerate pooled connections shared between threads.
+    unsigned version;
+
+    // Varnish locks.
+    struct {
+        unsigned refs;
+        struct VSC_C_lck *config;
+        struct VSC_C_lck *db;
+        struct VSC_C_lck *pool;
+    } locks;
+} vmod_state_t;
+
+vmod_state_t *vstate();
+
 #define NREDIS_SERVER_ROLES 3
 #define NREDIS_SERVER_WEIGHTS 4
 #define NREDIS_CLUSTER_SLOTS 16384
@@ -55,7 +76,7 @@ typedef struct redis_server {
     // Shared pool.
     struct {
         // Mutex & condition variable.
-        pthread_mutex_t mutex;
+        struct lock mutex;
         pthread_cond_t cond;
 
         // Contexts (rw fields -allocated in the heap- to be protected by the
@@ -108,7 +129,7 @@ struct vmod_redis_db {
 #define VMOD_REDIS_DB_MAGIC 0xef35182b
 
     // Mutex.
-    pthread_mutex_t mutex;
+    struct lock mutex;
 
     // Configuration.
     // XXX: required because PRIV_VCL pointers are not available (1) when
@@ -265,7 +286,7 @@ typedef struct vcl_priv {
     unsigned magic;
 
     // Mutex.
-    pthread_mutex_t mutex;
+    struct lock mutex;
 
     // Subnets (rw field to be protected by the associated mutex).
     VTAILQ_HEAD(,vcl_priv_subnet) subnets;
@@ -332,7 +353,7 @@ redis_server_t *new_redis_server(
 void free_redis_server(redis_server_t *server);
 
 redis_context_t *new_redis_context(
-    redis_server_t *server, redisContext *rcontext, unsigned version, time_t tst);
+    redis_server_t *server, redisContext *rcontext, time_t tst);
 void free_redis_context(redis_context_t *context);
 
 struct vmod_redis_db *new_vmod_redis_db(
@@ -355,7 +376,7 @@ vcl_priv_db_t *new_vcl_priv_db(struct vmod_redis_db *db);
 void free_vcl_priv_db(vcl_priv_db_t *db);
 
 redisReply *redis_execute(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, unsigned version,
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
     struct timeval timeout, unsigned max_retries, unsigned argc, const char *argv[],
     unsigned *retries, redis_server_t *server, unsigned asking,
     unsigned master, unsigned slot);

@@ -25,14 +25,14 @@ static unsigned get_cluster_slot(const char *key);
 void
 discover_cluster_slots(VRT_CTX, struct vmod_redis_db *db, redis_server_t *server)
 {
-    AZ(pthread_mutex_lock(&db->mutex));
+    Lck_Lock(&db->mutex);
     unsafe_discover_slots(ctx, db, server);
-    AZ(pthread_mutex_unlock(&db->mutex));
+    Lck_Unlock(&db->mutex);
 }
 
 redisReply *
 cluster_execute(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, unsigned version,
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
     struct timeval timeout, unsigned max_retries, unsigned argc, const char *argv[],
     unsigned *retries, unsigned master)
 {
@@ -57,7 +57,7 @@ cluster_execute(
             //   - !master ==> use READONLY + READWRITE when dealing with slaves.
             //   - unknown slot ==> random server selection.
             result = redis_execute(
-                ctx, db, state, version, timeout, max_retries, argc, argv,
+                ctx, db, state, timeout, max_retries, argc, argv,
                 retries, server, asking, master, slot);
 
             // Reset flags.
@@ -82,7 +82,7 @@ cluster_execute(
                     hop = 1;
 
                     // Get database lock.
-                    AZ(pthread_mutex_lock(&db->mutex));
+                    Lck_Lock(&db->mutex);
 
                     // Add / fetch server.
                     server = unsafe_add_redis_server(
@@ -120,7 +120,7 @@ cluster_execute(
                     }
 
                     // Release database lock.
-                    AZ(pthread_mutex_unlock(&db->mutex));
+                    Lck_Unlock(&db->mutex);
 
                     // Release reply object.
                     freeReplyObject(result);
@@ -171,7 +171,7 @@ unsafe_add_slot(
     char *host, int port, enum REDIS_SERVER_ROLE role)
 {
     // Assertions.
-    //   - db->mutex locked.
+    Lck_AssertHeld(&db->mutex);
 
     // Add / update server.
     char location[256];
@@ -189,7 +189,7 @@ static unsigned
 unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *server)
 {
     // Assertions.
-    //   - db->mutex locked.
+    Lck_AssertHeld(&db->mutex);
     assert(server->location.type == REDIS_SERVER_LOCATION_HOST_TYPE);
 
     // Log event.
@@ -317,7 +317,7 @@ static void
 unsafe_discover_slots(VRT_CTX, struct vmod_redis_db *db, redis_server_t *server)
 {
     // Assertions.
-    //   - db->mutex locked.
+    Lck_AssertHeld(&db->mutex);
 
     // Contact already known servers and try to fetch the slots-servers mapping.
     // Always use the provided server instance in the first place.
