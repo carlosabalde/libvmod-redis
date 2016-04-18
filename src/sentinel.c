@@ -66,7 +66,7 @@ struct state {
     unsigned magic;
 
     // Config reference.
-    vcl_priv_t *config;
+    vcl_state_t *config;
 
     // Configuration.
     VTAILQ_HEAD(,sentinel) sentinels;
@@ -84,7 +84,7 @@ struct state {
 static void *sentinel_loop(void *object);
 
 static struct state *new_state(
-    vcl_priv_t *config, unsigned period, struct timeval connection_timeout,
+    vcl_state_t *config, unsigned period, struct timeval connection_timeout,
     struct timeval command_timeout);
 static void free_state(struct state *state);
 
@@ -95,7 +95,7 @@ static void update_state(struct state *state);
 static unsigned unsafe_update_dbs(struct state *state, time_t now);
 
 void
-unsafe_sentinel_start(vcl_priv_t *config)
+unsafe_sentinel_start(vcl_state_t *config)
 {
     // Assertions.
     Lck_AssertHeld(&config->mutex);
@@ -125,7 +125,7 @@ unsafe_sentinel_start(vcl_priv_t *config)
 }
 
 void
-unsafe_sentinel_discovery(vcl_priv_t *config)
+unsafe_sentinel_discovery(vcl_state_t *config)
 {
     // Assertions.
     Lck_AssertHeld(&config->mutex);
@@ -139,7 +139,7 @@ unsafe_sentinel_discovery(vcl_priv_t *config)
 }
 
 void
-unsafe_sentinel_stop(vcl_priv_t *config)
+unsafe_sentinel_stop(vcl_state_t *config)
 {
     // Assertions.
     Lck_AssertHeld(&config->mutex);
@@ -164,7 +164,7 @@ sentinel_loop(void *object)
     // Assertions.
     struct state *state;
     CAST_OBJ_NOTNULL(state, object, STATE_MAGIC);
-    CHECK_OBJ_NOTNULL(state->config, VCL_PRIV_MAGIC);
+    CHECK_OBJ_NOTNULL(state->config, VCL_STATE_MAGIC);
 
     // Log event.
     Lck_Lock(&state->config->mutex);
@@ -178,7 +178,7 @@ sentinel_loop(void *object)
     while (1) {
         // Assertions.
         CHECK_OBJ_NOTNULL(state, STATE_MAGIC);
-        CHECK_OBJ_NOTNULL(state->config, VCL_PRIV_MAGIC);
+        CHECK_OBJ_NOTNULL(state->config, VCL_STATE_MAGIC);
 
         // Initializations.
         time_t now = time(NULL);
@@ -296,7 +296,7 @@ free_sentinel(struct sentinel *sentinel)
 
 static struct state *
 new_state(
-    vcl_priv_t *config, unsigned period, struct timeval connection_timeout,
+    vcl_state_t *config, unsigned period, struct timeval connection_timeout,
     struct timeval command_timeout)
 {
     struct state *result;
@@ -702,9 +702,9 @@ unsafe_update_dbs(struct state *state, time_t now)
     unsigned result = state->period;
 
     // Look for servers matching servers previously discovered by Sentinel.
-    vcl_priv_db_t *idb;
+    database_t *idb;
     VTAILQ_FOREACH(idb, &state->config->dbs, list) {
-        CHECK_OBJ_NOTNULL(idb, VCL_PRIV_DB_MAGIC);
+        CHECK_OBJ_NOTNULL(idb, DATABASE_MAGIC);
         if (!idb->db->cluster.enabled) {
             Lck_Lock(&idb->db->mutex);
             for (unsigned iweight = 0; iweight < NREDIS_SERVER_WEIGHTS; iweight++) {
