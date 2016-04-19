@@ -25,7 +25,7 @@ Arguments
         value in the VMOD_REDIS_SUBNETS environment variable will be used.
 
         This is useful in setups using Redis instances deployed across multiple
-        data centers.
+        data centers or availability zones.
 Description
     Using this function is not mandatory. If used, it must be called during
     ``vcl_init`` before creating any database instance. If a database instance
@@ -81,17 +81,17 @@ $Object db(PRIV_VCL,
 Arguments
     location: Redis connection string. Both host (IP or DNS name) + port and
     UNIX sockets are supported. Only the IP + port format is allowed when Redis
-    Cluster support is enabled. If this server should be monitored using
-    Redis Sentinel do not use DNS names.
+    Cluster support is enabled. **Do not use DNS names in combination with
+    ``redis.subnets()`` or ``redis.sentinels()``**.
 
     type: type of the Redis server referenced by ``location``:
 
     - The ``auto`` value  enables automatic discovery of the current role
-      of the server.
+      of the server on bootstrap time using the ``ROLE`` command.
 
     - The ``cluster`` value enables Redis Cluster support, automatically
-      discovering other servers in the cluster and their roles using the
-      ``CLUSTER SLOTS`` command.
+      discovering other servers in the cluster and their roles on demand
+      using the ``CLUSTER SLOTS`` command.
 
     connection_timeout: connection timeout (milliseconds; 0 means no timeout)
     to the Redis server.
@@ -157,13 +157,13 @@ $Method VOID .add_server(
 Arguments
     location: Redis connection string. Both host (IP or DNS name) + port and
     UNIX sockets are supported. If Redis Cluster support has been enabled only
-    the IP + port format is allowed. If this server should be monitored using
-    Redis Sentinel do not use DNS names.
+    the IP + port format is allowed. **Do not use DNS names in combination with
+    ``redis.subnets()`` or ``redis.sentinels()``**.
 
     type: type of the Redis server referenced by ``location``:
 
     - The ``auto`` value  enables automatic discovery of the current role
-      of the server.
+      of the server on bootstrap time using the ``ROLE`` command.
 
     - If Redis Cluster support has been enabled ``cluster`` is the only
       allowed value.
