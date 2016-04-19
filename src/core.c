@@ -14,6 +14,8 @@
 #include "sentinel.h"
 #include "core.h"
 
+#define ROLE_DISCOVERY_COMMAND "ROLE"
+
 static vmod_state_t state = {
     .mutex = PTHREAD_MUTEX_INITIALIZER,
     .version = 0,
@@ -47,6 +49,9 @@ struct plan {
         unsigned next;
     } servers;
 };
+
+static enum REDIS_SERVER_ROLE unsafe_discover_redis_server_role(
+    VRT_CTX, redis_server_t *server);
 
 static struct plan *plan_execution(
     VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
@@ -656,6 +661,13 @@ unsafe_add_redis_server(
         // Create new instance.
         result = new_redis_server(db, location, role);
         if (result != NULL) {
+            // If role is unknown try to discover it. This won't be retried. On
+            // failures discovering the role the module will depend on other
+            // discovery capabilities such as Redis Sentinel or Redis Cluster.
+            if (result->role == REDIS_SERVER_TBD_ROLE) {
+                result->role = unsafe_discover_redis_server_role(ctx, result);
+            }
+
             // Calculate weight.
             if (result->location.type == REDIS_SERVER_LOCATION_HOST_TYPE) {
                 struct in_addr ia4;
@@ -695,13 +707,24 @@ unsafe_add_redis_server(
 
     // Update existing server instance.
     } else {
-        // If role is not know yet, stay with the info we have so far.
-        if (role != REDIS_SERVER_TBD_ROLE) {
+        // If role is unknown try to discover it. This won't be retried. On
+        // failures the module stays with the info it has so far. Discovery of
+        // the real role will depend on other discovery capabilities such as
+        // Redis Sentinel or Redis Cluster.
+        if (role == REDIS_SERVER_TBD_ROLE) {
+            enum REDIS_SERVER_ROLE r = unsafe_discover_redis_server_role(ctx, result);
+            if (r != REDIS_SERVER_TBD_ROLE) {
+                result->role = r;
+            }
+        } else {
             result->role = role;
         }
 
         // Flush the sickness flag.
-        result->sickness.exp = time(NULL);
+        unsigned now = time(NULL);
+        if (result->sickness.exp > now) {
+            result->sickness.exp = now;
+        }
 
         // Log event.
         REDIS_LOG_INFO(ctx,
@@ -716,6 +739,7 @@ unsafe_add_redis_server(
             &db->servers[result->weight][result->role],
             result,
             list);
+
         // Trigger Sentinel discovery?
         if ((db->config->sentinels.active) && (!db->cluster.enabled)) {
             Lck_Lock(&db->config->mutex);
@@ -731,6 +755,205 @@ unsafe_add_redis_server(
 /******************************************************************************
  * UTILITIES.
  *****************************************************************************/
+
+static redisContext *
+new_rcontext(
+    VRT_CTX, redis_server_t * server, time_t now,
+    unsigned ephemeral, unsigned dblocked)
+{
+    // Assertions.
+    if (dblocked) Lck_AssertHeld(&server->db->mutex);
+
+    // Create context.
+    redisContext *result;
+    if ((server->db->connection_timeout.tv_sec > 0) ||
+        (server->db->connection_timeout.tv_usec > 0)) {
+        switch (server->location.type) {
+            case REDIS_SERVER_LOCATION_HOST_TYPE:
+                result = redisConnectWithTimeout(
+                    server->location.parsed.address.host,
+                    server->location.parsed.address.port,
+                    server->db->connection_timeout);
+                break;
+
+            case REDIS_SERVER_LOCATION_SOCKET_TYPE:
+                result = redisConnectUnixWithTimeout(
+                    server->location.parsed.path,
+                    server->db->connection_timeout);
+                break;
+
+            default:
+                result = NULL;
+        }
+    } else {
+        switch (server->location.type) {
+            case REDIS_SERVER_LOCATION_HOST_TYPE:
+                result = redisConnect(
+                    server->location.parsed.address.host,
+                    server->location.parsed.address.port);
+                break;
+
+            case REDIS_SERVER_LOCATION_SOCKET_TYPE:
+                result = redisConnectUnix(
+                    server->location.parsed.path);
+                break;
+
+            default:
+                result = NULL;
+        }
+    }
+    AN(result);
+
+    // Check created context.
+    if (result->err) {
+        REDIS_LOG_ERROR(ctx,
+            "Failed to establish connection (error=%d, db=%s, server=%s): %s",
+            result->err, server->db->name, server->location.raw, result->errstr);
+        redisFree(result);
+        result = NULL;
+    }
+
+    // Submit AUTH command.
+    if ((result != NULL) && (server->db->password != NULL)) {
+        // Send command.
+        redisReply *reply = redisCommand(result, "AUTH %s", server->db->password);
+
+        // Check reply.
+        if ((result->err) ||
+            (reply == NULL) ||
+            (reply->type != REDIS_REPLY_STATUS) ||
+            (strcmp(reply->str, "OK") != 0)) {
+            if (result->err) {
+                REDIS_LOG_ERROR(ctx,
+                    "Failed to authenticate connection (error=%d, db=%s, server=%s): %s",
+                    result->err, server->db->name, server->location.raw, result->errstr);
+            } else if ((reply != NULL) &&
+                       ((reply->type == REDIS_REPLY_ERROR) ||
+                        (reply->type == REDIS_REPLY_STATUS) ||
+                        (reply->type == REDIS_REPLY_STRING))) {
+                REDIS_LOG_ERROR(ctx,
+                    "Failed to authenticate connection (error=%d, db=%s, server=%s): %s",
+                    reply->type, server->db->name, server->location.raw, reply->str);
+            } else {
+                REDIS_LOG_ERROR(ctx,
+                    "Failed to authenticate connection (db=%s, server=%s)",
+                    server->db->name, server->location.raw);
+            }
+            redisFree(result);
+            result = NULL;
+        }
+
+        // Release reply.
+        if (reply != NULL) {
+            freeReplyObject(reply);
+        }
+    }
+
+    // Update stats & sickness flag.
+    if (!dblocked) Lck_Lock(&server->db->mutex);
+    if (result != NULL) {
+        if (server->sickness.exp > now) {
+            server->sickness.exp = now;
+            REDIS_LOG_INFO(ctx,
+                "Server sickness tag cleared (db=%s, server=%s)",
+                server->db->name, server->location.raw);
+        }
+        if (!ephemeral) {
+            server->db->stats.connections.total++;
+        }
+    } else {
+        server->sickness.tst = now;
+        server->sickness.exp = now + server->db->sickness_ttl;
+        if (!ephemeral) {
+            server->db->stats.connections.failed++;
+        }
+        REDIS_LOG_INFO(ctx,
+            "Server sickness tag set (db=%s, server=%s)",
+            server->db->name, server->location.raw);
+    }
+    if (!dblocked) Lck_Unlock(&server->db->mutex);
+
+#if HIREDIS_MAJOR >= 0 && HIREDIS_MINOR >= 12
+    // Enable TCP keep-alive.
+    if ((result != NULL) &&
+        (server->location.type == REDIS_SERVER_LOCATION_HOST_TYPE)) {
+        redisEnableKeepAlive(result);
+    }
+#endif
+
+    // Done!
+    return result;
+}
+
+static enum REDIS_SERVER_ROLE
+unsafe_discover_redis_server_role(VRT_CTX, redis_server_t *server)
+{
+    // Assertions.
+    Lck_AssertHeld(&server->db->mutex);
+
+    // Initializations.
+    enum REDIS_SERVER_ROLE result = REDIS_SERVER_TBD_ROLE;
+
+    // Create context.
+    redisContext *rcontext = new_rcontext(ctx, server, time(NULL), 1, 1);
+    if ((rcontext != NULL) && (!rcontext->err)) {
+        // Set command execution timeout.
+        int tr = redisSetTimeout(rcontext, server->db->command_timeout);
+        if (tr != REDIS_OK) {
+            REDIS_LOG_ERROR(ctx,
+                "Failed to set role discovery command execution timeout (error=%d, db=%s, server=%s)",
+                tr, server->db->name, server->location.raw);
+        }
+
+        // Send command.
+        redisReply *reply = redisCommand(rcontext, ROLE_DISCOVERY_COMMAND);
+
+        // Check reply.
+        if ((!rcontext->err) &&
+            (reply != NULL) &&
+            (reply->type == REDIS_REPLY_ARRAY) &&
+            (reply->elements > 0) &&
+            (reply->element[0]->type == REDIS_REPLY_STRING)) {
+            if (strcmp(reply->element[0]->str, "master") == 0) {
+                result = REDIS_SERVER_MASTER_ROLE;
+            } else if (strcmp(reply->element[0]->str, "slave") == 0) {
+                result = REDIS_SERVER_SLAVE_ROLE;
+            }
+            if (result != REDIS_SERVER_TBD_ROLE) {
+                REDIS_LOG_INFO(ctx,
+                    "Server role discovered (db=%s, server=%s, role=%d)",
+                    server->db->name, server->location.raw, result);
+            }
+        } else {
+            REDIS_LOG_ERROR(ctx,
+                "Failed to execute role discovery command (db=%s, server=%s)",
+                server->db->name, server->location.raw);
+        }
+
+        // Release reply.
+        if (reply != NULL) {
+            freeReplyObject(reply);
+        }
+    } else {
+        if (rcontext != NULL) {
+            REDIS_LOG_ERROR(ctx,
+                "Failed to establish role discovery connection (error=%d, db=%s, server=%s): %s",
+                rcontext->err, server->db->name, server->location.raw, rcontext->errstr);
+        } else {
+            REDIS_LOG_ERROR(ctx,
+                "Failed to establish role discovery connection (db=%s, server=%s)",
+                server->db->name, server->location.raw);
+        }
+    }
+
+    // Release context.
+    if (rcontext != NULL) {
+        redisFree(rcontext);
+    }
+
+    // Done!
+    return result;
+}
 
 static unsigned
 is_valid_redis_context(redis_context_t *context, time_t now)
@@ -1096,126 +1319,6 @@ plan_execution(
     return result;
 }
 
-static redisContext *
-new_rcontext(VRT_CTX, redis_server_t * server, time_t now)
-{
-    // Create context.
-    redisContext *result;
-    if ((server->db->connection_timeout.tv_sec > 0) ||
-        (server->db->connection_timeout.tv_usec > 0)) {
-        switch (server->location.type) {
-            case REDIS_SERVER_LOCATION_HOST_TYPE:
-                result = redisConnectWithTimeout(
-                    server->location.parsed.address.host,
-                    server->location.parsed.address.port,
-                    server->db->connection_timeout);
-                break;
-
-            case REDIS_SERVER_LOCATION_SOCKET_TYPE:
-                result = redisConnectUnixWithTimeout(
-                    server->location.parsed.path,
-                    server->db->connection_timeout);
-                break;
-
-            default:
-                result = NULL;
-        }
-    } else {
-        switch (server->location.type) {
-            case REDIS_SERVER_LOCATION_HOST_TYPE:
-                result = redisConnect(
-                    server->location.parsed.address.host,
-                    server->location.parsed.address.port);
-                break;
-
-            case REDIS_SERVER_LOCATION_SOCKET_TYPE:
-                result = redisConnectUnix(
-                    server->location.parsed.path);
-                break;
-
-            default:
-                result = NULL;
-        }
-    }
-    AN(result);
-
-    // Check created context.
-    if (result->err) {
-        REDIS_LOG_ERROR(ctx,
-            "Failed to establish connection (error=%d, db=%s, server=%s): %s",
-            result->err, server->db->name, server->location.raw, result->errstr);
-        redisFree(result);
-        result = NULL;
-    }
-
-    // Submit AUTH command.
-    if ((result != NULL) && (server->db->password != NULL)) {
-        // Send command.
-        redisReply *reply = redisCommand(result, "AUTH %s", server->db->password);
-
-        // Check reply.
-        if ((result->err) ||
-            (reply == NULL) ||
-            (reply->type != REDIS_REPLY_STATUS) ||
-            (strcmp(reply->str, "OK") != 0)) {
-            if (result->err) {
-                REDIS_LOG_ERROR(ctx,
-                    "Failed to authenticate connection (error=%d, db=%s, server=%s): %s",
-                    result->err, server->db->name, server->location.raw, result->errstr);
-            } else if ((reply != NULL) &&
-                       ((reply->type == REDIS_REPLY_ERROR) ||
-                        (reply->type == REDIS_REPLY_STATUS) ||
-                        (reply->type == REDIS_REPLY_STRING))) {
-                REDIS_LOG_ERROR(ctx,
-                    "Failed to authenticate connection (error=%d, db=%s, server=%s): %s",
-                    reply->type, server->db->name, server->location.raw, reply->str);
-            } else {
-                REDIS_LOG_ERROR(ctx,
-                    "Failed to authenticate connection (db=%s, server=%s)",
-                    server->db->name, server->location.raw);
-            }
-            redisFree(result);
-            result = NULL;
-        }
-
-        // Release reply.
-        if (reply != NULL) {
-            freeReplyObject(reply);
-        }
-    }
-
-    // Update stats & sickness flag.
-    Lck_Lock(&server->db->mutex);
-    if (result != NULL) {
-        if (server->sickness.exp > now) {
-            server->sickness.exp = now;
-            REDIS_LOG_INFO(ctx,
-                "Server sickness tag cleared (db=%s, server=%s)",
-                server->db->name, server->location.raw);
-        }
-        server->db->stats.connections.total++;
-    } else {
-        server->sickness.tst = now;
-        server->sickness.exp = now + server->db->sickness_ttl;
-        server->db->stats.connections.failed++;
-        REDIS_LOG_INFO(ctx,
-            "Server sickness tag set (db=%s, server=%s)",
-            server->db->name, server->location.raw);
-    }
-    Lck_Unlock(&server->db->mutex);
-
-#if HIREDIS_MAJOR >= 0 && HIREDIS_MINOR >= 12
-    // Enable TCP keep-alive.
-    if ((result != NULL) &&
-        (server->location.type == REDIS_SERVER_LOCATION_HOST_TYPE)) {
-        redisEnableKeepAlive(result);
-    }
-#endif
-
-    // Done!
-    return result;
-}
-
 static redis_context_t *
 lock_private_redis_context(
     VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, struct plan *plan)
@@ -1252,7 +1355,7 @@ lock_private_redis_context(
 
         // Create new context using the previously selected server. If any
         // error arises discard the context and return.
-        redisContext *rcontext = new_rcontext(ctx, server, now);
+        redisContext *rcontext = new_rcontext(ctx, server, now, 0, 0);
         if (rcontext != NULL) {
             result = new_redis_context(server, rcontext, now);
             VTAILQ_INSERT_TAIL(&state->contexts, result, list);
@@ -1322,7 +1425,7 @@ retry:
 
         // Create new context using the previously selected server. If any
         // error arises discard the context and return.
-        redisContext *rcontext = new_rcontext(ctx, server, now);
+        redisContext *rcontext = new_rcontext(ctx, server, now, 0, 0);
         if (rcontext != NULL) {
             result = new_redis_context(server, rcontext, now);
             VTAILQ_INSERT_TAIL(&server->pool.busy_contexts, result, list);

@@ -15,7 +15,7 @@
 #define BANNED_COMMANDS "|INFO|MULTI|EXEC|SLAVEOF|CONFIG|SHUTDOWN|SCRIPT|"
 #define KEY_INDEX3_COMMANDS "|EVAL|EVALSHA|"
 
-#define DISCOVERY_COMMAND "CLUSTER SLOTS"
+#define CLUSTER_DISCOVERY_COMMAND "CLUSTER SLOTS"
 
 static void unsafe_discover_slots(VRT_CTX, struct vmod_redis_db *db, redis_server_t *server);
 
@@ -213,10 +213,9 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
             server->location.parsed.address.host,
             server->location.parsed.address.port);
     }
-    AN(rcontext);
 
     // Check context.
-    if (!rcontext->err) {
+    if ((rcontext != NULL) && (!rcontext->err)) {
         // Set command execution timeout.
         int tr = redisSetTimeout(rcontext, db->command_timeout);
         if (tr != REDIS_OK) {
@@ -226,7 +225,7 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
         }
 
         // Send command.
-        redisReply *reply = redisCommand(rcontext, DISCOVERY_COMMAND);
+        redisReply *reply = redisCommand(rcontext, CLUSTER_DISCOVERY_COMMAND);
 
         // Check reply.
         if ((!rcontext->err) &&
@@ -299,14 +298,22 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
             freeReplyObject(reply);
         }
     } else {
-        REDIS_LOG_ERROR(ctx,
-            "Failed to establish cluster discovery connection (error=%d, db=%s, server=%s): %s",
-            rcontext->err, db->name, server->location.raw, rcontext->errstr);
+        if (rcontext != NULL) {
+            REDIS_LOG_ERROR(ctx,
+                "Failed to establish cluster discovery connection (error=%d, db=%s, server=%s): %s",
+                rcontext->err, db->name, server->location.raw, rcontext->errstr);
+        } else {
+            REDIS_LOG_ERROR(ctx,
+                "Failed to establish cluster discovery connection (db=%s, server=%s)",
+                db->name, server->location.raw);
+        }
         db->stats.cluster.discoveries.failed++;
     }
 
     // Release context.
-    redisFree(rcontext);
+    if (rcontext != NULL) {
+        redisFree(rcontext);
+    }
 
     // Done.
     return done;

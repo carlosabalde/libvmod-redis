@@ -48,8 +48,12 @@ Arguments
         priority of unreachable servers when creating execution plans. This is
         **not** designed for auto-discovery of Redis Servers.
 
-    period: how frequently (seconds) the Redis Sentinel checks are executed
-    (0 means no Sentinel checks).
+    period: how frequently (seconds) Redis Sentinel proactive checks are
+    executed (0 means disabling periodical proactive checks). Beware
+    (1) proactive checks are also executed anytime a new non-clustered server
+    is registered using ``redis.db()`` or ``.add_server()``; and (2) Sentinel
+    Pub/Sub events are listened and processed even when periodical proactive
+    checks are disabled.
 
     connection_timeout: connection timeout (milliseconds; 0 means no timeout)
     to the Redis Sentinel servers.
@@ -83,8 +87,7 @@ Arguments
     type: type of the Redis server referenced by ``location``:
 
     - The ``auto`` value  enables automatic discovery of the current role
-      of the server. This requires adding at least one Sentinel using
-      ``redis.sentinels()`` and using the IP + port format.
+      of the server.
 
     - The ``cluster`` value enables Redis Cluster support, automatically
       discovering other servers in the cluster and their roles using the
@@ -160,8 +163,7 @@ Arguments
     type: type of the Redis server referenced by ``location``:
 
     - The ``auto`` value  enables automatic discovery of the current role
-      of the server. This requires adding at least one Sentinel using
-      ``redis.sentinels()`` and using the IP + port format.
+      of the server.
 
     - If Redis Cluster support has been enabled ``cluster`` is the only
       allowed value.

@@ -4,6 +4,8 @@
 #include <string.h>
 #include <pthread.h>
 #include <hiredis/hiredis.h>
+#include <hiredis/async.h>
+#include <hiredis/adapters/libev.h>
 #include <arpa/inet.h>
 
 #include "vrt.h"
@@ -12,36 +14,23 @@
 #include "core.h"
 #include "sentinel.h"
 
-#define MASTER_FLAG_NAME "master"
-#define MASTER_FLAG_MASK (1 << 0)
-
-#define SLAVE_FLAG_NAME "slave"
-#define SLAVE_FLAG_MASK (1 << 1)
-
-#define S_DOWN_FLAG_NAME "s_down"
-#define S_DOWN_FLAG_MASK (1 << 2)
-
-#define O_DOWN_FLAG_NAME "o_down"
-#define O_DOWN_FLAG_MASK (1 << 3)
-
-#define FAILOVER_IN_PROGRESS_FLAG_NAME "failover_in_progress"
-#define FAILOVER_IN_PROGRESS_FLAG_MASK (1 << 4)
-
-#define RECONF_INPROG_FLAG_NAME "reconf_inprog"
-#define RECONF_INPROG_FLAG_MASK (1 << 5)
+#define SUBSCRIPTION_COMMAND "PSUBSCRIBE +sdown -sdown +odown -odown +switch-master"
 
 struct server {
     // Object marker.
 #define SERVER_MAGIC 0x762a900c
     unsigned magic;
 
-    // Properties found during the last Sentinel discovery.
-    // When multiple Sentinels have inconsistent information about a server,
-    // properties returned by the last queried Sentinel will be used.
-    struct sentinel *sentinel;
+    // Location.
     const char *host;
     unsigned port;
-    unsigned flags;
+
+    // Most recent discovered properties.
+    enum REDIS_SERVER_ROLE role;
+    unsigned down;
+
+    // Sentinel responsible of the last change to the previous properties.
+    struct sentinel *sentinel;
 
     // Tail queue.
     VTAILQ_ENTRY(server) list;
@@ -55,6 +44,12 @@ struct sentinel {
     // Location.
     const char *host;
     unsigned port;
+
+    // Non-blocking connection.
+    redisAsyncContext *context;
+
+    // State reference, useful when processing Pub/Sub messages.
+    struct state *state;
 
     // Tail queue.
     VTAILQ_ENTRY(sentinel) list;
@@ -74,10 +69,11 @@ struct state {
     struct timeval connection_timeout;
     struct timeval command_timeout;
 
-    // Next periodical discovery.
+    // Timestamps.
+    time_t last_change;
     time_t next_discovery;
 
-    // Discovered servers.
+    // Known servers.
     VTAILQ_HEAD(,server) servers;
 };
 
@@ -90,9 +86,11 @@ static void free_state(struct state *state);
 
 static void unsafe_set_locations(struct state *state, const char *locations);
 
-static void update_state(struct state *state);
+static void parse_sentinel_notification(struct sentinel *sentinel, redisReply *reply);
 
-static unsigned unsafe_update_dbs(struct state *state, time_t now);
+static void discover_servers(struct state *state);
+
+static void unsafe_update_dbs(struct state *state);
 
 void
 unsafe_sentinel_start(vcl_state_t *config)
@@ -100,11 +98,10 @@ unsafe_sentinel_start(vcl_state_t *config)
     // Assertions.
     Lck_AssertHeld(&config->mutex);
     AN(config->sentinels.locations);
-    assert(config->sentinels.period > 0);
     AZ(config->sentinels.thread);
     AZ(config->sentinels.active);
 
-    // Try to start new thread and launch initial discovery.
+    // Try to start new thread and launch initial proactive discovery.
     struct state *state = new_state(
             config,
             config->sentinels.period,
@@ -130,11 +127,10 @@ unsafe_sentinel_discovery(vcl_state_t *config)
     // Assertions.
     Lck_AssertHeld(&config->mutex);
     AN(config->sentinels.locations);
-    assert(config->sentinels.period > 0);
     AN(config->sentinels.thread);
     AN(config->sentinels.active);
 
-    // Request Sentinel discovery.
+    // Request proactive discovery.
     config->sentinels.discovery = 1;
 }
 
@@ -144,7 +140,6 @@ unsafe_sentinel_stop(vcl_state_t *config)
     // Assertions.
     Lck_AssertHeld(&config->mutex);
     AN(config->sentinels.locations);
-    assert(config->sentinels.period > 0);
     AN(config->sentinels.thread);
     AN(config->sentinels.active);
 
@@ -157,6 +152,45 @@ unsafe_sentinel_stop(vcl_state_t *config)
 /******************************************************************************
  * THREAD LOOP.
  *****************************************************************************/
+
+static void
+connectCallback(const redisAsyncContext *context, int status)
+{
+    if (status != REDIS_OK) {
+        struct sentinel *sentinel;
+        CAST_OBJ_NOTNULL(sentinel, context->data, SENTINEL_MAGIC);
+
+        sentinel->context = NULL;
+
+        REDIS_LOG_ERROR(NULL,
+            "Failed to establish Sentinel connection (status=%d, sentinel=%s:%d)",
+            status, sentinel->host, sentinel->port);
+    }
+}
+
+static void
+disconnectCallback(const redisAsyncContext *context, int status)
+{
+    struct sentinel *sentinel;
+    CAST_OBJ_NOTNULL(sentinel, context->data, SENTINEL_MAGIC);
+
+    sentinel->context = NULL;
+
+    if (status != REDIS_OK) {
+        REDIS_LOG_ERROR(NULL,
+            "Sentinel connection lost (status=%d, sentinel=%s:%d)",
+            status, sentinel->host, sentinel->port);
+    }
+}
+
+static void
+subscribeCallback(redisAsyncContext *conext, void *reply, void *s)
+{
+    struct sentinel *sentinel;
+    CAST_OBJ_NOTNULL(sentinel, s, SENTINEL_MAGIC);
+
+    parse_sentinel_notification(sentinel, reply);
+}
 
 static void*
 sentinel_loop(void *object)
@@ -180,9 +214,6 @@ sentinel_loop(void *object)
         CHECK_OBJ_NOTNULL(state, STATE_MAGIC);
         CHECK_OBJ_NOTNULL(state->config, VCL_STATE_MAGIC);
 
-        // Initializations.
-        time_t now = time(NULL);
-
         // Terminate the thread loop?
         Lck_Lock(&state->config->mutex);
         if (!state->config->sentinels.active) {
@@ -190,39 +221,70 @@ sentinel_loop(void *object)
             break;
         }
 
+        // Initializations.
+        time_t now = time(NULL);
+
         // Is time to execute a new discovery?
-        // XXX: simple polling-based implementation using information provided
-        // by the last contacted Sentinel server. To be explored a better
-        // implementation based on pub/sub.
         if ((state->config->sentinels.discovery) ||
-            (state->next_discovery <= now)) {
-            // The config->mutex lock is not needed while querying Sentinels.
+            ((state->period > 0) && (state->next_discovery <= now))) {
             Lck_Unlock(&state->config->mutex);
-
-            // Query all Sentinels in order to update the internal state
-            // of the thread.
-            update_state(state);
-
-            // Terminate the thread loop?
+            discover_servers(state);
             Lck_Lock(&state->config->mutex);
-            if (!state->config->sentinels.active) {
-                Lck_Unlock(&state->config->mutex);
-                break;
-            }
-
-            // Update databases.
-            // XXX: this is a lot of work to be done on every discovery with
-            // config->mutex locked. Not sure how terrible this would be in
-            // a realistic setup.
-            state->config->sentinels.discovery = 0;
-            state->next_discovery = now + unsafe_update_dbs(state, now);
-            Lck_Unlock(&state->config->mutex);
-        } else {
-            Lck_Unlock(&state->config->mutex);
+            state->next_discovery = now + state->period;
         }
 
+        // Terminate the thread loop?
+        if (!state->config->sentinels.active) {
+            Lck_Unlock(&state->config->mutex);
+            break;
+        }
+        Lck_Unlock(&state->config->mutex);
+
+        // Check Pub/Sub connections.
+        struct sentinel *isentinel;
+        VTAILQ_FOREACH(isentinel, &state->sentinels, list) {
+            CHECK_OBJ_NOTNULL(isentinel, SENTINEL_MAGIC);
+            if (isentinel->context == NULL) {
+                isentinel->context = redisAsyncConnect(isentinel->host, isentinel->port);
+                if ((isentinel->context != NULL ) && (!isentinel->context->err)) {
+                    isentinel->context->data = isentinel;
+                    redisLibevAttach(EV_DEFAULT_ isentinel->context);
+                    redisAsyncSetConnectCallback(isentinel->context, connectCallback);
+                    redisAsyncSetDisconnectCallback(isentinel->context, disconnectCallback);
+                    redisAsyncCommand(isentinel->context, subscribeCallback, isentinel, SUBSCRIPTION_COMMAND);
+                } else {
+                    if (isentinel->context != NULL) {
+                        redisAsyncFree(isentinel->context);
+                        isentinel->context = NULL;
+                        REDIS_LOG_ERROR(NULL,
+                            "Failed to establish Sentinel connection (error=%d, sentinel=%s:%d): %s",
+                            isentinel->context->err, isentinel->host,
+                            isentinel->port, isentinel->context->errstr);
+                    } else {
+                        REDIS_LOG_ERROR(NULL,
+                            "Failed to establish Sentinel connection (sentinel=%s:%d)",
+                            isentinel->host, isentinel->port);
+                    }
+                }
+            }
+        }
+
+        // Look for pending Pub/Sub events, handle those events, update servers
+        // and continue execution.
+        ev_loop(EV_DEFAULT_ EVRUN_NOWAIT);
+
+        // Only update database objects if a proactive discovery has been
+        // explicitly requested or if some change was found during this check.
+        Lck_Lock(&state->config->mutex);
+        if ((state->config->sentinels.discovery) ||
+            (state->last_change >= now)) {
+            unsafe_update_dbs(state);
+            state->config->sentinels.discovery = 0;
+        }
+        Lck_Unlock(&state->config->mutex);
+
         // Wait for the next check.
-        usleep(1000);
+        usleep(1000000);
     }
 
     // Log event.
@@ -243,17 +305,22 @@ sentinel_loop(void *object)
  *****************************************************************************/
 
 static struct server *
-new_server(struct sentinel *sentinel, const char *host, unsigned port, unsigned flags)
+new_server(
+    struct sentinel *sentinel, const char *host, unsigned port,
+    enum REDIS_SERVER_ROLE role, unsigned down)
 {
     struct server *result;
     ALLOC_OBJ(result, SERVER_MAGIC);
     AN(result);
 
-    result->sentinel = sentinel;
     result->host = strdup(host);
     AN(result->host);
     result->port = port;
-    result->flags = flags;
+
+    result->role = role;
+    result->down = down;
+
+    result->sentinel = sentinel;
 
     return result;
 }
@@ -261,17 +328,20 @@ new_server(struct sentinel *sentinel, const char *host, unsigned port, unsigned 
 static void
 free_server(struct server *server)
 {
-    server->sentinel = NULL;
     free((void *) server->host);
     server->host = NULL;
     server->port = 0;
-    server->flags = 0;
+
+    server->role = REDIS_SERVER_TBD_ROLE;
+    server->down = 0;
+
+    server->sentinel = NULL;
 
     FREE_OBJ(server);
 }
 
 static struct sentinel *
-new_sentinel(const char *host, unsigned host_len, unsigned port)
+new_sentinel(struct state *state, const char *host, unsigned host_len, unsigned port)
 {
     struct sentinel *result;
     ALLOC_OBJ(result, SENTINEL_MAGIC);
@@ -280,6 +350,10 @@ new_sentinel(const char *host, unsigned host_len, unsigned port)
     result->host = strndup(host, host_len);
     AN(result->host);
     result->port = port;
+
+    result->context = NULL;
+
+    result->state = state;
 
     return result;
 }
@@ -290,6 +364,13 @@ free_sentinel(struct sentinel *sentinel)
     free((void *) sentinel->host);
     sentinel->host = NULL;
     sentinel->port = 0;
+
+    if (sentinel->context != NULL) {
+        redisAsyncFree(sentinel->context);
+        sentinel->context = NULL;
+    }
+
+    sentinel->state = NULL;
 
     FREE_OBJ(sentinel);
 }
@@ -304,11 +385,15 @@ new_state(
     AN(result);
 
     result->config = config;
+
     VTAILQ_INIT(&result->sentinels);
     result->period = period;
     result->connection_timeout = connection_timeout;
     result->command_timeout = command_timeout;
+
+    result->last_change = 0;
     result->next_discovery = 0;
+
     VTAILQ_INIT(&result->servers);
 
     return result;
@@ -330,6 +415,7 @@ free_state(struct state *state)
     state->connection_timeout = (struct timeval){ 0 };
     state->command_timeout = (struct timeval){ 0 };
 
+    state->last_change = 0;
     state->next_discovery = 0;
 
     struct server *iserver;
@@ -378,7 +464,7 @@ unsafe_set_locations(struct state *state, const char *locations)
         }
 
         // Store parsed Sentinel.
-        struct sentinel *sentinel = new_sentinel(host, host_len, port);
+        struct sentinel *sentinel = new_sentinel(state, host, host_len, port);
         VTAILQ_INSERT_TAIL(&state->sentinels, sentinel, list);
 
         // More items?
@@ -406,14 +492,14 @@ unsafe_set_locations(struct state *state, const char *locations)
 
 static void
 store_sentinel_reply(
-    struct state *state, struct sentinel *sentinel,
-    const char *host, unsigned port, unsigned flags)
+    struct sentinel *sentinel, const char *host, unsigned port,
+    enum REDIS_SERVER_ROLE role, unsigned down)
 {
     // Initializations.
     struct server *server = NULL;
 
     // Search for server matching host & port.
-    VTAILQ_FOREACH(server, &state->servers, list) {
+    VTAILQ_FOREACH(server, &sentinel->state->servers, list) {
         CHECK_OBJ_NOTNULL(server, SERVER_MAGIC);
         if ((server->port == port) &&
             (strcmp(server->host, host) == 0)) {
@@ -423,16 +509,145 @@ store_sentinel_reply(
 
     // Register / update server.
     if (server == NULL) {
-        server = new_server(sentinel, host, port, flags);
-        VTAILQ_INSERT_TAIL(&state->servers, server, list);
-    } else {
+        server = new_server(sentinel, host, port, role, down);
+        VTAILQ_INSERT_TAIL(&sentinel->state->servers, server, list);
+        sentinel->state->last_change = time(NULL);
+    } else if ((server->role != role) || (server->down != down)) {
         server->sentinel = sentinel;
-        server->flags = flags;
+        server->role = role;
+        server->down = down;
+        sentinel->state->last_change = time(NULL);
     }
 }
 
 static void
-parse_sentinel_reply(
+parse_sentinel_notification(struct sentinel *sentinel, redisReply *reply)
+{
+    // Check reply format.
+    if ((reply != NULL) &&
+        (reply->type == REDIS_REPLY_ARRAY) &&
+        (reply->elements == 4) &&
+        (reply->element[0]->type == REDIS_REPLY_STRING) &&
+        (strcmp(reply->element[0]->str, "pmessage") == 0) &&
+        (reply->element[2]->type == REDIS_REPLY_STRING) &&
+        (reply->element[3]->type == REDIS_REPLY_STRING)) {
+        // Initializations.
+        char *ctx, *ptr;
+        const char *event = reply->element[2]->str;
+        char *payload = strdup(reply->element[3]->str);
+        AN(payload);
+
+        // +sdown <instance type> <master name> <IP> <port> ...
+        // -sdown <instance type> <master name> <IP> <port> ...
+        // +odown <instance type> <master name> <IP> <port> ...
+        // -odown <instance type> <master name> <IP> <port> ...
+        if ((strcmp(event, "+sdown") == 0) ||
+            (strcmp(event, "-sdown") == 0) ||
+            (strcmp(event, "+odown") == 0) ||
+            (strcmp(event, "-odown") == 0)) {
+            // Extract <instance type>.
+            enum REDIS_SERVER_ROLE role;
+            ptr = strtok_r(payload, " ", &ctx);
+            if (ptr != NULL) {
+                if (strcmp(ptr, "master") == 0) {
+                    role = REDIS_SERVER_MASTER_ROLE;
+                } else if (strcmp(ptr, "slave") == 0) {
+                    role = REDIS_SERVER_SLAVE_ROLE;
+                } else {
+                    goto stop;
+                }
+            } else {
+                goto stop;
+            }
+
+            // Extract <master name>.
+            ptr = strtok_r(NULL, " ", &ctx);
+            if (ptr == NULL) {
+                goto stop;
+            }
+
+            // Extract <IP>.
+            ptr = strtok_r(NULL, " ", &ctx);
+            const char *ip;
+            if (ptr != NULL) {
+                ip = ptr;
+            } else {
+                goto stop;
+            }
+
+            // Extract <port>.
+            ptr = strtok_r(NULL, " ", &ctx);
+            unsigned port;
+            if (ptr != NULL) {
+                port = atoi(ptr);
+            } else {
+                goto stop;
+            }
+
+            // Register / update server.
+            store_sentinel_reply(sentinel, ip, port, role, event[0] == '+');
+
+        // +switch-master <master name> <old IP> <old port> <new IP> <new port> ...
+        } else if (strcmp(event, "+switch-master") == 0) {
+            // Extract <master name>.
+            ptr = strtok_r(payload, " ", &ctx);
+            if (ptr == NULL) {
+                goto stop;
+            }
+
+            // Extract <old IP>.
+            ptr = strtok_r(NULL, " ", &ctx);
+            const char *old_ip;
+            if (ptr != NULL) {
+                old_ip = ptr;
+            } else {
+                goto stop;
+            }
+
+            // Extract <old port>.
+            ptr = strtok_r(NULL, " ", &ctx);
+            unsigned old_port;
+            if (ptr != NULL) {
+                old_port = atoi(ptr);
+            } else {
+                goto stop;
+            }
+
+            // Extract <new IP>.
+            ptr = strtok_r(NULL, " ", &ctx);
+            const char *new_ip;
+            if (ptr != NULL) {
+                new_ip = ptr;
+            } else {
+                goto stop;
+            }
+
+            // Extract <new port>.
+            ptr = strtok_r(NULL, " ", &ctx);
+            unsigned new_port;
+            if (ptr != NULL) {
+                new_port = atoi(ptr);
+            } else {
+                goto stop;
+            }
+
+            // Register / update server.
+            store_sentinel_reply(
+                sentinel, old_ip, old_port,
+                REDIS_SERVER_SLAVE_ROLE, 1);
+            store_sentinel_reply(
+                sentinel, new_ip, new_port,
+                REDIS_SERVER_MASTER_ROLE, 0);
+        }
+stop:
+
+        // Release payload.
+        free(payload);
+    }
+}
+
+static void
+parse_sentinel_discovery(
     struct state *state, struct sentinel *sentinel,
     redisReply *reply, const char ***master_names)
 {
@@ -459,7 +674,8 @@ parse_sentinel_reply(
                 const char *master_name = NULL;
                 const char *host = NULL;
                 unsigned port = 0;
-                unsigned flags = 0;
+                enum REDIS_SERVER_ROLE role = REDIS_SERVER_TBD_ROLE;
+                unsigned down = 0;
 
                 // Look for relevant properties.
                 for (int j = 0; j + 1 < reply->element[i]->elements; j += 2) {
@@ -474,23 +690,15 @@ parse_sentinel_reply(
                         } else if (strcmp(name, "port") == 0) {
                             port = atoi(value);
                         } else if (strcmp(name, "flags") == 0) {
-                            if (strstr(value, MASTER_FLAG_NAME) != NULL) {
-                                flags = flags | MASTER_FLAG_MASK;
+                            if (strstr(value, "master") != NULL) {
+                                role = REDIS_SERVER_MASTER_ROLE;
                             }
-                            if (strstr(value, SLAVE_FLAG_NAME) != NULL) {
-                                flags = flags | SLAVE_FLAG_MASK;
+                            if (strstr(value, "slave") != NULL) {
+                                role = REDIS_SERVER_SLAVE_ROLE;
                             }
-                            if (strstr(value, S_DOWN_FLAG_NAME) != NULL) {
-                                flags = flags | S_DOWN_FLAG_MASK;
-                            }
-                            if (strstr(value, O_DOWN_FLAG_NAME) != NULL) {
-                                flags = flags | O_DOWN_FLAG_MASK;
-                            }
-                            if (strstr(value, FAILOVER_IN_PROGRESS_FLAG_NAME) != NULL) {
-                                flags = flags | FAILOVER_IN_PROGRESS_FLAG_MASK;
-                            }
-                            if (strstr(value, RECONF_INPROG_FLAG_NAME) != NULL) {
-                                flags = flags | RECONF_INPROG_FLAG_MASK;
+                            if ((strstr(value, "s_down") != NULL) ||
+                                (strstr(value, "o_down") != NULL)) {
+                                down = 1;
                             }
                         }
                     }
@@ -506,8 +714,8 @@ parse_sentinel_reply(
                 // been found.
                 if ((host != NULL) &&
                     (port > 0) &&
-                    (flags & (MASTER_FLAG_MASK | SLAVE_FLAG_MASK))) {
-                    store_sentinel_reply(state, sentinel, host, port, flags);
+                    (role != REDIS_SERVER_TBD_ROLE)) {
+                    store_sentinel_reply(sentinel, host, port, role, down);
                 }
             }
         }
@@ -515,7 +723,7 @@ parse_sentinel_reply(
 }
 
 static void
-update_state(struct state *state)
+discover_servers(struct state *state)
 {
     // Query all registered Sentinels.
     struct sentinel *isentinel;
@@ -536,10 +744,9 @@ update_state(struct state *state)
                 isentinel->host,
                 isentinel->port);
         }
-        AN(rcontext);
 
         // Check context.
-        if (!rcontext->err) {
+        if ((rcontext != NULL) && (!rcontext->err)) {
             // Set command execution timeout.
             int tr = redisSetTimeout(rcontext, state->command_timeout);
             if (tr != REDIS_OK) {
@@ -553,7 +760,7 @@ update_state(struct state *state)
             const char **master_names = NULL;
             redisReply *reply1 = redisCommand(rcontext, "SENTINEL masters");
             if (reply1 != NULL) {
-                parse_sentinel_reply(state, isentinel, reply1, &master_names);
+                parse_sentinel_discovery(state, isentinel, reply1, &master_names);
 
                 // Send 'SENTINEL slaves <master name>' command for each
                 // discovered master name in order to get the list of
@@ -563,7 +770,7 @@ update_state(struct state *state)
                         if (!rcontext->err) {
                             redisReply *reply2 = redisCommand(rcontext, "SENTINEL slaves %s", master_names[i]);
                             if (reply2 != NULL) {
-                                parse_sentinel_reply(state, isentinel, reply2, NULL);
+                                parse_sentinel_discovery(state, isentinel, reply2, NULL);
                                 freeReplyObject(reply2);
                             } else {
                                 REDIS_LOG_ERROR(NULL,
@@ -588,26 +795,31 @@ update_state(struct state *state)
                     isentinel->host, isentinel->port);
             }
         } else {
-            REDIS_LOG_ERROR(NULL,
-                "Failed to establish Sentinel connection (error=%d, sentinel=%s:%d): %s",
-                rcontext->err, isentinel->host,
-                isentinel->port, rcontext->errstr);
+            if (rcontext != NULL) {
+                REDIS_LOG_ERROR(NULL,
+                    "Failed to establish Sentinel connection (error=%d, sentinel=%s:%d): %s",
+                    rcontext->err, isentinel->host,
+                    isentinel->port, rcontext->errstr);
+            } else {
+                REDIS_LOG_ERROR(NULL,
+                    "Failed to establish Sentinel connection (sentinel=%s:%d)",
+                    isentinel->host, isentinel->port);
+            }
         }
 
         // Release context.
-        redisFree(rcontext);
+        if (rcontext != NULL) {
+            redisFree(rcontext);
+        }
     }
 }
 
-static unsigned
-unsafe_update_dbs_aux(struct state *state, redis_server_t *server, time_t now)
+static void
+unsafe_update_dbs_aux(struct state *state, redis_server_t *server)
 {
     // Assertions.
     Lck_AssertHeld(&state->config->mutex);
     Lck_AssertHeld(&server->db->mutex);
-
-    // Initializations.
-    unsigned result = state->period;
 
     // Look for a discovered server matching this one.
     struct server *is;
@@ -616,19 +828,12 @@ unsafe_update_dbs_aux(struct state *state, redis_server_t *server, time_t now)
         if ((server->location.parsed.address.port == is->port) &&
             (strcmp(server->location.parsed.address.host, is->host) == 0)) {
             // Change role?
-            enum REDIS_SERVER_ROLE role;
-            if (is->flags & MASTER_FLAG_MASK) {
-                role = REDIS_SERVER_MASTER_ROLE;
-            } else {
-                AN(is->flags & SLAVE_FLAG_MASK);
-                role = REDIS_SERVER_SLAVE_ROLE;
-            }
-            if (server->role != role) {
+            if (server->role != is->role) {
                 VTAILQ_REMOVE(
                     &server->db->servers[server->weight][server->role],
                     server,
                     list);
-                server->role = role;
+                server->role = is->role;
                 VTAILQ_INSERT_TAIL(
                     &server->db->servers[server->weight][server->role],
                     server,
@@ -637,20 +842,13 @@ unsafe_update_dbs_aux(struct state *state, redis_server_t *server, time_t now)
                     "Server role updated (db=%s, server=%s, sentinel=%s:%d, role=%d)",
                     server->db->name, server->location.raw,
                     is->sentinel->host, is->sentinel->port,
-                    role);
+                    is->role);
             }
 
             // Change sickness flag?
-            //   - The ODOWN condition only applies to masters. For other kind
-            //   of instances Sentinel doesn't require to act, so the ODOWN
-            //   state is never reached for slaves and other sentinels, but only
-            //   SDOWN is.
-            //   - However SDOWN has also semantic implications. For example a
-            //   slave in SDOWN state is not selected to be promoted by a
-            //   Sentinel performing a failover.
-            unsigned sick = is->flags & S_DOWN_FLAG_MASK;
+            unsigned now = time(NULL);
             if (server->sickness.exp <= now) {
-                if (sick) {
+                if (is->down) {
                     server->sickness.exp = UINT_MAX;
                     REDIS_LOG_INFO(NULL,
                         "Server sickness tag set (db=%s, server=%s, sentinel=%s:%d)",
@@ -658,7 +856,7 @@ unsafe_update_dbs_aux(struct state *state, redis_server_t *server, time_t now)
                         is->sentinel->host, is->sentinel->port);
                 }
             } else {
-                if (!sick) {
+                if (!is->down) {
                     server->sickness.exp = now;
                     REDIS_LOG_INFO(NULL,
                         "Server sickness tag cleared (db=%s, server=%s, sentinel=%s:%d)",
@@ -667,33 +865,17 @@ unsafe_update_dbs_aux(struct state *state, redis_server_t *server, time_t now)
                 }
             }
 
-            // Schedule next discovery?
-            if (is->flags &
-                (FAILOVER_IN_PROGRESS_FLAG_MASK | RECONF_INPROG_FLAG_MASK)) {
-                REDIS_LOG_INFO(NULL,
-                    "Early Sentinel discovery scheduled (db=%s, server=%s, sentinel=%s:%d)",
-                    server->db->name, server->location.raw,
-                    is->sentinel->host, is->sentinel->port);
-                return 1;
-            }
-
             // Found!
             break;
         }
     }
-
-    // Done!
-    return result;
 }
 
-static unsigned
-unsafe_update_dbs(struct state *state, time_t now)
+static void
+unsafe_update_dbs(struct state *state)
 {
     // Assertions.
     Lck_AssertHeld(&state->config->mutex);
-
-    // Initializations.
-    unsigned result = state->period;
 
     // Look for servers matching servers previously discovered by Sentinel.
     database_t *idb;
@@ -707,10 +889,7 @@ unsafe_update_dbs(struct state *state, time_t now)
                     VTAILQ_FOREACH_SAFE(iserver, &(idb->db->servers[iweight][irole]), list, iserver_tmp) {
                         CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
                         if (iserver->location.type == REDIS_SERVER_LOCATION_HOST_TYPE) {
-                            unsigned period = unsafe_update_dbs_aux(state, iserver, now);
-                            if (period < result) {
-                                result = period;
-                            }
+                            unsafe_update_dbs_aux(state, iserver);
                         }
                     }
                 }
@@ -718,7 +897,4 @@ unsafe_update_dbs(struct state *state, time_t now)
             Lck_Unlock(&idb->db->mutex);
         }
     }
-
-    // Done!
-    return result;
 }
