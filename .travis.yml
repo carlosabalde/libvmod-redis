@@ -2,7 +2,7 @@ language: c
 
 before_install:
   - sudo apt-get update -q
-  - sudo apt-get install -qq apt-transport-https python-docutils rubygems
+  - sudo apt-get install -qq apt-transport-https libev-dev python-docutils rubygems
   - git clone https://github.com/varnishcache/varnish-cache.git ./varnish
   - cd varnish
   - ./autogen.sh
