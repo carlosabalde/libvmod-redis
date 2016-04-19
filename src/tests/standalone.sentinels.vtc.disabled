@@ -1,4 +1,4 @@
-varnishtest "Test Sentinels."
+varnishtest "Tests Sentinels."
 
 server s1 {
    rxreq
@@ -21,7 +21,7 @@ varnish v1 -vcl+backend {
                 ${redis_sentinel2_ip}:${redis_sentinel2_port},
                 ${redis_sentinel3_ip}:${redis_sentinel3_port}
             "},
-            period=2,
+            period=3,
             connection_timeout=500,
             command_timeout=0);
 
@@ -45,7 +45,7 @@ varnish v1 -vcl+backend {
         # Simulate unreachable master.
         db.command("DEBUG");
         db.push("sleep");
-        db.push("10");
+        db.push("20");
         db.execute(true);
 
         # Stats.
@@ -60,7 +60,7 @@ client c1 {
     rxresp
 } -run
 
-delay 10
+delay 20
 
 # XXX: not really an useful test at the moment.
 

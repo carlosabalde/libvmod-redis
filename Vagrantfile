@@ -10,7 +10,7 @@ $script = <<SCRIPT
   apt-get update -q
   apt-get install -qq unzip apt-transport-https \
     autotools-dev automake libtool python-docutils pkg-config libpcre3-dev \
-    libeditline-dev libedit-dev make dpkg-dev
+    libeditline-dev libedit-dev libev-dev make dpkg-dev
   gem install redis
 
   # Varnish Cache.

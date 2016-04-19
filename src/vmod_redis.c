@@ -353,8 +353,7 @@ vmod_sentinels(
     if (VTAILQ_EMPTY(&config->dbs)) {
         // Do not continue if Sentinels have already been set.
         if (config->sentinels.locations == NULL) {
-            if ((period > 0) &&
-                (connection_timeout >= 0) &&
+            if ((connection_timeout >= 0) &&
                 (command_timeout >= 0)) {
                 // Store settings.
                 const char *value = NULL;

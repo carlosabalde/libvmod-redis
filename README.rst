@@ -224,6 +224,7 @@ The source tree is based on autotools to configure the building, and does also h
 Dependencies:
 
 * `hiredis <https://github.com/redis/hiredis>`_ - minimalistic C Redis client library.
+* `libev <http://software.schmorp.de/pkg/libev.html>`_ - full-featured and high-performance event loop.
 
 COPYRIGHT
 =========

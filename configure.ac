@@ -73,9 +73,18 @@ AC_PATH_PROG([VARNISHTEST], [varnishtest], [],
 AC_PATH_PROG([VARNISHD], [varnishd], [],
     [$LIBVARNISHAPI_SBINDIR:$LIBVARNISHAPI_BINDIR:$PATH])
 
+# Check for libhiredis.
 AC_CHECK_LIB(
     hiredis, redisCommand, [],
     [AC_MSG_ERROR([libvmod-redis requires libhiredis.])])
+
+# Check for libev3 (ev_loop) / libev4 (ev_run).
+# -DEV_COMPAT3=1 used during build.
+AC_CHECK_LIB(
+    ev, ev_loop, [],
+    [AC_CHECK_LIB(
+        ev, ev_run, [],
+        [AC_MSG_ERROR([libvmod-redis requires libev.])])])
 
 AC_CONFIG_FILES([
 	Makefile
