@@ -1,4 +1,4 @@
-AM_CPPFLAGS = @VMOD_INCLUDES@ -Wall -Wno-typedef-redefinition -Werror -D_GNU_SOURCE=1 -DEV_COMPAT3=1
+AM_CPPFLAGS = @VMOD_INCLUDES@ -Wall -D_GNU_SOURCE=1 -DEV_COMPAT3=1
 
 vmoddir = @VMOD_DIR@
 vmod_LTLIBRARIES = libvmod_redis.la
