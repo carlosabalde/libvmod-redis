@@ -25,7 +25,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
             connection_ttl=0,
             command_timeout=0,
             max_command_retries=0,
-            shared_connections=0,
+            shared_connections=false,
             max_connections=1,
             password="",
             sickness_ttl=0,
@@ -38,7 +38,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
             connection_ttl=0,
             command_timeout=0,
             max_command_retries=0,
-            shared_connections=0,
+            shared_connections=false,
             max_connections=1,
             password="",
             sickness_ttl=0,
@@ -50,32 +50,32 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         master1.command("SET");
         master1.push("foo");
         master1.push("Hello world!");
-        master1.execute(1);
+        master1.execute(true);
 
         master1.command("GET");
         master1.push("foo");
-        master1.execute(1);
+        master1.execute(true);
         set resp.http.Reply-1 = master1.get_reply();
 
         master2.command("GET");
         master2.push("foo");
-        master2.execute(1);
+        master2.execute(true);
         set resp.http.Reply-2 = master2.get_reply();
 
         # SET (master2) -> GET (master2) -> GET (master1).
         master2.command("SET");
         master2.push("bar");
         master2.push("Hello world!");
-        master2.execute(1);
+        master2.execute(true);
 
         master2.command("GET");
         master2.push("bar");
-        master2.execute(1);
+        master2.execute(true);
         set resp.http.Reply-3 = master2.get_reply();
 
         master1.command("GET");
         master1.push("bar");
-        master1.execute(1);
+        master1.execute(true);
         set resp.http.Reply-4 = master1.get_reply();
 
         # Stats.

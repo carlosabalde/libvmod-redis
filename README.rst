@@ -105,7 +105,7 @@ Single server
         new db = redis.db(
             location="192.168.1.100:6379",
             connection_timeout=500,
-            shared_connections=0,
+            shared_connections=false,
             max_connections=1);
     }
 
@@ -159,7 +159,7 @@ Multiple servers
             location="192.168.1.100:6379",
             type=master,
             connection_timeout=500,
-            shared_connections=0,
+            shared_connections=false,
             max_connections=2);
         db.add_server("192.168.1.101:6379", slave);
         db.add_server("192.168.1.102:6379", slave);
@@ -176,7 +176,7 @@ Multiple servers
         # GET submitted to one of the slave servers.
         db.command("GET");
         db.push("foo");
-        db.execute(0);
+        db.execute(false);
         set req.http.X-Foo = db.get_string_reply();
     }
 
@@ -194,7 +194,7 @@ Clustered setup
             location="192.168.1.100:6379",
             type=cluster,
             connection_timeout=500,
-            shared_connections=1,
+            shared_connections=true,
             max_connections=128,
             max_cluster_hops=16);
         cluster.add_server("192.168.1.101:6379", cluster);
@@ -210,7 +210,7 @@ Clustered setup
         # GET internally routed to the destination server.
         db.command("GET");
         db.push("foo");
-        db.execute(0);
+        db.execute(false);
         set req.http.X-Foo = db.get_string_reply();
     }
 

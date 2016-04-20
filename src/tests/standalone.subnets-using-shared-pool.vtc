@@ -28,7 +28,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
             connection_ttl=0,
             command_timeout=0,
             max_command_retries=0,
-            shared_connections=1,
+            shared_connections=true,
             max_connections=1,
             password="",
             sickness_ttl=0,
@@ -40,7 +40,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     sub vcl_deliver {
         # INFO (master).
         db.command("INFO");
-        db.execute(1);
+        db.execute(true);
         if (db.reply_is_string()) {
             set resp.http.Reply-1 = regsub(
                 db.get_string_reply(),
@@ -52,7 +52,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
 
         # INFO (slave).
         db.command("INFO");
-        db.execute(0);
+        db.execute(false);
         if (db.reply_is_string()) {
             set resp.http.Reply-3 = regsub(
                 db.get_string_reply(),

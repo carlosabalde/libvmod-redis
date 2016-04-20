@@ -229,7 +229,7 @@ Description
     subnet masks provided when calling ``redis.subnets()``.
 
     WARNING: allowing execution of commands in slave servers (i.e. ``master ==
-    0``) must be carefully used:
+    false``) must be carefully used:
 
     - When Redis Cluster support is disabled, sending a read-write command to
       a read-only slave server will result in an error reply.
