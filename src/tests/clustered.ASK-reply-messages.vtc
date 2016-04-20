@@ -25,7 +25,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
             connection_ttl=0,
             command_timeout=0,
             max_command_retries=0,
-            shared_connections=true,
+            shared_connections=1,
             max_connections=32,
             password="",
             sickness_ttl=0,
@@ -40,7 +40,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
             connection_ttl=0,
             command_timeout=0,
             max_command_retries=0,
-            shared_connections=false,
+            shared_connections=0,
             max_connections=1,
             password="",
             sickness_ttl=0,
@@ -52,7 +52,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
             connection_ttl=0,
             command_timeout=0,
             max_command_retries=0,
-            shared_connections=false,
+            shared_connections=0,
             max_connections=1,
             password="",
             sickness_ttl=0,
@@ -64,7 +64,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.command("SET");
         db.push("${redis_key_in_master1}");
         db.push("hello");
-        db.execute(true);
+        db.execute(1);
         if (db.reply_is_status()) {
             set resp.http.Reply-1 = db.get_status_reply();
         }
@@ -75,7 +75,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         # Get the key (should internally handle the ASK redirection).
         db.command("GET");
         db.push("${redis_key_in_master1}");
-        db.execute(true);
+        db.execute(1);
         if (db.reply_is_string()) {
             set resp.http.Reply-2 = db.get_string_reply();
         }
@@ -95,7 +95,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         master1.command("CLUSTER");
         master1.push("KEYSLOT");
         master1.push("${redis_key_in_master1}");
-        master1.execute(true);
+        master1.execute(1);
         if (master1.reply_is_integer()) {
             set resp.http.Migration-Slot = master1.get_integer_reply();
         }
@@ -103,7 +103,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         # Get the ID for the original node (master1).
         master1.command("CLUSTER");
         master1.push("NODES");
-        master1.execute(true);
+        master1.execute(1);
         if (master1.reply_is_string()) {
             set resp.http.Migration-NodeOrig = regsub(master1.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master1_ip}:${redis_master1_port} .*$", "\1");
             if (resp.http.Migration-NodeOrig !~ "[0-9a-f]+") {
@@ -114,7 +114,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         # Get the ID for the destination node (master2).
         master1.command("CLUSTER");
         master1.push("NODES");
-        master1.execute(true);
+        master1.execute(1);
         if (master1.reply_is_string()) {
             set resp.http.Migration-NodeDest = regsub(master1.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master2_ip}:${redis_master2_port} .*$", "\1");
             if (resp.http.Migration-NodeDest !~ "[0-9a-f]+") {
@@ -128,7 +128,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         master2.push(resp.http.Migration-Slot);
         master2.push("IMPORTING");
         master2.push(resp.http.Migration-NodeOrig);
-        master2.execute(true);
+        master2.execute(1);
         if (master2.reply_is_status()) {
             set resp.http.Migration-Reply-4 = master2.get_status_reply();
         }
@@ -139,7 +139,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         master1.push(resp.http.Migration-Slot);
         master1.push("MIGRATING");
         master1.push(resp.http.Migration-NodeDest);
-        master1.execute(true);
+        master1.execute(1);
         if (master1.reply_is_status()) {
             set resp.http.Migration-Reply-5 = master1.get_status_reply();
         }
@@ -151,7 +151,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         master1.push("${redis_key_in_master1}");
         master1.push("0");
         master1.push("0");
-        master1.execute(true);
+        master1.execute(1);
         if (master1.reply_is_status()) {
             set resp.http.Migration-Reply-6 = master1.get_status_reply();
         }
@@ -159,7 +159,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         # Check that the original node replies with an ASK redirection.
         master1.command("GET");
         master1.push("${redis_key_in_master1}");
-        master1.execute(true);
+        master1.execute(1);
         if (master1.reply_is_error()) {
             if (master1.get_error_reply() ~ "^ASK ") {
                 set resp.http.Migration-Reply-7 = "ASK";

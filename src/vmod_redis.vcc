@@ -72,7 +72,7 @@ $Object db(PRIV_VCL,
     INT connection_ttl=0,
     INT command_timeout=0,
     INT max_command_retries=0,
-    BOOL shared_connections=true,
+    BOOL shared_connections=1,
     INT max_connections=128,
     STRING password="",
     INT sickness_ttl=60,
@@ -215,7 +215,7 @@ Arguments
 Description
     Provides an argument to a previously enqueued Redis command.
 
-$Method VOID .execute(BOOL master=true)
+$Method VOID .execute(BOOL master=1)
 
 Arguments
     master: when enabled slave servers are not considered for execution.
@@ -229,7 +229,7 @@ Description
     subnet masks provided when calling ``redis.subnets()``.
 
     WARNING: allowing execution of commands in slave servers (i.e. ``master ==
-    false``) must be carefully used:
+    0``) must be carefully used:
 
     - When Redis Cluster support is disabled, sending a read-write command to
       a read-only slave server will result in an error reply.

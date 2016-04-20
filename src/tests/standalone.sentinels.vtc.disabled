@@ -32,7 +32,7 @@ varnish v1 -vcl+backend {
             connection_ttl=0,
             command_timeout=0,
             max_command_retries=0,
-            shared_connections=false,
+            shared_connections=0,
             max_connections=2,
             password="",
             sickness_ttl=0,
@@ -46,7 +46,7 @@ varnish v1 -vcl+backend {
         db.command("DEBUG");
         db.push("sleep");
         db.push("20");
-        db.execute(true);
+        db.execute(1);
 
         # Stats.
         set resp.http.db-stats = db.stats();
