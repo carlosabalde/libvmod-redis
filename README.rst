@@ -44,7 +44,7 @@ import redis;
         INT connection_ttl=0,
         INT command_timeout=0,
         INT max_command_retries=0,
-        BOOL shared_connections=true,
+        BOOL shared_connections=1,
         INT max_connections=128,
         STRING password="",
         INT sickness_ttl=60,
@@ -58,7 +58,7 @@ import redis;
     Method VOID .timeout(INT command_timeout)
     Method VOID .retries(INT max_command_retries)
     Method VOID .push(STRING arg)
-    Method VOID .execute(BOOL master=true)
+    Method VOID .execute(BOOL master=1)
 
     # Access to replies.
     Method BOOL .replied()
@@ -105,9 +105,8 @@ Single server
         new db = redis.db(
             location="192.168.1.100:6379",
             connection_timeout=500,
-            shared_connections=false,
-            max_connections=1,
-            clustered=false);
+            shared_connections=0,
+            max_connections=1);
     }
 
     sub vcl_deliver {
@@ -160,9 +159,8 @@ Multiple servers
             location="192.168.1.100:6379",
             type=master,
             connection_timeout=500,
-            shared_connections=false,
-            max_connections=2
-            clustered=false);
+            shared_connections=0,
+            max_connections=2);
         db.add_server("192.168.1.101:6379", slave);
         db.add_server("192.168.1.102:6379", slave);
         db.add_server("192.168.1.103:6379", slave);
@@ -178,7 +176,7 @@ Multiple servers
         # GET submitted to one of the slave servers.
         db.command("GET");
         db.push("foo");
-        db.execute(false);
+        db.execute(0);
         set req.http.X-Foo = db.get_string_reply();
     }
 
@@ -196,7 +194,7 @@ Clustered setup
             location="192.168.1.100:6379",
             type=cluster,
             connection_timeout=500,
-            shared_connections=true,
+            shared_connections=1,
             max_connections=128,
             max_cluster_hops=16);
         cluster.add_server("192.168.1.101:6379", cluster);
@@ -212,7 +210,7 @@ Clustered setup
         # GET internally routed to the destination server.
         db.command("GET");
         db.push("foo");
-        db.execute(false);
+        db.execute(0);
         set req.http.X-Foo = db.get_string_reply();
     }
 
