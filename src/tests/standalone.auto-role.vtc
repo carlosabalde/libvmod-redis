@@ -25,7 +25,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
             connection_ttl=0,
             command_timeout=0,
             max_command_retries=0,
-            shared_connections=0,
+            shared_connections=false,
             max_connections=2,
             password="",
             sickness_ttl=0,
@@ -36,7 +36,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     sub vcl_deliver {
         # Fetch role (master).
         db.command("ROLE");
-        db.execute(1);
+        db.execute(true);
         if (db.reply_is_array() &&
             db.get_array_reply_length() > 0 &&
             db.array_reply_is_string(0)) {
@@ -45,7 +45,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
 
         # Fetch role (slave).
         db.command("ROLE");
-        db.execute(0);
+        db.execute(false);
         if (db.reply_is_array() &&
             db.get_array_reply_length() > 0 &&
             db.array_reply_is_string(0)) {

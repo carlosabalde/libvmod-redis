@@ -25,7 +25,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
             connection_ttl=0,
             command_timeout=0,
             max_command_retries=0,
-            shared_connections=1,
+            shared_connections=true,
             max_connections=1,
             password="",
             sickness_ttl=0,
@@ -43,7 +43,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
             db.push("foo");
             db.push("hello");
         }
-        db.execute(1);
+        db.execute(true);
         set resp.http.Replied = db.replied();
         set resp.http.Reply = db.get_reply();
 
