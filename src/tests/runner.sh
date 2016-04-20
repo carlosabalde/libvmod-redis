@@ -5,6 +5,7 @@
 ##
 REDIS_STANDALONE_MASTER_SERVERS=2
 REDIS_STANDALONE_SLAVE_SERVERS=2
+REDIS_STANDALONE_SENTINEL_SERVERS=3
 REDIS_STANDALONE_START_PORT=40000
 REDIS_CLUSTER_SERVERS=9
 REDIS_CLUSTER_REPLICAS=2
@@ -25,6 +26,12 @@ cleanup() {
                 kill -9 $(cat "$1/redis-slave${MASTER_INDEX}_$SLAVE_INDEX.pid")
             fi
         done
+    done
+
+    for INDEX in $(seq 1 $REDIS_STANDALONE_SENTINEL_SERVERS); do
+        if [[ -s "$1/redis-sentinel$INDEX.pid" ]]; then
+            kill -9 $(cat "$1/redis-sentinel$INDEX.pid")
+        fi
     done
 
     for INDEX in $(seq 1 $REDIS_CLUSTER_SERVERS); do
@@ -53,7 +60,7 @@ trap "cleanup $TMP" EXIT
 ##
 ## Launch standalone Redis servers?
 ##
-if [[ $2 =~ ^.*standalone\.[^\.]*\.vtc$ ]]; then
+if [[ $2 =~ ^.*standalone\.[^\.]*\.vtc(\.disabled)?$ ]]; then
     if [ -x "$(command -v redis-cli)" ]; then
         SKIP=0
         for MASTER_INDEX in $(seq 1 $REDIS_STANDALONE_MASTER_SERVERS); do
@@ -73,6 +80,7 @@ EOF
                 -Dredis_master${MASTER_INDEX}_ip=$MASTER_IP \
                 -Dredis_master${MASTER_INDEX}_port=$MASTER_PORT \
                 -Dredis_master${MASTER_INDEX}_socket=$TMP/redis-master$MASTER_INDEX.sock"
+
             for SLAVE_INDEX in $(seq 1 $REDIS_STANDALONE_SLAVE_SERVERS); do
                 SLAVE_IP=127.0.$MASTER_INDEX.$SLAVE_INDEX
                 SLAVE_PORT=$((REDIS_STANDALONE_START_PORT+REDIS_STANDALONE_MASTER_SERVERS+(MASTER_INDEX-1)*REDIS_STANDALONE_SLAVE_SERVERS+SLAVE_INDEX))
@@ -92,13 +100,40 @@ EOF
                     -Dredis_slave${MASTER_INDEX}_${SLAVE_INDEX}_port=$SLAVE_PORT \
                     -Dredis_slave${MASTER_INDEX}_${SLAVE_INDEX}_socket=$TMP/redis-slave${MASTER_INDEX}_$SLAVE_INDEX.sock"
             done
+
+            for SENTINEL_INDEX in $(seq 1 $REDIS_STANDALONE_SENTINEL_SERVERS); do
+                cat >> "$TMP/redis-sentinel$SENTINEL_INDEX.conf" <<EOF
+                pidfile $TMP/redis-sentinel$SENTINEL_INDEX.pid
+                sentinel monitor redis-master$MASTER_INDEX $MASTER_IP $MASTER_PORT 1
+                sentinel down-after-milliseconds redis-master$MASTER_INDEX 5000
+                sentinel failover-timeout redis-master$MASTER_INDEX 60000
+                sentinel parallel-syncs redis-master$MASTER_INDEX 1
+EOF
+            done
+        done
+
+        for INDEX in $(seq 1 $REDIS_STANDALONE_SENTINEL_SERVERS); do
+            SENTINEL_IP=127.1.0.$INDEX
+            SENTINEL_PORT=$((REDIS_STANDALONE_START_PORT+1000+INDEX))
+            cat >> "$TMP/redis-sentinel$INDEX.conf" <<EOF
+            daemonize yes
+            dir $TMP
+            bind $SENTINEL_IP
+            port $SENTINEL_PORT
+            pidfile $TMP/redis-sentinel$INDEX.pid
+EOF
+            redis-server "$TMP/redis-sentinel$INDEX.conf" --sentinel
+            CONTEXT="\
+                $CONTEXT \
+                -Dredis_sentinel${INDEX}_ip=$SENTINEL_IP \
+                -Dredis_sentinel${INDEX}_port=$SENTINEL_PORT"
         done
     fi
 
 ##
 ## Launch clustered Redis servers?
 ##
-elif [[ $2 =~ ^.*clustered\.[^\.]*\.vtc$ ]]; then
+elif [[ $2 =~ ^.*clustered\.[^\.]*\.vtc(\.disabled)?$ ]]; then
     if [ -x "$(command -v redis-cli)" -a -x "$(command -v redis-trib.rb)" ]; then
         SKIP=0
         SERVERS=""

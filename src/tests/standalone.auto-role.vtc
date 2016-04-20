@@ -1,9 +1,9 @@
-varnishtest "Tests workers are blocked when using a small shared pool"
+varnishtest "Test 'auto' role"
 
 server s1 {
    rxreq
    txresp
-} -repeat 2 -start
+} -repeat 1 -start
 
 varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
@@ -20,63 +20,57 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
 
         new db = redis.db(
             location="${redis_master1_ip}:${redis_master1_port}",
-            type=master,
+            type=auto,
             connection_timeout=500,
             connection_ttl=0,
             command_timeout=0,
             max_command_retries=0,
-            shared_connections=true,
-            max_connections=1,
+            shared_connections=false,
+            max_connections=2,
             password="",
             sickness_ttl=0,
             max_cluster_hops=0);
+        db.add_server("${redis_slave1_1_ip}:${redis_slave1_1_port}", auto);
     }
 
     sub vcl_deliver {
-        # Slow vs fast command.
-        if (req.http.Slow == "1") {
-            db.command("DEBUG");
-            db.push("sleep");
-            db.push("3");
-        } else {
-            db.command("SET");
-            db.push("foo");
-            db.push("hello");
-        }
+        # Fetch role (master).
+        db.command("ROLE");
         db.execute(true);
-        set resp.http.Replied = db.replied();
-        set resp.http.Reply = db.get_reply();
+        if (db.reply_is_array() &&
+            db.get_array_reply_length() > 0 &&
+            db.array_reply_is_string(0)) {
+            set resp.http.Reply-1 = db.get_array_reply_value(0);
+        }
+
+        # Fetch role (slave).
+        db.command("ROLE");
+        db.execute(false);
+        if (db.reply_is_array() &&
+            db.get_array_reply_length() > 0 &&
+            db.array_reply_is_string(0)) {
+            set resp.http.Reply-2 = db.get_array_reply_value(0);
+        }
 
         # Stats.
         set resp.http.db-stats = db.stats();
         set resp.http.db-servers-total = db.counter("servers.total");
         set resp.http.db-connections-total = db.counter("connections.total");
-        set resp.http.db-workers-blocked = db.counter("workers.blocked");
         set resp.http.db-commands-total = db.counter("commands.total");
     }
 } -start
 
 client c1 {
-    txreq -hdr "Slow: 1"
+    txreq
     rxresp
 
-    expect resp.http.Replied == "true"
-    expect resp.http.Reply == "OK"
-} -start
+    expect resp.http.Reply-1 == "master"
 
-delay 1.0
+    expect resp.http.Reply-2 == "slave"
 
-client c2 {
-    txreq -hdr "Slow: 0"
-    rxresp
-
-    expect resp.http.Replied == "true"
-    expect resp.http.Reply == "OK"
-
-    expect resp.http.db-servers-total == "1"
-    expect resp.http.db-connections-total == "1"
-    expect resp.http.db-workers-blocked == "1"
+    expect resp.http.db-servers-total == "2"
+    expect resp.http.db-connections-total == "2"
     expect resp.http.db-commands-total == "2"
 } -run
 
-varnish v1 -expect client_req == 2
+varnish v1 -expect client_req == 1

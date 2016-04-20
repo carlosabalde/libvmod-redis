@@ -11,7 +11,25 @@
 #include "cache/cache.h"
 
 #include "sha1.h"
+#include "sentinel.h"
 #include "core.h"
+
+#define ROLE_DISCOVERY_COMMAND "ROLE"
+
+static vmod_state_t state = {
+    .mutex = PTHREAD_MUTEX_INITIALIZER,
+    .version = 0,
+    .locks.refs = 0,
+    .locks.config = NULL,
+    .locks.db = NULL,
+    .locks.pool = NULL
+};
+
+vmod_state_t *
+vmod_state()
+{
+    return &state;
+}
 
 struct plan {
     // Ordered list of private contexts, including a reference to the next item
@@ -32,21 +50,22 @@ struct plan {
     } servers;
 };
 
+static enum REDIS_SERVER_ROLE unsafe_discover_redis_server_role(
+    VRT_CTX, redis_server_t *server);
+
 static struct plan *plan_execution(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, unsigned version,
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
     unsigned size, redis_server_t *server, unsigned master, unsigned slot);
 
 static redis_context_t *lock_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    unsigned version, struct plan *plan);
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, struct plan *plan);
 
 static void unlock_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    redis_context_t *context);
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, redis_context_t *context);
 
 static redisReply *get_redis_repy(
-    VRT_CTX, redis_context_t *context,
-    struct timeval timeout, unsigned argc, const char *argv[], unsigned asking);
+    VRT_CTX, redis_context_t *context, struct timeval timeout, unsigned argc,
+    const char *argv[], unsigned asking);
 
 static const char *sha1(VRT_CTX, const char *script);
 
@@ -54,49 +73,55 @@ redis_server_t *
 new_redis_server(
     struct vmod_redis_db *db, const char *location, enum REDIS_SERVER_ROLE role)
 {
-    // Initializations.
-    redis_server_t *result = NULL;
+    redis_server_t *result;
+    ALLOC_OBJ(result, REDIS_SERVER_MAGIC);
+    AN(result);
+
     char *ptr = strrchr(location, ':');
+    if (ptr != NULL) {
+        result->location.type = REDIS_SERVER_LOCATION_HOST_TYPE;
+        result->location.parsed.address.host = strndup(location, ptr - location);
+        AN(result->location.parsed.address.host);
+        result->location.parsed.address.port = atoi(ptr + 1);
+    } else {
+        result->location.type = REDIS_SERVER_LOCATION_SOCKET_TYPE;
+        result->location.parsed.path = strdup(location);
+        AN(result->location.parsed.path);
+    }
 
     // Do not continue if this is a clustered database but the location is not
     // provided using the IP + port format.
-    if ((!db->cluster.enabled) || (ptr != NULL)) {
-        ALLOC_OBJ(result, REDIS_SERVER_MAGIC);
-        AN(result);
-
-        result->db = db;
-
-        result->location.raw = strdup(location);
-        AN(result->location.raw);
-        if (ptr != NULL) {
-            result->location.type = REDIS_SERVER_LOCATION_HOST_TYPE;
-            result->location.parsed.address.host = strndup(location, ptr - location);
-            AN(result->location.parsed.address.host);
-            result->location.parsed.address.port = atoi(ptr + 1);
-        } else {
-            result->location.type = REDIS_SERVER_LOCATION_SOCKET_TYPE;
-            result->location.parsed.path = strdup(location);
-            AN(result->location.parsed.path);
-        }
-
-        result->role = role;
-
-        result->weight = 0;
-
-        AZ(pthread_mutex_init(&result->pool.mutex, NULL));
-        AZ(pthread_cond_init(&result->pool.cond, NULL));
-
-        result->pool.ncontexts = 0;
-        VTAILQ_INIT(&result->pool.free_contexts);
-        VTAILQ_INIT(&result->pool.busy_contexts);
-
-        for (int i = 0; i < NREDIS_CLUSTER_SLOTS; i++) {
-            result->cluster.slots[i] = 0;
-        }
-
-        result->sickness.tst = 0;
-        result->sickness.exp = 0;
+    struct in_addr ia4;
+    if ((db->cluster.enabled) &&
+        ((result->location.type != REDIS_SERVER_LOCATION_HOST_TYPE) ||
+         (inet_pton(AF_INET, result->location.parsed.address.host, &ia4) == 0))) {
+        free((void *) result->location.parsed.address.host);
+        FREE_OBJ(result);
+        return NULL;
     }
+
+    result->db = db;
+
+    result->location.raw = strdup(location);
+    AN(result->location.raw);
+
+    result->role = role;
+
+    result->weight = 0;
+
+    Lck_New(&result->pool.mutex, VMOD(locks.pool));
+    AZ(pthread_cond_init(&result->pool.cond, NULL));
+
+    result->pool.ncontexts = 0;
+    VTAILQ_INIT(&result->pool.free_contexts);
+    VTAILQ_INIT(&result->pool.busy_contexts);
+
+    for (int i = 0; i < NREDIS_CLUSTER_SLOTS; i++) {
+        result->cluster.slots[i] = 0;
+    }
+
+    result->sickness.tst = 0;
+    result->sickness.exp = 0;
 
     // Done!
     return result;
@@ -126,18 +151,20 @@ free_redis_server(redis_server_t *server)
 
     server->weight = 0;
 
-    AZ(pthread_mutex_destroy(&server->pool.mutex));
+    Lck_Delete(&server->pool.mutex);
     AZ(pthread_cond_destroy(&server->pool.cond));
 
     server->pool.ncontexts = 0;
     redis_context_t *icontext;
     while (!VTAILQ_EMPTY(&server->pool.free_contexts)) {
         icontext = VTAILQ_FIRST(&server->pool.free_contexts);
+        CHECK_OBJ_NOTNULL(icontext, REDIS_CONTEXT_MAGIC);
         VTAILQ_REMOVE(&server->pool.free_contexts, icontext, list);
         free_redis_context(icontext);
     }
     while (!VTAILQ_EMPTY(&server->pool.busy_contexts)) {
         icontext = VTAILQ_FIRST(&server->pool.busy_contexts);
+        CHECK_OBJ_NOTNULL(icontext, REDIS_CONTEXT_MAGIC);
         VTAILQ_REMOVE(&server->pool.busy_contexts, icontext, list);
         free_redis_context(icontext);
     }
@@ -154,7 +181,7 @@ free_redis_server(redis_server_t *server)
 
 redis_context_t *
 new_redis_context(
-    redis_server_t *server, redisContext *rcontext, unsigned version, time_t tst)
+    redis_server_t *server, redisContext *rcontext, time_t tst)
 {
     redis_context_t *result;
     ALLOC_OBJ(result, REDIS_CONTEXT_MAGIC);
@@ -162,7 +189,7 @@ new_redis_context(
 
     result->server = server;
     result->rcontext = rcontext;
-    result->version = version;
+    result->version = VMOD(version);
     result->tst = tst;
 
     return result;
@@ -184,16 +211,16 @@ free_redis_context(redis_context_t *context)
 
 struct vmod_redis_db *
 new_vmod_redis_db(
-    vcl_priv_t *config, const char *name, struct timeval connection_timeout,
+    vcl_state_t *config, const char *name, struct timeval connection_timeout,
     unsigned connection_ttl, struct timeval command_timeout, unsigned max_command_retries,
     unsigned shared_connections, unsigned max_connections, const char *password,
     unsigned sickness_ttl, unsigned clustered, unsigned max_cluster_hops)
 {
     struct vmod_redis_db *result;
-    ALLOC_OBJ(result, VMOD_REDIS_DB_MAGIC);
+    ALLOC_OBJ(result, VMOD_REDIS_DATABASE_MAGIC);
     AN(result);
 
-    AZ(pthread_mutex_init(&result->mutex, NULL));
+    Lck_New(&result->mutex, VMOD(locks.db));
 
     result->config = config;
 
@@ -249,15 +276,16 @@ new_vmod_redis_db(
 void
 free_vmod_redis_db(struct vmod_redis_db *db)
 {
-    AZ(pthread_mutex_destroy(&db->mutex));
+    Lck_Delete(&db->mutex);
 
     db->config = NULL;
 
-    redis_server_t *iserver;
     for (unsigned weight = 0; weight < NREDIS_SERVER_WEIGHTS; weight++) {
         for (enum REDIS_SERVER_ROLE role = 0; role < NREDIS_SERVER_ROLES; role++) {
+            redis_server_t *iserver;
             while (!VTAILQ_EMPTY(&db->servers[weight][role])) {
                 iserver = VTAILQ_FIRST(&db->servers[weight][role]);
+                CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
                 VTAILQ_REMOVE(&db->servers[weight][role], iserver, list);
                 free_redis_server(iserver);
             }
@@ -331,6 +359,7 @@ free_thread_state(thread_state_t *state)
     redis_context_t *icontext;
     while (!VTAILQ_EMPTY(&state->contexts)) {
         icontext = VTAILQ_FIRST(&state->contexts);
+        CHECK_OBJ_NOTNULL(icontext, REDIS_CONTEXT_MAGIC);
         VTAILQ_REMOVE(&state->contexts, icontext, list);
         free_redis_context(icontext);
     }
@@ -346,49 +375,70 @@ free_thread_state(thread_state_t *state)
     FREE_OBJ(state);
 }
 
-vcl_priv_t *
-new_vcl_priv()
+vcl_state_t *
+new_vcl_state()
 {
-    vcl_priv_t *result;
-    ALLOC_OBJ(result, VCL_PRIV_MAGIC);
+    vcl_state_t *result;
+    ALLOC_OBJ(result, VCL_STATE_MAGIC);
     AN(result);
 
-    AZ(pthread_mutex_init(&result->mutex, NULL));
+    Lck_New(&result->mutex, VMOD(locks.config));
 
     VTAILQ_INIT(&result->subnets);
 
     VTAILQ_INIT(&result->dbs);
 
+    result->sentinels.locations = NULL;
+    result->sentinels.period = 0;
+    result->sentinels.connection_timeout = (struct timeval){ 0 };
+    result->sentinels.command_timeout = (struct timeval){ 0 };
+    result->sentinels.thread = 0;
+    result->sentinels.active = 0;
+    result->sentinels.discovery = 0;
+
     return result;
 }
 
 void
-free_vcl_priv(vcl_priv_t *priv)
+free_vcl_state(vcl_state_t *priv)
 {
-    AZ(pthread_mutex_destroy(&priv->mutex));
+    Lck_Delete(&priv->mutex);
 
-    vcl_priv_subnet_t *isubnet;
+    subnet_t *isubnet;
     while (!VTAILQ_EMPTY(&priv->subnets)) {
         isubnet = VTAILQ_FIRST(&priv->subnets);
+        CHECK_OBJ_NOTNULL(isubnet, SUBNET_MAGIC);
         VTAILQ_REMOVE(&priv->subnets, isubnet, list);
-        free_vcl_priv_subnet(isubnet);
+        free_subnet(isubnet);
     }
 
-    vcl_priv_db_t *idb;
+    database_t *idb;
     while (!VTAILQ_EMPTY(&priv->dbs)) {
         idb = VTAILQ_FIRST(&priv->dbs);
+        CHECK_OBJ_NOTNULL(idb, DATABASE_MAGIC);
         VTAILQ_REMOVE(&priv->dbs, idb, list);
-        free_vcl_priv_db(idb);
+        free_database(idb);
     }
+
+    if (priv->sentinels.locations != NULL) {
+        free((void *) priv->sentinels.locations);
+        priv->sentinels.locations = NULL;
+    }
+    priv->sentinels.period = 0;
+    priv->sentinels.connection_timeout = (struct timeval){ 0 };
+    priv->sentinels.command_timeout = (struct timeval){ 0 };
+    priv->sentinels.thread = 0;
+    priv->sentinels.active = 0;
+    priv->sentinels.discovery = 0;
 
     FREE_OBJ(priv);
 }
 
-vcl_priv_subnet_t *
-new_vcl_priv_subnet(unsigned weight, struct in_addr ia4, unsigned bits)
+subnet_t *
+new_subnet(unsigned weight, struct in_addr ia4, unsigned bits)
 {
-    vcl_priv_subnet_t *result;
-    ALLOC_OBJ(result, VCL_PRIV_SUBNET_MAGIC);
+    subnet_t *result;
+    ALLOC_OBJ(result, SUBNET_MAGIC);
     AN(result);
 
     result->weight = weight;
@@ -399,7 +449,7 @@ new_vcl_priv_subnet(unsigned weight, struct in_addr ia4, unsigned bits)
 }
 
 void
-free_vcl_priv_subnet(vcl_priv_subnet_t *subnet)
+free_subnet(subnet_t *subnet)
 {
     subnet->weight = 0;
     subnet->mask = (struct in_addr){ 0 };
@@ -408,11 +458,11 @@ free_vcl_priv_subnet(vcl_priv_subnet_t *subnet)
     FREE_OBJ(subnet);
 }
 
-vcl_priv_db_t *
-new_vcl_priv_db(struct vmod_redis_db *db)
+database_t *
+new_database(struct vmod_redis_db *db)
 {
-    vcl_priv_db_t *result;
-    ALLOC_OBJ(result, VCL_PRIV_DB_MAGIC);
+    database_t *result;
+    ALLOC_OBJ(result, DATABASE_MAGIC);
     AN(result);
 
     result->db = db;
@@ -421,7 +471,7 @@ new_vcl_priv_db(struct vmod_redis_db *db)
 }
 
 void
-free_vcl_priv_db(vcl_priv_db_t *db)
+free_database(database_t *db)
 {
     free_vmod_redis_db(db->db);
     db->db = NULL;
@@ -431,18 +481,19 @@ free_vcl_priv_db(vcl_priv_db_t *db)
 
 redisReply *
 redis_execute(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, unsigned version,
-    struct timeval timeout, unsigned max_retries, unsigned argc, const char *argv[],
-    unsigned *retries, redis_server_t *server, unsigned asking,
-    unsigned master, unsigned slot)
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, struct timeval timeout,
+    unsigned max_retries, unsigned argc, const char *argv[], unsigned *retries,
+    redis_server_t *server, unsigned asking, unsigned master, unsigned slot)
 {
+    // Assertions.
+    assert(*retries <= max_retries);
+
     // Initializations.
     redisReply *result = NULL;
 
     // Build the execution plan.
-    assert(*retries <= max_retries);
     struct plan *plan = plan_execution(
-        ctx, db, state, version,
+        ctx, db, state,
         (*retries > 0) ? max_retries - *retries : 1 + max_retries - *retries,
         server, master, slot);
 
@@ -452,9 +503,9 @@ redis_execute(
         // Execute command, retrying up to some limit.
         while ((result == NULL) && (!WS_Overflowed(ctx->ws))) {
             // Initializations.
-            redis_context_t *context = lock_redis_context(ctx, db, state, version, plan);
+            redis_context_t *context = lock_redis_context(ctx, db, state, plan);
 
-            // Do not continue if a Redis context is not available.
+            // Do not continue if a context is not available.
             if (context != NULL) {
                 // Initializations.
                 unsigned done = 0;
@@ -466,7 +517,7 @@ redis_execute(
                     if (argv[0] == NULL) {
                         *retries = max_retries;
                         REDIS_LOG_ERROR(ctx,
-                            "Failed to allocate memory in workspace (%p)",
+                            "Failed to allocate memory in workspace (ws=%p)",
                             ctx->ws);
                         goto unlock;
                     }
@@ -480,9 +531,9 @@ redis_execute(
                     // Execute the EVALSHA command.
                     result = get_redis_repy(ctx, context, timeout, argc, argv, asking);
 
-                    // Check reply. If Redis replies with a NOSCRIPT, the original
-                    // EVAL command should be executed to register the script for
-                    // the first time in the Redis server.
+                    // Check reply. If replied with a NOSCRIPT, the original
+                    // EVAL command should be executed to register the script
+                    // for the first time in the Redis server.
                     if (!context->rcontext->err &&
                         (result != NULL) &&
                         (result->type == REDIS_REPLY_ERROR) &&
@@ -492,7 +543,7 @@ redis_execute(
                         if (argv[0] == NULL) {
                             *retries = max_retries;
                             REDIS_LOG_ERROR(ctx,
-                                "Failed to allocate memory in workspace (%p)",
+                                "Failed to allocate memory in workspace (ws=%p)",
                                 ctx->ws);
                             goto unlock;
                         }
@@ -503,9 +554,9 @@ redis_execute(
                         result = NULL;
 
                         // Update stats.
-                        AZ(pthread_mutex_lock(&db->mutex));
+                        Lck_Lock(&db->mutex);
                         db->stats.commands.noscript++;
-                        AZ(pthread_mutex_unlock(&db->mutex));
+                        Lck_Unlock(&db->mutex);
 
                     // Command execution is completed.
                     } else {
@@ -522,28 +573,27 @@ redis_execute(
                 // Log failed executions.
                 if (context->rcontext->err) {
                     REDIS_LOG_ERROR(ctx,
-                        "Failed to execute Redis command (%s): [%d] %s",
-                        argv[0],
-                        context->rcontext->err,
-                        context->rcontext->errstr);
+                        "Failed to execute command (command=%s, error=%d, db=%s, server=%s): %s",
+                        argv[0], context->rcontext->err, db->name,
+                        context->server->location.raw, context->rcontext->errstr);
                 } else if (result == NULL) {
                     REDIS_LOG_ERROR(ctx,
-                        "Failed to execute Redis command (%s)",
-                        argv[0]);
+                        "Failed to execute command (command=%s, db=%s, server=%s)",
+                        argv[0], db->name, context->server->location.raw);
                 }
     unlock:
                 // Release context.
                 unlock_redis_context(ctx, db, state, context);
 
-            // Redis context not available.
+            // Context not available.
             } else {
                 REDIS_LOG_ERROR(ctx,
-                    "Failed to execute Redis command (%s): context not available",
-                    argv[0]);
+                    "Failed to execute command (command=%s, db=%s): context not available",
+                    argv[0], db->name);
             }
 
             // Update stats.
-            AZ(pthread_mutex_lock(&db->mutex));
+            Lck_Lock(&db->mutex);
             if (*retries > 0) {
                 db->stats.commands.retried++;
             }
@@ -552,7 +602,7 @@ redis_execute(
             } else {
                 db->stats.commands.total++;
             }
-            AZ(pthread_mutex_unlock(&db->mutex));
+            Lck_Unlock(&db->mutex);
 
             // Try again?
             if (result == NULL) {
@@ -568,8 +618,8 @@ redis_execute(
     } else {
         *retries = max_retries;
         REDIS_LOG_ERROR(ctx,
-            "Failed to execute Redis command (%s): execution plan not available",
-            argv[0]);
+            "Failed to execute command (command=%s, db=%s): execution plan not available",
+            argv[0], db->name);
     }
 
     // Done!
@@ -580,18 +630,21 @@ redis_server_t *
 unsafe_add_redis_server(
     VRT_CTX, struct vmod_redis_db *db, const char *location, enum REDIS_SERVER_ROLE role)
 {
+    // Assertions.
+    Lck_AssertHeld(&db->mutex);
+
     // Initializations.
     redis_server_t *result = NULL;
 
     // Look for a server matching the location. If found, remove if from the
     // list. It would be reinserted later, perhaps in a different list.
-    redis_server_t *iserver;
     for (unsigned iweight = 0;
          result == NULL && iweight < NREDIS_SERVER_WEIGHTS;
          iweight++) {
         for (enum REDIS_SERVER_ROLE irole = 0;
              result == NULL && irole < NREDIS_SERVER_ROLES;
              irole++) {
+            redis_server_t *iserver;
             VTAILQ_FOREACH(iserver, &db->servers[iweight][irole], list) {
                 CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
                 if (strcmp(iserver->location.raw, location) == 0) {
@@ -608,22 +661,29 @@ unsafe_add_redis_server(
         // Create new instance.
         result = new_redis_server(db, location, role);
         if (result != NULL) {
+            // If role is unknown try to discover it. This won't be retried. On
+            // failures discovering the role the module will depend on other
+            // discovery capabilities such as Redis Sentinel or Redis Cluster.
+            if (result->role == REDIS_SERVER_TBD_ROLE) {
+                result->role = unsafe_discover_redis_server_role(ctx, result);
+            }
+
             // Calculate weight.
             if (result->location.type == REDIS_SERVER_LOCATION_HOST_TYPE) {
                 struct in_addr ia4;
                 if (inet_pton(AF_INET, result->location.parsed.address.host, &ia4)) {
                     result->weight = NREDIS_SERVER_WEIGHTS - 1;
-                    vcl_priv_subnet_t *isubnet;
-                    AZ(pthread_mutex_lock(&db->config->mutex));
+                    subnet_t *isubnet;
+                    Lck_Lock(&db->config->mutex);
                     VTAILQ_FOREACH(isubnet, &db->config->subnets, list) {
-                        CHECK_OBJ_NOTNULL(isubnet, VCL_PRIV_SUBNET_MAGIC);
+                        CHECK_OBJ_NOTNULL(isubnet, SUBNET_MAGIC);
                         if ((ntohl(ia4.s_addr) & isubnet->mask.s_addr) ==
                             (isubnet->address.s_addr & isubnet->mask.s_addr)) {
                             result->weight = isubnet->weight;
                             break;
                         }
                     }
-                    AZ(pthread_mutex_unlock(&db->config->mutex));
+                    Lck_Unlock(&db->config->mutex);
                 } else {
                     result->weight = NREDIS_SERVER_WEIGHTS - 1;
                 }
@@ -633,40 +693,59 @@ unsafe_add_redis_server(
 
             // Log event.
             REDIS_LOG_INFO(ctx,
-                "New server registered (db=%s, location=%s, role=%d, weight=%d)",
+                "New server registered (db=%s, server=%s, role=%d, weight=%d)",
                 db->name, result->location.raw, result->role, result->weight);
 
             // Update stats.
             db->stats.servers.total++;
         } else {
             REDIS_LOG_ERROR(ctx,
-                "Failed to add server '%s'",
-                location);
+                "Failed to register server (db=%s, server=%s)",
+                db->name, location);
             db->stats.servers.failed++;
         }
 
     // Update existing server instance.
     } else {
-        // If role is not know yet, stay with the info we have so far.
-        if (role != REDIS_SERVER_TBD_ROLE) {
+        // If role is unknown try to discover it. This won't be retried. On
+        // failures the module stays with the info it has so far. Discovery of
+        // the real role will depend on other discovery capabilities such as
+        // Redis Sentinel or Redis Cluster.
+        if (role == REDIS_SERVER_TBD_ROLE) {
+            enum REDIS_SERVER_ROLE r = unsafe_discover_redis_server_role(ctx, result);
+            if (r != REDIS_SERVER_TBD_ROLE) {
+                result->role = r;
+            }
+        } else {
             result->role = role;
         }
 
         // Flush the sickness flag.
-        result->sickness.exp = time(NULL);
+        unsigned now = time(NULL);
+        if (result->sickness.exp > now) {
+            result->sickness.exp = now;
+        }
 
         // Log event.
         REDIS_LOG_INFO(ctx,
-            "Existing server updated (db=%s, location=%s, role=%d, weight=%d)",
+            "Server updated (db=%s, server=%s, role=%d, weight=%d)",
             db->name, result->location.raw, result->role, result->weight);
     }
 
-    // Register server instance in the right list.
+    // Do not continue if a server instance is not available.
     if (result != NULL) {
+        // Register server instance in the right list.
         VTAILQ_INSERT_TAIL(
             &db->servers[result->weight][result->role],
             result,
             list);
+
+        // Trigger Sentinel discovery?
+        if ((db->config->sentinels.active) && (!db->cluster.enabled)) {
+            Lck_Lock(&db->config->mutex);
+            unsafe_sentinel_discovery(db->config);
+            Lck_Unlock(&db->config->mutex);
+        }
     }
 
     // Done!
@@ -677,322 +756,14 @@ unsafe_add_redis_server(
  * UTILITIES.
  *****************************************************************************/
 
-static unsigned
-is_valid_redis_context(redis_context_t *context, unsigned version, time_t now)
-{
-    // Check if context is in an error state.
-    if (context->rcontext->err) {
-        AZ(pthread_mutex_lock(&context->server->db->mutex));
-        context->server->db->stats.connections.dropped.error++;
-        AZ(pthread_mutex_unlock(&context->server->db->mutex));
-        return 0;
-    }
-
-    // Check if context is too old (version).
-    if (context->version != version) {
-        AZ(pthread_mutex_lock(&context->server->db->mutex));
-        context->server->db->stats.connections.dropped.version++;
-        AZ(pthread_mutex_unlock(&context->server->db->mutex));
-        return 0;
-    }
-
-    // Check if context is too old (TTL).
-    if ((context->server->db->connection_ttl > 0) &&
-        (now - context->tst > context->server->db->connection_ttl)) {
-        AZ(pthread_mutex_lock(&context->server->db->mutex));
-        context->server->db->stats.connections.dropped.ttl++;
-        AZ(pthread_mutex_unlock(&context->server->db->mutex));
-        return 0;
-    }
-
-    // Check if context was created before the server was flagged
-    // as sick.
-    unsigned sick = 0;
-    AZ(pthread_mutex_lock(&context->server->db->mutex));
-    if (context->tst <= context->server->sickness.tst) {
-        sick = 1;
-        context->server->db->stats.connections.dropped.sick++;
-    }
-    AZ(pthread_mutex_unlock(&context->server->db->mutex));
-    if (sick) {
-        return 0;
-    }
-
-    // Check if context connection has been hung up by the server.
-    struct pollfd fds;
-    fds.fd = context->rcontext->fd;
-    fds.events = POLLOUT;
-    if ((poll(&fds, 1, 0) != 1) || (fds.revents & POLLHUP)) {
-        AZ(pthread_mutex_lock(&context->server->db->mutex));
-        context->server->db->stats.connections.dropped.hung_up++;
-        AZ(pthread_mutex_unlock(&context->server->db->mutex));
-        return 0;
-    }
-
-    // Valid!
-    return 1;
-}
-
-static struct plan *
-new_execution_plan(VRT_CTX, struct vmod_redis_db *db, unsigned max_size)
-{
-    struct plan *result = (void *)WS_Alloc(ctx->ws, sizeof(struct plan));
-    if (result == NULL) {
-        REDIS_LOG_ERROR(ctx,
-            "Failed to allocate memory in workspace (%p)",
-            ctx->ws);
-        return NULL;
-    }
-
-    result->contexts.n = 0;
-    result->contexts.next = 0;
-    if (!db->shared_connections) {
-        result->contexts.list = (void *)WS_Alloc(ctx->ws, max_size * sizeof(redis_server_t *));;
-        if (result->contexts.list == NULL) {
-            REDIS_LOG_ERROR(ctx,
-                "Failed to allocate memory in workspace (%p)",
-                ctx->ws);
-            return NULL;
-        }
-    } else {
-        result->contexts.list = NULL;
-    }
-
-    result->servers.n = 0;
-    result->servers.next = 0;
-    result->servers.list = (void *)WS_Alloc(ctx->ws, max_size * sizeof(redis_server_t *));;
-    if (result->servers.list == NULL) {
-        REDIS_LOG_ERROR(ctx,
-            "Failed to allocate memory in workspace (%p)",
-            ctx->ws);
-        return NULL;
-    }
-
-    return result;
-}
-
-void
-populate_simple_execution_plan(
-    struct plan *plan, struct vmod_redis_db *db, thread_state_t *state,
-    unsigned version, unsigned max_size, redis_server_t *server)
-{
-    // Populate list of contexts?
-    if (!db->shared_connections) {
-        // Initializations.
-        time_t now = time(NULL);
-        plan->contexts.n = 0;
-
-        // Search for contexts matching the requested conditions.
-        redis_context_t *icontext, *icontext_tmp;
-        VTAILQ_FOREACH_SAFE(icontext, &state->contexts, list, icontext_tmp) {
-            CHECK_OBJ_NOTNULL(icontext, REDIS_CONTEXT_MAGIC);
-            if ((icontext->server->db == db) &&
-                (icontext->server == server)) {
-                if (is_valid_redis_context(icontext, version, now)) {
-                    plan->contexts.list[plan->contexts.n++] = icontext;
-                    if (plan->contexts.n == max_size) {
-                        break;
-                    }
-                } else {
-                    VTAILQ_REMOVE(&state->contexts, icontext, list);
-                    state->ncontexts--;
-                    free_redis_context(icontext);
-                }
-            }
-        }
-    }
-
-    // Build list of servers.
-    plan->servers.n = 1;
-    plan->servers.list[0] = server;
-}
-
-void
-populate_execution_plan(
-    struct plan *plan, struct vmod_redis_db *db, thread_state_t *state,
-    unsigned version, unsigned max_size, unsigned master, unsigned slot)
-{
-    // Initializations.
-    time_t now = time(NULL);
-
-    // Populate list of contexts?
-    if (!db->shared_connections) {
-        // Initializations.
-        plan->contexts.n = 0;
-
-        // Search for contexts matching the requested conditions.
-        redis_context_t *icontext, *icontext_tmp;
-        VTAILQ_FOREACH_SAFE(icontext, &state->contexts, list, icontext_tmp) {
-            CHECK_OBJ_NOTNULL(icontext, REDIS_CONTEXT_MAGIC);
-            if ((icontext->server->db == db) &&
-                ((master && (icontext->server->role == REDIS_SERVER_MASTER_ROLE)) ||
-                 (!master && (icontext->server->role != REDIS_SERVER_MASTER_ROLE))) &&
-                ((!db->cluster.enabled) ||
-                 (icontext->server->cluster.slots[slot]))) {
-                if (is_valid_redis_context(icontext, version, now)) {
-                    plan->contexts.list[plan->contexts.n++] = icontext;
-                    if (plan->contexts.n == max_size) {
-                        break;
-                    }
-                } else {
-                    VTAILQ_REMOVE(&state->contexts, icontext, list);
-                    state->ncontexts--;
-                    free_redis_context(icontext);
-                }
-            }
-        }
-
-        // If some context was added to the execution plan, move it to the end
-        // of the list. This ensures a nice distribution of load between all
-        // available contexts.
-        if (plan->contexts.n > 0) {
-            VTAILQ_REMOVE(&state->contexts, plan->contexts.list[0], list);
-            VTAILQ_INSERT_TAIL(&state->contexts, plan->contexts.list[0], list);
-        }
-    }
-
-    // Populate list of servers?
-    if (plan->contexts.n < max_size) {
-        // Initializations.
-        unsigned round;
-        unsigned iweight;
-        enum REDIS_SERVER_ROLE irole;
-        redis_server_t *iserver;
-        unsigned remaining = max_size - plan->contexts.n;
-        plan->servers.n = 0;
-
-        // Get database lock.
-        AZ(pthread_mutex_lock(&db->mutex));
-
-        // Build list of servers.
-        //   - First round:
-        //       + Give higher priority to:
-        //           * Slave servers.
-        //           * Servers with lower weight.
-        //       + Skip servers not matching 'slot' if clustering is enabled.
-        //       + Skip sick servers.
-        //       + Skip slave & TBD servers if 'master' is set.
-        //   - Second round:
-        //       + Consider sick and TBD servers skipped during the first round.
-        for (round = 1; round <= 2; round++) {
-            for (iweight = 0;
-                remaining > 0 && iweight < NREDIS_SERVER_WEIGHTS;
-                iweight++) {
-                for (irole = 0;
-                    remaining > 0 && irole < NREDIS_SERVER_ROLES;
-                    irole++) {
-                    if ((!master) ||
-                        (((round == 1) &&
-                          (irole == REDIS_SERVER_MASTER_ROLE)) ||
-                         ((round == 2) &&
-                          ((irole == REDIS_SERVER_MASTER_ROLE) ||
-                           (irole == REDIS_SERVER_TBD_ROLE))))) {
-                        unsigned nservers = plan->servers.n;
-                        VTAILQ_FOREACH(iserver, &db->servers[iweight][irole], list) {
-                            CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
-                            assert(iserver->weight == iweight);
-                            assert(iserver->role == irole);
-                            if (((!db->cluster.enabled) ||
-                                 (iserver->cluster.slots[slot])) &&
-                                (((round == 1) &&
-                                  (iserver->sickness.exp <= now)) ||
-                                 ((round == 2) &&
-                                  (((master) &&
-                                    (iserver->role == REDIS_SERVER_TBD_ROLE)) ||
-                                   (iserver->sickness.exp > now))))) {
-                                plan->servers.list[plan->servers.n++] = iserver;
-                                if (--remaining == 0) {
-                                    break;
-                                }
-                            }
-                        }
-
-                        // If some server in this list was added to the
-                        // execution plan, move it to the end of the list. This
-                        // ensures a nice distribution of load between all
-                        // servers.
-                        if ((round == 1) && (nservers < plan->servers.n)) {
-                            VTAILQ_REMOVE(
-                                &db->servers[iweight][irole],
-                                plan->servers.list[nservers],
-                                list);
-                            VTAILQ_INSERT_TAIL(
-                                &db->servers[iweight][irole],
-                                plan->servers.list[nservers],
-                                list);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Continue building list of servers.
-        //   - Only executed when clustering is enabled and if the execution
-        //   plan is still empty. Any server will be ok to get a redirection to
-        //   the right server and the trigger a discovery of the cluster
-        //   topology.
-        //   - Give higher priority to:
-        //       + Slave servers.
-        //       + Servers with lower weight.
-        //   - Skip sick servers during the third round.
-        //   - Skip healthy servers during the fourth round.
-        if ((db->cluster.enabled) && (plan->servers.n == 0)) {
-            for (round = 3; round <= 4; round++) {
-                for (iweight = 0;
-                    remaining > 0 && iweight < NREDIS_SERVER_WEIGHTS;
-                    iweight++) {
-                    for (irole = 0;
-                        remaining > 0 && irole < NREDIS_SERVER_ROLES;
-                        irole++) {
-                        VTAILQ_FOREACH(iserver, &db->servers[iweight][irole], list) {
-                            CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
-                            assert(iserver->weight == iweight);
-                            assert(iserver->role == irole);
-                            if (((round == 3) &&
-                                 (iserver->sickness.exp <= now)) ||
-                                ((round == 4) &&
-                                 (iserver->sickness.exp > now))) {
-                                plan->servers.list[plan->servers.n++] = iserver;
-                                if (--remaining == 0) {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Release database lock.
-        AZ(pthread_mutex_unlock(&db->mutex));
-    }
-}
-
-static struct plan *
-plan_execution(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, unsigned version,
-    unsigned max_size, redis_server_t *server, unsigned master, unsigned slot)
-{
-    // Initializations.
-    struct plan *result = new_execution_plan(ctx, db, max_size);
-
-    // Do not continue if something failed while creating an empty execution
-    // plan.
-    if (result != NULL) {
-        if (server != NULL) {
-            populate_simple_execution_plan(result, db, state, version, max_size, server);
-        } else {
-            populate_execution_plan(result, db, state, version, max_size, master, slot);
-        }
-    }
-
-    // Done!
-    return result;
-}
-
 static redisContext *
-new_rcontext(VRT_CTX, redis_server_t * server, unsigned version, time_t now)
+new_rcontext(
+    VRT_CTX, redis_server_t * server, time_t now,
+    unsigned ephemeral, unsigned dblocked)
 {
+    // Assertions.
+    if (dblocked) Lck_AssertHeld(&server->db->mutex);
+
     // Create context.
     redisContext *result;
     if ((server->db->connection_timeout.tv_sec > 0) ||
@@ -1036,9 +807,8 @@ new_rcontext(VRT_CTX, redis_server_t * server, unsigned version, time_t now)
     // Check created context.
     if (result->err) {
         REDIS_LOG_ERROR(ctx,
-            "Failed to establish Redis connection (%d): %s",
-            result->err,
-            result->errstr);
+            "Failed to establish connection (error=%d, db=%s, server=%s): %s",
+            result->err, server->db->name, server->location.raw, result->errstr);
         redisFree(result);
         result = NULL;
     }
@@ -1055,21 +825,19 @@ new_rcontext(VRT_CTX, redis_server_t * server, unsigned version, time_t now)
             (strcmp(reply->str, "OK") != 0)) {
             if (result->err) {
                 REDIS_LOG_ERROR(ctx,
-                    "Failed to authenticate Redis connection (%d): %s",
-                    result->err,
-                    result->errstr);
+                    "Failed to authenticate connection (error=%d, db=%s, server=%s): %s",
+                    result->err, server->db->name, server->location.raw, result->errstr);
             } else if ((reply != NULL) &&
                        ((reply->type == REDIS_REPLY_ERROR) ||
                         (reply->type == REDIS_REPLY_STATUS) ||
                         (reply->type == REDIS_REPLY_STRING))) {
                 REDIS_LOG_ERROR(ctx,
-                    "Failed to authenticate Redis connection (%d): %s",
-                    reply->type,
-                    reply->str);
+                    "Failed to authenticate connection (error=%d, db=%s, server=%s): %s",
+                    reply->type, server->db->name, server->location.raw, reply->str);
             } else {
                 REDIS_LOG_ERROR(ctx,
-                    "Failed to authenticate Redis connection: %s",
-                    "-");
+                    "Failed to authenticate connection (db=%s, server=%s)",
+                    server->db->name, server->location.raw);
             }
             redisFree(result);
             result = NULL;
@@ -1082,28 +850,33 @@ new_rcontext(VRT_CTX, redis_server_t * server, unsigned version, time_t now)
     }
 
     // Update stats & sickness flag.
-    AZ(pthread_mutex_lock(&server->db->mutex));
+    if (!dblocked) Lck_Lock(&server->db->mutex);
     if (result != NULL) {
         if (server->sickness.exp > now) {
             server->sickness.exp = now;
             REDIS_LOG_INFO(ctx,
-                "Server sickness tag cleared (db=%s, location=%s, reason=context)",
+                "Server sickness tag cleared (db=%s, server=%s)",
                 server->db->name, server->location.raw);
         }
-        server->db->stats.connections.total++;
+        if (!ephemeral) {
+            server->db->stats.connections.total++;
+        }
     } else {
         server->sickness.tst = now;
         server->sickness.exp = now + server->db->sickness_ttl;
-        server->db->stats.connections.failed++;
+        if (!ephemeral) {
+            server->db->stats.connections.failed++;
+        }
         REDIS_LOG_INFO(ctx,
-            "Server sickness tag set (db=%s, location=%s, reason=context)",
+            "Server sickness tag set (db=%s, server=%s)",
             server->db->name, server->location.raw);
     }
-    AZ(pthread_mutex_unlock(&server->db->mutex));
+    if (!dblocked) Lck_Unlock(&server->db->mutex);
 
 #if HIREDIS_MAJOR >= 0 && HIREDIS_MINOR >= 12
     // Enable TCP keep-alive.
-    if ((result != NULL) && (server->location.type == REDIS_SERVER_LOCATION_HOST_TYPE)) {
+    if ((result != NULL) &&
+        (server->location.type == REDIS_SERVER_LOCATION_HOST_TYPE)) {
         redisEnableKeepAlive(result);
     }
 #endif
@@ -1112,10 +885,443 @@ new_rcontext(VRT_CTX, redis_server_t * server, unsigned version, time_t now)
     return result;
 }
 
+static enum REDIS_SERVER_ROLE
+unsafe_discover_redis_server_role(VRT_CTX, redis_server_t *server)
+{
+    // Assertions.
+    Lck_AssertHeld(&server->db->mutex);
+
+    // Initializations.
+    enum REDIS_SERVER_ROLE result = REDIS_SERVER_TBD_ROLE;
+
+    // Create context.
+    redisContext *rcontext = new_rcontext(ctx, server, time(NULL), 1, 1);
+    if ((rcontext != NULL) && (!rcontext->err)) {
+        // Set command execution timeout.
+        int tr = redisSetTimeout(rcontext, server->db->command_timeout);
+        if (tr != REDIS_OK) {
+            REDIS_LOG_ERROR(ctx,
+                "Failed to set role discovery command execution timeout (error=%d, db=%s, server=%s)",
+                tr, server->db->name, server->location.raw);
+        }
+
+        // Send command.
+        redisReply *reply = redisCommand(rcontext, ROLE_DISCOVERY_COMMAND);
+
+        // Check reply.
+        if ((!rcontext->err) &&
+            (reply != NULL) &&
+            (reply->type == REDIS_REPLY_ARRAY) &&
+            (reply->elements > 0) &&
+            (reply->element[0]->type == REDIS_REPLY_STRING)) {
+            if (strcmp(reply->element[0]->str, "master") == 0) {
+                result = REDIS_SERVER_MASTER_ROLE;
+            } else if (strcmp(reply->element[0]->str, "slave") == 0) {
+                result = REDIS_SERVER_SLAVE_ROLE;
+            }
+            if (result != REDIS_SERVER_TBD_ROLE) {
+                REDIS_LOG_INFO(ctx,
+                    "Server role discovered (db=%s, server=%s, role=%d)",
+                    server->db->name, server->location.raw, result);
+            }
+        } else {
+            REDIS_LOG_ERROR(ctx,
+                "Failed to execute role discovery command (db=%s, server=%s)",
+                server->db->name, server->location.raw);
+        }
+
+        // Release reply.
+        if (reply != NULL) {
+            freeReplyObject(reply);
+        }
+    } else {
+        if (rcontext != NULL) {
+            REDIS_LOG_ERROR(ctx,
+                "Failed to establish role discovery connection (error=%d, db=%s, server=%s): %s",
+                rcontext->err, server->db->name, server->location.raw, rcontext->errstr);
+        } else {
+            REDIS_LOG_ERROR(ctx,
+                "Failed to establish role discovery connection (db=%s, server=%s)",
+                server->db->name, server->location.raw);
+        }
+    }
+
+    // Release context.
+    if (rcontext != NULL) {
+        redisFree(rcontext);
+    }
+
+    // Done!
+    return result;
+}
+
+static unsigned
+is_valid_redis_context(redis_context_t *context, time_t now)
+{
+    // Check if context is in an error state.
+    if (context->rcontext->err) {
+        Lck_Lock(&context->server->db->mutex);
+        context->server->db->stats.connections.dropped.error++;
+        Lck_Unlock(&context->server->db->mutex);
+        return 0;
+    }
+
+    // Check if context is too old (version).
+    if (context->version != VMOD(version)) {
+        Lck_Lock(&context->server->db->mutex);
+        context->server->db->stats.connections.dropped.version++;
+        Lck_Unlock(&context->server->db->mutex);
+        return 0;
+    }
+
+    // Check if context is too old (TTL).
+    if ((context->server->db->connection_ttl > 0) &&
+        (now - context->tst > context->server->db->connection_ttl)) {
+        Lck_Lock(&context->server->db->mutex);
+        context->server->db->stats.connections.dropped.ttl++;
+        Lck_Unlock(&context->server->db->mutex);
+        return 0;
+    }
+
+    // Check if context was created before the server was flagged
+    // as sick.
+    unsigned sick = 0;
+    Lck_Lock(&context->server->db->mutex);
+    if (context->tst <= context->server->sickness.tst) {
+        sick = 1;
+        context->server->db->stats.connections.dropped.sick++;
+    }
+    Lck_Unlock(&context->server->db->mutex);
+    if (sick) {
+        return 0;
+    }
+
+    // Check if context connection has been hung up by the server.
+    struct pollfd fds;
+    fds.fd = context->rcontext->fd;
+    fds.events = POLLOUT;
+    if ((poll(&fds, 1, 0) != 1) || (fds.revents & POLLHUP)) {
+        Lck_Lock(&context->server->db->mutex);
+        context->server->db->stats.connections.dropped.hung_up++;
+        Lck_Unlock(&context->server->db->mutex);
+        return 0;
+    }
+
+    // Valid!
+    return 1;
+}
+
+static struct plan *
+new_execution_plan(VRT_CTX, struct vmod_redis_db *db)
+{
+    struct plan *result = (void *)WS_Alloc(ctx->ws, sizeof(struct plan));
+    if (result == NULL) {
+        REDIS_LOG_ERROR(ctx,
+            "Failed to allocate memory in workspace (ws=%p)",
+            ctx->ws);
+        return NULL;
+    }
+
+    result->contexts.n = 0;
+    result->contexts.next = 0;
+    result->contexts.list = NULL;
+
+    result->servers.n = 0;
+    result->servers.next = 0;
+    result->servers.list = NULL;
+
+    return result;
+}
+
+void
+populate_simple_execution_plan(
+    VRT_CTX, struct plan *plan, struct vmod_redis_db *db, thread_state_t *state,
+    unsigned max_size, redis_server_t *server)
+{
+    // Populate list of contexts?
+    if (!db->shared_connections) {
+        // Initializations.
+        time_t now = time(NULL);
+        unsigned free_ws = WS_Reserve(ctx->ws, 0);
+        unsigned used_ws = 0;
+        plan->contexts.list = (redis_context_t **) ctx->ws->f;
+        plan->contexts.n = 0;
+
+        // Search for contexts matching the requested conditions.
+        redis_context_t *icontext, *icontext_tmp;
+        VTAILQ_FOREACH_SAFE(icontext, &state->contexts, list, icontext_tmp) {
+            CHECK_OBJ_NOTNULL(icontext, REDIS_CONTEXT_MAGIC);
+            if ((icontext->server->db == db) &&
+                (icontext->server == server)) {
+                if (is_valid_redis_context(icontext, now)) {
+                    if (free_ws >= sizeof(redis_context_t *)) {
+                        used_ws += sizeof(redis_context_t *);
+                        plan->contexts.list[plan->contexts.n++] = icontext;
+                        if (plan->contexts.n == max_size) {
+                            break;
+                        }
+                    } else {
+                        WS_Release(ctx->ws, used_ws);
+                        WS_MarkOverflow(ctx->ws);
+                        REDIS_LOG_ERROR(ctx,
+                            "Failed to allocate memory in workspace (ws=%p)",
+                            ctx->ws);
+                        return;
+                    }
+                } else {
+                    VTAILQ_REMOVE(&state->contexts, icontext, list);
+                    state->ncontexts--;
+                    free_redis_context(icontext);
+                }
+            }
+        }
+
+        // Done!
+        WS_Release(ctx->ws, used_ws);
+    }
+
+    // Build list of servers.
+    unsigned free_ws = WS_Reserve(ctx->ws, 0);
+    if (free_ws >= sizeof(redis_server_t *)) {
+        plan->servers.list = (redis_server_t **) ctx->ws->f;
+        plan->servers.n = 1;
+        plan->servers.list[0] = server;
+        WS_Release(ctx->ws, sizeof(redis_server_t *));
+    } else {
+        WS_Release(ctx->ws, 0);
+        WS_MarkOverflow(ctx->ws);
+        REDIS_LOG_ERROR(ctx,
+            "Failed to allocate memory in workspace (ws=%p)",
+            ctx->ws);
+    }
+}
+
+void
+populate_execution_plan(
+    VRT_CTX, struct plan *plan, struct vmod_redis_db *db, thread_state_t *state,
+    unsigned max_size, unsigned master, unsigned slot)
+{
+    // Initializations.
+    time_t now = time(NULL);
+
+    // Populate list of contexts?
+    if (!db->shared_connections) {
+        // Initializations.
+        unsigned free_ws = WS_Reserve(ctx->ws, 0);
+        unsigned used_ws = 0;
+        plan->contexts.list = (redis_context_t **) ctx->ws->f;
+        plan->contexts.n = 0;
+
+        // Search for contexts matching the requested conditions.
+        redis_context_t *icontext, *icontext_tmp;
+        VTAILQ_FOREACH_SAFE(icontext, &state->contexts, list, icontext_tmp) {
+            CHECK_OBJ_NOTNULL(icontext, REDIS_CONTEXT_MAGIC);
+            if ((icontext->server->db == db) &&
+                ((master && (icontext->server->role == REDIS_SERVER_MASTER_ROLE)) ||
+                 (!master && (icontext->server->role != REDIS_SERVER_MASTER_ROLE))) &&
+                ((!db->cluster.enabled) ||
+                 (icontext->server->cluster.slots[slot]))) {
+                if (is_valid_redis_context(icontext, now)) {
+                    if (free_ws >= sizeof(redis_context_t *)) {
+                        used_ws += sizeof(redis_context_t *);
+                        plan->contexts.list[plan->contexts.n++] = icontext;
+                        if (plan->contexts.n == max_size) {
+                            break;
+                        }
+                    } else {
+                        WS_Release(ctx->ws, used_ws);
+                        WS_MarkOverflow(ctx->ws);
+                        REDIS_LOG_ERROR(ctx,
+                            "Failed to allocate memory in workspace (ws=%p)",
+                            ctx->ws);
+                        return;
+                    }
+                } else {
+                    VTAILQ_REMOVE(&state->contexts, icontext, list);
+                    state->ncontexts--;
+                    free_redis_context(icontext);
+                }
+            }
+        }
+
+        // If some context was added to the execution plan, move it to the end
+        // of the list. This ensures a nice distribution of load between all
+        // available contexts.
+        if (plan->contexts.n > 0) {
+            VTAILQ_REMOVE(&state->contexts, plan->contexts.list[0], list);
+            VTAILQ_INSERT_TAIL(&state->contexts, plan->contexts.list[0], list);
+        }
+
+        // Done!
+        WS_Release(ctx->ws, used_ws);
+    }
+
+    // Populate list of servers?
+    if (plan->contexts.n < max_size) {
+        // Initializations.
+        unsigned remaining = max_size - plan->contexts.n;
+        unsigned free_ws = WS_Reserve(ctx->ws, 0);
+        unsigned used_ws = 0;
+        plan->servers.list = (redis_server_t **) ctx->ws->f;
+        plan->servers.n = 0;
+
+        // Get database lock.
+        Lck_Lock(&db->mutex);
+
+        // Build list of servers.
+        //   - First round:
+        //       + Give higher priority to:
+        //           * Slave servers.
+        //           * Servers with lower weight.
+        //       + Skip servers not matching 'slot' if clustering is enabled.
+        //       + Skip sick servers.
+        //       + Skip slave & TBD servers if 'master' is set.
+        //   - Second round:
+        //       + Consider sick and TBD servers skipped during the first round.
+        for (unsigned round = 1; round <= 2; round++) {
+            for (unsigned iweight = 0;
+                 remaining > 0 && iweight < NREDIS_SERVER_WEIGHTS;
+                 iweight++) {
+                for (enum REDIS_SERVER_ROLE irole = 0;
+                     remaining > 0 && irole < NREDIS_SERVER_ROLES;
+                     irole++) {
+                    if ((!master) ||
+                        (((round == 1) &&
+                          (irole == REDIS_SERVER_MASTER_ROLE)) ||
+                         ((round == 2) &&
+                          ((irole == REDIS_SERVER_MASTER_ROLE) ||
+                           (irole == REDIS_SERVER_TBD_ROLE))))) {
+                        unsigned nservers = plan->servers.n;
+                        redis_server_t *iserver;
+                        VTAILQ_FOREACH(iserver, &db->servers[iweight][irole], list) {
+                            CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
+                            assert(iserver->weight == iweight);
+                            assert(iserver->role == irole);
+                            if (((!db->cluster.enabled) ||
+                                 (iserver->cluster.slots[slot])) &&
+                                (((round == 1) &&
+                                  (iserver->sickness.exp <= now)) ||
+                                 ((round == 2) &&
+                                  (((master) &&
+                                    (iserver->role == REDIS_SERVER_TBD_ROLE)) ||
+                                   (iserver->sickness.exp > now))))) {
+                                if (free_ws >= sizeof(redis_server_t *)) {
+                                    used_ws += sizeof(redis_server_t *);
+                                    plan->servers.list[plan->servers.n++] = iserver;
+                                    if (--remaining == 0) {
+                                        break;
+                                    }
+                                } else {
+                                    WS_Release(ctx->ws, used_ws);
+                                    WS_MarkOverflow(ctx->ws);
+                                    REDIS_LOG_ERROR(ctx,
+                                        "Failed to allocate memory in workspace (ws=%p)",
+                                        ctx->ws);
+                                    return;
+                                }
+                            }
+                        }
+
+                        // If some server in this list was added to the
+                        // execution plan, move it to the end of the list. This
+                        // ensures a nice distribution of load between all
+                        // servers.
+                        if ((round == 1) && (nservers < plan->servers.n)) {
+                            VTAILQ_REMOVE(
+                                &db->servers[iweight][irole],
+                                plan->servers.list[nservers],
+                                list);
+                            VTAILQ_INSERT_TAIL(
+                                &db->servers[iweight][irole],
+                                plan->servers.list[nservers],
+                                list);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Continue building list of servers.
+        //   - Only executed when clustering is enabled and if the execution
+        //   plan is still empty. Any server will be ok to get a redirection to
+        //   the right server and the trigger a discovery of the cluster
+        //   topology.
+        //   - Give higher priority to:
+        //       + Slave servers.
+        //       + Servers with lower weight.
+        //   - Skip sick servers during the third round.
+        //   - Skip healthy servers during the fourth round.
+        if ((db->cluster.enabled) && (plan->servers.n == 0)) {
+            for (unsigned round = 3; round <= 4; round++) {
+                for (unsigned iweight = 0;
+                     remaining > 0 && iweight < NREDIS_SERVER_WEIGHTS;
+                     iweight++) {
+                    for (enum REDIS_SERVER_ROLE irole = 0;
+                         remaining > 0 && irole < NREDIS_SERVER_ROLES;
+                         irole++) {
+                        redis_server_t *iserver;
+                        VTAILQ_FOREACH(iserver, &db->servers[iweight][irole], list) {
+                            CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
+                            assert(iserver->weight == iweight);
+                            assert(iserver->role == irole);
+                            if (((round == 3) &&
+                                 (iserver->sickness.exp <= now)) ||
+                                ((round == 4) &&
+                                 (iserver->sickness.exp > now))) {
+                                if (free_ws >= sizeof(redis_server_t *)) {
+                                    used_ws += sizeof(redis_server_t *);
+                                    plan->servers.list[plan->servers.n++] = iserver;
+                                    if (--remaining == 0) {
+                                        break;
+                                    }
+                                } else {
+                                    WS_Release(ctx->ws, used_ws);
+                                    WS_MarkOverflow(ctx->ws);
+                                    REDIS_LOG_ERROR(ctx,
+                                        "Failed to allocate memory in workspace (ws=%p)",
+                                        ctx->ws);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Release database lock.
+        Lck_Unlock(&db->mutex);
+
+        // Done!
+        WS_Release(ctx->ws, used_ws);
+    }
+}
+
+static struct plan *
+plan_execution(
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
+    unsigned max_size, redis_server_t *server, unsigned master, unsigned slot)
+{
+    // Initializations.
+    struct plan *result = new_execution_plan(ctx, db);
+
+    // Do not continue if something failed while creating an empty execution
+    // plan.
+    if (result != NULL) {
+        if (server != NULL) {
+            populate_simple_execution_plan(ctx, result, db, state, max_size, server);
+        } else {
+            populate_execution_plan(ctx, result, db, state, max_size, master, slot);
+        }
+    }
+
+    // Done!
+    return result;
+}
+
 static redis_context_t *
 lock_private_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    unsigned version, struct plan *plan)
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, struct plan *plan)
 {
     // Initializations.
     redis_context_t *result = NULL;
@@ -1142,16 +1348,16 @@ lock_private_redis_context(
             VTAILQ_REMOVE(&state->contexts, context, list);
             state->ncontexts--;
             free_redis_context(context);
-            AZ(pthread_mutex_lock(&db->mutex));
+            Lck_Lock(&db->mutex);
             db->stats.connections.dropped.overflow++;
-            AZ(pthread_mutex_unlock(&db->mutex));
+            Lck_Unlock(&db->mutex);
         }
 
         // Create new context using the previously selected server. If any
         // error arises discard the context and return.
-        redisContext *rcontext = new_rcontext(ctx, server, version, now);
+        redisContext *rcontext = new_rcontext(ctx, server, now, 0, 0);
         if (rcontext != NULL) {
-            result = new_redis_context(server, rcontext, version, now);
+            result = new_redis_context(server, rcontext, now);
             VTAILQ_INSERT_TAIL(&state->contexts, result, list);
             state->ncontexts++;
         }
@@ -1163,8 +1369,7 @@ lock_private_redis_context(
 
 static redis_context_t *
 lock_shared_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    unsigned version, struct plan *plan)
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, struct plan *plan)
 {
     // Initializations.
     redis_context_t *result = NULL;
@@ -1176,7 +1381,7 @@ lock_shared_redis_context(
     plan->servers.next = (plan->servers.next + 1) % plan->servers.n;
 
     // Get pool lock.
-    AZ(pthread_mutex_lock(&server->pool.mutex));
+    Lck_Lock(&server->pool.mutex);
 
 retry:
     // Look for an existing free context.
@@ -1190,7 +1395,7 @@ retry:
         VTAILQ_INSERT_TAIL(&server->pool.busy_contexts, result, list);
 
         // Is the context valid?
-        if (!is_valid_redis_context(result, version, now)) {
+        if (!is_valid_redis_context(result, now)) {
             // Release context.
             VTAILQ_REMOVE(&server->pool.busy_contexts, result, list);
             server->pool.ncontexts--;
@@ -1211,25 +1416,25 @@ retry:
     if (result == NULL) {
         // If an no more contexts can be created, wait for another thread.
         if (server->pool.ncontexts >= db->max_connections) {
-            AZ(pthread_cond_wait(&server->pool.cond, &server->pool.mutex));
-            AZ(pthread_mutex_lock(&db->mutex));
+            Lck_CondWait(&server->pool.cond, &server->pool.mutex, 0);
+            Lck_Lock(&db->mutex);
             db->stats.workers.blocked++;
-            AZ(pthread_mutex_unlock(&db->mutex));
+            Lck_Unlock(&db->mutex);
             goto retry;
         }
 
         // Create new context using the previously selected server. If any
         // error arises discard the context and return.
-        redisContext *rcontext = new_rcontext(ctx, server, version, now);
+        redisContext *rcontext = new_rcontext(ctx, server, now, 0, 0);
         if (rcontext != NULL) {
-            result = new_redis_context(server, rcontext, version, now);
+            result = new_redis_context(server, rcontext, now);
             VTAILQ_INSERT_TAIL(&server->pool.busy_contexts, result, list);
             server->pool.ncontexts++;
         }
     }
 
     // Release pool lock.
-    AZ(pthread_mutex_unlock(&server->pool.mutex));
+    Lck_Unlock(&server->pool.mutex);
 
     // Done!
     return result;
@@ -1237,13 +1442,12 @@ retry:
 
 static redis_context_t *
 lock_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    unsigned version, struct plan *plan)
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, struct plan *plan)
 {
     if (db->shared_connections) {
-        return lock_shared_redis_context(ctx, db, state, version, plan);
+        return lock_shared_redis_context(ctx, db, state, plan);
     } else {
-        return lock_private_redis_context(ctx, db, state, version, plan);
+        return lock_private_redis_context(ctx, db, state, plan);
     }
 }
 
@@ -1251,22 +1455,21 @@ static void
 unlock_shared_redis_context(
     VRT_CTX, struct vmod_redis_db *db, redis_context_t *context)
 {
-    // Check input.
+    // Assertions.
     CHECK_OBJ_NOTNULL(context, REDIS_CONTEXT_MAGIC);
     CHECK_OBJ_NOTNULL(context->server, REDIS_SERVER_MAGIC);
 
     // Return context to the pool's free list.
-    AZ(pthread_mutex_lock(&context->server->pool.mutex));
+    Lck_Lock(&context->server->pool.mutex);
     VTAILQ_REMOVE(&context->server->pool.busy_contexts, context, list);
     VTAILQ_INSERT_TAIL(&context->server->pool.free_contexts, context, list);
     AZ(pthread_cond_signal(&context->server->pool.cond));
-    AZ(pthread_mutex_unlock(&context->server->pool.mutex));
+    Lck_Unlock(&context->server->pool.mutex);
 }
 
 static void
 unlock_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
-    redis_context_t *context)
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,  redis_context_t *context)
 {
     if (db->shared_connections) {
         return unlock_shared_redis_context(ctx, db, context);
@@ -1275,11 +1478,12 @@ unlock_redis_context(
 
 static redisReply *
 get_redis_repy(
-    VRT_CTX, redis_context_t *context,
-    struct timeval timeout, unsigned argc, const char *argv[], unsigned asking)
+    VRT_CTX, redis_context_t *context, struct timeval timeout, unsigned argc,
+    const char *argv[], unsigned asking)
 {
     // Initializations.
-    redisReply *reply, *result;
+    redisReply *result = NULL;
+    redisReply *reply;
     unsigned readonly =
         ((context->server->db->cluster.enabled) &&
          (context->server->role == REDIS_SERVER_SLAVE_ROLE));
@@ -1287,10 +1491,12 @@ get_redis_repy(
     // Set command execution timeout.
     int tr = redisSetTimeout(context->rcontext, timeout);
     if (tr != REDIS_OK) {
-        REDIS_LOG_ERROR(ctx, "Failed to set command execution timeout (%d)", tr);
+        REDIS_LOG_ERROR(ctx,
+            "Failed to set command execution timeout (error=%d, db=%s, server=%s)",
+            tr, context->server->db->name, context->server->location.raw);
     }
 
-    // Prepare pipeline.
+    // Build pipeline.
     if (readonly) {
         redisAppendCommand(context->rcontext, "READONLY");
     }
@@ -1321,7 +1527,6 @@ get_redis_repy(
     }
 
     // Fetch command reply.
-    result = NULL;
     redisGetReply(context->rcontext, (void **)&result);
 
     // Fetch READWRITE command reply?
@@ -1357,7 +1562,7 @@ sha1(VRT_CTX, const char *script)
         }
     } else {
         REDIS_LOG_ERROR(ctx,
-            "Failed to allocate memory in workspace (%p)",
+            "Failed to allocate memory in workspace (ws=%p)",
             ctx->ws);
     }
 

@@ -15,7 +15,7 @@
 #define BANNED_COMMANDS "|INFO|MULTI|EXEC|SLAVEOF|CONFIG|SHUTDOWN|SCRIPT|"
 #define KEY_INDEX3_COMMANDS "|EVAL|EVALSHA|"
 
-#define DISCOVERY_COMMAND "CLUSTER SLOTS"
+#define CLUSTER_DISCOVERY_COMMAND "CLUSTER SLOTS"
 
 static void unsafe_discover_slots(VRT_CTX, struct vmod_redis_db *db, redis_server_t *server);
 
@@ -25,16 +25,16 @@ static unsigned get_cluster_slot(const char *key);
 void
 discover_cluster_slots(VRT_CTX, struct vmod_redis_db *db, redis_server_t *server)
 {
-    AZ(pthread_mutex_lock(&db->mutex));
+    Lck_Lock(&db->mutex);
     unsafe_discover_slots(ctx, db, server);
-    AZ(pthread_mutex_unlock(&db->mutex));
+    Lck_Unlock(&db->mutex);
 }
 
 redisReply *
 cluster_execute(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, unsigned version,
-    struct timeval timeout, unsigned max_retries, unsigned argc, const char *argv[],
-    unsigned *retries, unsigned master)
+    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, struct timeval timeout,
+    unsigned max_retries, unsigned argc, const char *argv[], unsigned *retries,
+    unsigned master)
 {
     // Initializations.
     redisReply *result = NULL;
@@ -57,7 +57,7 @@ cluster_execute(
             //   - !master ==> use READONLY + READWRITE when dealing with slaves.
             //   - unknown slot ==> random server selection.
             result = redis_execute(
-                ctx, db, state, version, timeout, max_retries, argc, argv,
+                ctx, db, state, timeout, max_retries, argc, argv,
                 retries, server, asking, master, slot);
 
             // Reset flags.
@@ -82,7 +82,7 @@ cluster_execute(
                     hop = 1;
 
                     // Get database lock.
-                    AZ(pthread_mutex_lock(&db->mutex));
+                    Lck_Lock(&db->mutex);
 
                     // Add / fetch server.
                     server = unsafe_add_redis_server(
@@ -120,7 +120,7 @@ cluster_execute(
                     }
 
                     // Release database lock.
-                    AZ(pthread_mutex_unlock(&db->mutex));
+                    Lck_Unlock(&db->mutex);
 
                     // Release reply object.
                     freeReplyObject(result);
@@ -146,15 +146,15 @@ cluster_execute(
         // Too many redirections?
         if (hops == 0) {
             REDIS_LOG_ERROR(ctx,
-                "Too many redirections while executing Redis Cluster command (%s)",
-                argv[0]);
+                "Too many redirections while executing cluster command (command=%s, db=%s)",
+                argv[0], db->name);
         }
 
     // Invalid Redis Cluster command.
     } else {
         REDIS_LOG_ERROR(ctx,
-            "Invalid Redis Cluster command (%s)",
-            argv[0]);
+            "Invalid cluster command (command=%s, db=%s)",
+            argv[0], db->name);
     }
 
     // Done!
@@ -170,6 +170,9 @@ unsafe_add_slot(
     VRT_CTX, struct vmod_redis_db *db, unsigned start, unsigned stop,
     char *host, int port, enum REDIS_SERVER_ROLE role)
 {
+    // Assertions.
+    Lck_AssertHeld(&db->mutex);
+
     // Add / update server.
     char location[256];
     snprintf(location, sizeof(location), "%s:%d", host, port);
@@ -185,17 +188,16 @@ unsafe_add_slot(
 static unsigned
 unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *server)
 {
-    // Check server.
-    CHECK_OBJ_NOTNULL(server, REDIS_SERVER_MAGIC);
+    // Assertions.
+    Lck_AssertHeld(&db->mutex);
     assert(server->location.type == REDIS_SERVER_LOCATION_HOST_TYPE);
 
     // Log event.
     REDIS_LOG_INFO(ctx,
-        "Discovering cluster topology (db=%s, server=%s)",
+        "Discovery of cluster topology started (db=%s, server=%s)",
         db->name, server->location.raw);
 
     // Initializations.
-    int i, j;
     unsigned done = 0;
 
     // Create context.
@@ -211,18 +213,19 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
             server->location.parsed.address.host,
             server->location.parsed.address.port);
     }
-    AN(rcontext);
 
     // Check context.
-    if (!rcontext->err) {
+    if ((rcontext != NULL) && (!rcontext->err)) {
         // Set command execution timeout.
         int tr = redisSetTimeout(rcontext, db->command_timeout);
         if (tr != REDIS_OK) {
-            REDIS_LOG_ERROR(ctx, "Failed to set command execution timeout (%d)", tr);
+            REDIS_LOG_ERROR(ctx,
+                "Failed to set cluster discovery command execution timeout (error=%d, db=%s, server=%s)",
+                tr, server->db->name, server->location.raw);
         }
 
         // Send command.
-        redisReply *reply = redisCommand(rcontext, DISCOVERY_COMMAND);
+        redisReply *reply = redisCommand(rcontext, CLUSTER_DISCOVERY_COMMAND);
 
         // Check reply.
         if ((!rcontext->err) &&
@@ -233,7 +236,7 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
             for (unsigned iweight = 0; iweight < NREDIS_SERVER_WEIGHTS; iweight++) {
                 for (enum REDIS_SERVER_ROLE irole = 0; irole < NREDIS_SERVER_ROLES; irole++) {
                     VTAILQ_FOREACH(iserver, &db->servers[iweight][irole], list) {
-                        for (i = 0; i < NREDIS_CLUSTER_SLOTS; i++) {
+                        for (int i = 0; i < NREDIS_CLUSTER_SLOTS; i++) {
                             iserver->cluster.slots[i] = 0;
                         }
                     }
@@ -241,7 +244,7 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
             }
 
             // Extract slots.
-            for (i = 0; i < reply->elements; i++) {
+            for (int i = 0; i < reply->elements; i++) {
                 if ((reply->element[i]->type == REDIS_REPLY_ARRAY) &&
                     (reply->element[i]->elements >= 3) &&
                     (reply->element[i]->element[0]->type == REDIS_REPLY_INTEGER) &&
@@ -264,7 +267,7 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
                             REDIS_SERVER_MASTER_ROLE);
 
                         // Extract slave servers data.
-                        for (j = 3; j < reply->element[i]->elements; j++) {
+                        for (int j = 3; j < reply->element[i]->elements; j++) {
                             if ((reply->element[i]->element[j]->type == REDIS_REPLY_ARRAY) &&
                                 (reply->element[i]->element[j]->elements >= 2) &&
                                 (reply->element[i]->element[j]->element[0]->type == REDIS_REPLY_STRING) &&
@@ -285,8 +288,8 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
             db->stats.cluster.discoveries.total++;
         } else {
             REDIS_LOG_ERROR(ctx,
-                "Failed to execute Redis command (%s)",
-                DISCOVERY_COMMAND);
+                "Failed to execute cluster discovery command (db=%s, server=%s)",
+                db->name, server->location.raw);
             db->stats.cluster.discoveries.failed++;
         }
 
@@ -295,31 +298,41 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
             freeReplyObject(reply);
         }
     } else {
-        REDIS_LOG_ERROR(ctx,
-            "Failed to establish Redis connection (%d): %s",
-            rcontext->err,
-            rcontext->errstr);
+        if (rcontext != NULL) {
+            REDIS_LOG_ERROR(ctx,
+                "Failed to establish cluster discovery connection (error=%d, db=%s, server=%s): %s",
+                rcontext->err, db->name, server->location.raw, rcontext->errstr);
+        } else {
+            REDIS_LOG_ERROR(ctx,
+                "Failed to establish cluster discovery connection (db=%s, server=%s)",
+                db->name, server->location.raw);
+        }
         db->stats.cluster.discoveries.failed++;
     }
 
     // Release context.
-    redisFree(rcontext);
+    if (rcontext != NULL) {
+        redisFree(rcontext);
+    }
 
     // Done.
     return done;
 }
 
-
 static void
 unsafe_discover_slots(VRT_CTX, struct vmod_redis_db *db, redis_server_t *server)
 {
+    // Assertions.
+    Lck_AssertHeld(&db->mutex);
+
     // Contact already known servers and try to fetch the slots-servers mapping.
     // Always use the provided server instance in the first place.
     if (!unsafe_discover_slots_aux(ctx, db, server)) {
-        redis_server_t *iserver;
         for (unsigned iweight = 0; iweight < NREDIS_SERVER_WEIGHTS; iweight++) {
             for (enum REDIS_SERVER_ROLE irole = 0; irole < NREDIS_SERVER_ROLES; irole++) {
+                redis_server_t *iserver;
                 VTAILQ_FOREACH(iserver, &db->servers[iweight][irole], list) {
+                    CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
                     if ((iserver != server) &&
                         (unsafe_discover_slots_aux(ctx, db, iserver))) {
                         // Lists of servers are only modified on a successful

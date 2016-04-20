@@ -13,6 +13,7 @@ Highlights:
 * **Support for classic Redis deployments** using multiple replicated Redis servers **and for clustered deployments based on Redis Cluster**.
 * **Support for multiple databases and multiple Redis connections**, local to each Varnish worker thread, or shared using one or more pools.
 * **Support for smart command execution**, selecting the destination server according with the preferred role (i.e. master or slave) and with distance and healthiness metrics collected during execution.
+* **Support for Redis Sentinel**, allowing automatic discovery of sick / healthy servers and changes in their roles.
 
 Please, check out `the project wiki <https://github.com/carlosabalde/libvmod-redis/wiki>`_ for some extra information and useful links.
 
@@ -25,13 +26,20 @@ import redis;
 
 ::
 
-    # Initialization.
-    Function init(STRING subnets="")
+    # Subnets.
+    Function subnets(STRING masks="")
 
-    # Configuration.
+    # Sentinels.
+    Function sentinels(
+        STRING locations="",
+        INT period=60,
+        INT connection_timeout=500,
+        INT command_timeout=0)
+
+    # Databases.
     Object db(
         STRING location,
-        ENUM { master, slave, cluster } type,
+        ENUM { master, slave, auto, cluster } type,
         INT connection_timeout=1000,
         INT connection_ttl=0,
         INT command_timeout=0,
@@ -43,7 +51,7 @@ import redis;
         INT max_cluster_hops=32)
     Method VOID .add_server(
         STRING location,
-        ENUM { master, slave, cluster } type)
+        ENUM { master, slave, auto, cluster } type)
 
     # Command execution.
     Method VOID .command(STRING name)
@@ -141,8 +149,13 @@ Multiple servers
     sub vcl_init {
         # VMOD configuration: master-slave replication, keeping up to two
         # Redis connections per Varnish worker thread (up to one to the master
-        # server & up to one to a randomly selected -because subnets information
-        # is not provided- slave server).
+        # server & up to one to the closest slave server).
+        redis.subnets(
+            masks={"
+                0 192.168.1.102/32,
+                1 192.168.1.103/32,
+                2 0.0.0.0/32
+            "});
         new db = redis.db(
             location="192.168.1.100:6379",
             type=master,
@@ -211,6 +224,7 @@ The source tree is based on autotools to configure the building, and does also h
 Dependencies:
 
 * `hiredis <https://github.com/redis/hiredis>`_ - minimalistic C Redis client library.
+* `libev <http://software.schmorp.de/pkg/libev.html>`_ - full-featured and high-performance event loop.
 
 COPYRIGHT
 =========

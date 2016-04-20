@@ -1,14 +1,14 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 3.2
+Version: 3.3
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
 Group: System Environment/Daemons
 Source0: libvmod-redis.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
-Requires: varnish >= 4.1.0, hiredis >= 0.11.0
-BuildRequires: make, python-docutils, varnish >= 4.1.0, varnish-libs-devel >= 4.1.0, hiredis-devel >= 0.11.0
+Requires: varnish >= 4.1.0, hiredis >= 0.11.0, libev >= 4.03
+BuildRequires: make, python-docutils, varnish >= 4.1.0, varnish-libs-devel >= 4.1.0, hiredis-devel >= 0.11.0, libev-devel >= 4.03
 
 %description
 Redis VMOD for Varnish
@@ -36,6 +36,14 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Wed Apr 20 2016 Carlos Abalde <carlos.abalde@gmail.com> - 3.3-1.20160420
+- Added Redis Sentinel support.
+- Added support for auto-discovery of roles.
+- Replaced plain pthread mutexes by Varnish locks.
+- Dynamic allocation of execution plans.
+- Improved logging.
+- Added redis.subnets() (previosuly redis.init()).
+- Improvements & fixes.
 * Tue Apr 12 2016 Carlos Abalde <carlos.abalde@gmail.com> - 3.2-1.20160412
 - Improvements & fixes.
 * Mon Apr 11 2016 Carlos Abalde <carlos.abalde@gmail.com> - 3.1-1.20160411

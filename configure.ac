@@ -1,6 +1,6 @@
 AC_PREREQ(2.59)
 AC_COPYRIGHT([Copyright (c) 2014-2016 Carlos Abalde <carlos.abalde@gmail.com>])
-AC_INIT([libvmod-redis], [3.2])
+AC_INIT([libvmod-redis], [3.3])
 AC_CONFIG_MACRO_DIR([m4])
 m4_ifndef([VARNISH_VMOD_INCLUDES], AC_MSG_ERROR([Need varnish.m4 -- see README.rst]))
 AC_CONFIG_SRCDIR(src/vmod_redis.vcc)
@@ -73,9 +73,18 @@ AC_PATH_PROG([VARNISHTEST], [varnishtest], [],
 AC_PATH_PROG([VARNISHD], [varnishd], [],
     [$LIBVARNISHAPI_SBINDIR:$LIBVARNISHAPI_BINDIR:$PATH])
 
+# Check for libhiredis.
 AC_CHECK_LIB(
     hiredis, redisCommand, [],
     [AC_MSG_ERROR([libvmod-redis requires libhiredis.])])
+
+# Check for libev3 (ev_loop) / libev4 (ev_run).
+# -DEV_COMPAT3=1 used during build.
+AC_CHECK_LIB(
+    ev, ev_loop, [],
+    [AC_CHECK_LIB(
+        ev, ev_run, [],
+        [AC_MSG_ERROR([libvmod-redis requires libev.])])])
 
 AC_CONFIG_FILES([
 	Makefile

@@ -1,3 +1,15 @@
+libvmod-redis (3.3-1) unstable; urgency=low
+
+  * Added Redis Sentinel support
+  * Added support for auto-discovery of roles
+  * Replaced plain pthread mutexes by Varnish locks
+  * Dynamic allocation of execution plans
+  * Improved logging
+  * Added redis.subnets() (previosuly redis.init())
+  * Improvements & fixes
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Wed, 20 Apr 2016 17:00:00 +0200
+
 libvmod-redis (3.2-1) unstable; urgency=low
 
   * Improvements & fixes
