@@ -44,7 +44,7 @@ import redis;
         INT connection_ttl=0,
         INT command_timeout=0,
         INT max_command_retries=0,
-        BOOL shared_connections=1,
+        BOOL shared_connections=true,
         INT max_connections=128,
         STRING password="",
         INT sickness_ttl=60,
@@ -58,7 +58,7 @@ import redis;
     Method VOID .timeout(INT command_timeout)
     Method VOID .retries(INT max_command_retries)
     Method VOID .push(STRING arg)
-    Method VOID .execute(BOOL master=1)
+    Method VOID .execute(BOOL master=true)
 
     # Access to replies.
     Method BOOL .replied()
