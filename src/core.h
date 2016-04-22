@@ -8,29 +8,6 @@
 
 #include "vqueue.h"
 
-typedef struct vmod_state {
-    // Mutex.
-    pthread_mutex_t mutex;
-
-    // Version increased on every VCL warm event (rw field protected by the
-    // associated mutex on writes; it's ok to ignore the lock during reads).
-    // This will be used to (1) reestablish connections binded to worker
-    // threads; and (2) regenerate pooled connections shared between threads.
-    unsigned version;
-
-    // Varnish locks.
-    struct {
-        unsigned refs;
-        struct VSC_C_lck *config;
-        struct VSC_C_lck *db;
-        struct VSC_C_lck *pool;
-    } locks;
-} vmod_state_t;
-
-vmod_state_t *vmod_state();
-
-#define VMOD(member) (vmod_state()->member)
-
 #define NREDIS_SERVER_ROLES 3
 #define NREDIS_SERVER_WEIGHTS 4
 #define NREDIS_CLUSTER_SLOTS 16384
@@ -310,6 +287,27 @@ typedef struct vcl_state {
         unsigned discovery;
     } sentinels;
 } vcl_state_t;
+
+typedef struct vmod_state {
+    // Mutex.
+    pthread_mutex_t mutex;
+
+    // Version increased on every VCL warm event (rw field protected by the
+    // associated mutex on writes; it's ok to ignore the lock during reads).
+    // This will be used to (1) reestablish connections binded to worker
+    // threads; and (2) regenerate pooled connections shared between threads.
+    unsigned version;
+
+    // Varnish locks.
+    struct {
+        unsigned refs;
+        struct VSC_C_lck *config;
+        struct VSC_C_lck *db;
+        struct VSC_C_lck *pool;
+    } locks;
+} vmod_state_t;
+
+extern vmod_state_t vmod_state;
 
 #define REDIS_LOG(ctx, level, message, ...) \
     do { \
