@@ -493,7 +493,7 @@ unsafe_set_locations(struct state *state, const char *locations)
 static void
 store_sentinel_reply(
     struct sentinel *sentinel, const char *host, unsigned port,
-    enum REDIS_SERVER_ROLE role, unsigned down)
+    enum REDIS_SERVER_ROLE role, int down)
 {
     // Initializations.
     struct server *server = NULL;
@@ -509,13 +509,16 @@ store_sentinel_reply(
 
     // Register / update server.
     if (server == NULL) {
-        server = new_server(sentinel, host, port, role, down);
+        server = new_server(sentinel, host, port, role, down > 0);
         VTAILQ_INSERT_TAIL(&sentinel->state->servers, server, list);
         sentinel->state->last_change = time(NULL);
-    } else if ((server->role != role) || (server->down != down)) {
+    } else if ((server->role != role) ||
+               ((down >= 0) && (server->down != down))) {
         server->sentinel = sentinel;
         server->role = role;
-        server->down = down;
+        if (down >= 0) {
+            server->down = down;
+        }
         sentinel->state->last_change = time(NULL);
     }
 }
@@ -634,7 +637,7 @@ parse_sentinel_notification(struct sentinel *sentinel, redisReply *reply)
             // Register / update server.
             store_sentinel_reply(
                 sentinel, old_ip, old_port,
-                REDIS_SERVER_SLAVE_ROLE, 1);
+                REDIS_SERVER_SLAVE_ROLE, -1);
             store_sentinel_reply(
                 sentinel, new_ip, new_port,
                 REDIS_SERVER_MASTER_ROLE, 0);
