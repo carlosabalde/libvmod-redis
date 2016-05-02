@@ -1,3 +1,9 @@
+libvmod-redis (3.4-1) unstable; urgency=low
+
+  * Stop assuming down flag on +switch-master events
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Mon, 02 May 2016 17:00:00 +0200
+
 libvmod-redis (3.3-1) unstable; urgency=low
 
   * Added Redis Sentinel support
