@@ -41,15 +41,15 @@ handle_vcl_load_event(VRT_CTX, struct vmod_priv *vcl_priv)
     AZ(pthread_once(&thread_once, make_thread_key));
 
     // Initialize Varnish locks.
-    if (VMOD(locks.refs) == 0) {
-        VMOD(locks.config) = Lck_CreateClass("redis.config");
-        AN(VMOD(locks.config));
-        VMOD(locks.db) = Lck_CreateClass("redis.db");
-        AN(VMOD(locks.db));
-        VMOD(locks.pool) = Lck_CreateClass("redis.pool");
-        AN(VMOD(locks.pool));
+    if (vmod_state.locks.refs == 0) {
+        vmod_state.locks.config = Lck_CreateClass("redis.config");
+        AN(vmod_state.locks.config);
+        vmod_state.locks.db = Lck_CreateClass("redis.db");
+        AN(vmod_state.locks.db);
+        vmod_state.locks.pool = Lck_CreateClass("redis.pool");
+        AN(vmod_state.locks.pool);
     }
-    VMOD(locks.refs)++;
+    vmod_state.locks.refs++;
 
     // Initialize configuration in the local VCL data structure.
     vcl_priv->priv = new_vcl_state();
@@ -63,9 +63,9 @@ static int
 handle_vcl_warm_event(VRT_CTX, vcl_state_t *config)
 {
     // Increase global version
-    AZ(pthread_mutex_lock(&VMOD(mutex)));
-    VMOD(version)++;
-    AZ(pthread_mutex_unlock(&VMOD(mutex)));
+    AZ(pthread_mutex_lock(&vmod_state.mutex));
+    vmod_state.version++;
+    AZ(pthread_mutex_unlock(&vmod_state.mutex));
 
     // Start Sentinel thread?
     Lck_Lock(&config->mutex);
@@ -165,14 +165,14 @@ static int
 handle_vcl_discard_event(VRT_CTX, vcl_state_t *config)
 {
     // Assertions.
-    assert(VMOD(locks.refs) > 0);
+    assert(vmod_state.locks.refs > 0);
 
     // Release Varnish locks.
-    VMOD(locks.refs)--;
-    if (VMOD(locks.refs) == 0) {
-        VSM_Free(VMOD(locks.config));
-        VSM_Free(VMOD(locks.db));
-        VSM_Free(VMOD(locks.pool));
+    vmod_state.locks.refs--;
+    if (vmod_state.locks.refs == 0) {
+        VSM_Free(vmod_state.locks.config);
+        VSM_Free(vmod_state.locks.db);
+        VSM_Free(vmod_state.locks.pool);
     }
 
     // Done!

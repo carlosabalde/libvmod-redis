@@ -16,7 +16,7 @@
 
 #define ROLE_DISCOVERY_COMMAND "ROLE"
 
-static vmod_state_t state = {
+vmod_state_t vmod_state = {
     .mutex = PTHREAD_MUTEX_INITIALIZER,
     .version = 0,
     .locks.refs = 0,
@@ -24,12 +24,6 @@ static vmod_state_t state = {
     .locks.db = NULL,
     .locks.pool = NULL
 };
-
-vmod_state_t *
-vmod_state()
-{
-    return &state;
-}
 
 struct plan {
     // Ordered list of private contexts, including a reference to the next item
@@ -109,7 +103,7 @@ new_redis_server(
 
     result->weight = 0;
 
-    Lck_New(&result->pool.mutex, VMOD(locks.pool));
+    Lck_New(&result->pool.mutex, vmod_state.locks.pool);
     AZ(pthread_cond_init(&result->pool.cond, NULL));
 
     result->pool.ncontexts = 0;
@@ -189,7 +183,7 @@ new_redis_context(
 
     result->server = server;
     result->rcontext = rcontext;
-    result->version = VMOD(version);
+    result->version = vmod_state.version;
     result->tst = tst;
 
     return result;
@@ -220,7 +214,7 @@ new_vmod_redis_db(
     ALLOC_OBJ(result, VMOD_REDIS_DATABASE_MAGIC);
     AN(result);
 
-    Lck_New(&result->mutex, VMOD(locks.db));
+    Lck_New(&result->mutex, vmod_state.locks.db);
 
     result->config = config;
 
@@ -382,7 +376,7 @@ new_vcl_state()
     ALLOC_OBJ(result, VCL_STATE_MAGIC);
     AN(result);
 
-    Lck_New(&result->mutex, VMOD(locks.config));
+    Lck_New(&result->mutex, vmod_state.locks.config);
 
     VTAILQ_INIT(&result->subnets);
 
@@ -967,7 +961,7 @@ is_valid_redis_context(redis_context_t *context, time_t now)
     }
 
     // Check if context is too old (version).
-    if (context->version != VMOD(version)) {
+    if (context->version != vmod_state.version) {
         Lck_Lock(&context->server->db->mutex);
         context->server->db->stats.connections.dropped.version++;
         Lck_Unlock(&context->server->db->mutex);
