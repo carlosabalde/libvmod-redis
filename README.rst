@@ -104,6 +104,7 @@ Single server
         # per Varnish worker thread.
         new db = redis.db(
             location="192.168.1.100:6379",
+            type=master,
             connection_timeout=500,
             shared_connections=false,
             max_connections=1);
