@@ -48,14 +48,14 @@ static enum REDIS_SERVER_ROLE unsafe_discover_redis_server_role(
     VRT_CTX, redis_server_t *server);
 
 static struct plan *plan_execution(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
+    VRT_CTX, struct vmod_redis_db *db, task_state_t *state,
     unsigned size, redis_server_t *server, unsigned master, unsigned slot);
 
 static redis_context_t *lock_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, struct plan *plan);
+    VRT_CTX, struct vmod_redis_db *db, task_state_t *state, struct plan *plan);
 
 static void unlock_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, redis_context_t *context);
+    VRT_CTX, struct vmod_redis_db *db, task_state_t *state, redis_context_t *context);
 
 static redisReply *get_redis_repy(
     VRT_CTX, redis_context_t *context, struct timeval timeout, unsigned argc,
@@ -327,11 +327,11 @@ free_vmod_redis_db(struct vmod_redis_db *db)
     FREE_OBJ(db);
 }
 
-thread_state_t *
-new_thread_state()
+task_state_t *
+new_task_state()
 {
-    thread_state_t *result;
-    ALLOC_OBJ(result, THREAD_STATE_MAGIC);
+    task_state_t *result;
+    ALLOC_OBJ(result, TASK_STATE_MAGIC);
     AN(result);
 
     result->ncontexts = 0;
@@ -347,7 +347,7 @@ new_thread_state()
 }
 
 void
-free_thread_state(thread_state_t *state)
+free_task_state(task_state_t *state)
 {
     state->ncontexts = 0;
     redis_context_t *icontext;
@@ -475,7 +475,7 @@ free_database(database_t *db)
 
 redisReply *
 redis_execute(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, struct timeval timeout,
+    VRT_CTX, struct vmod_redis_db *db, task_state_t *state, struct timeval timeout,
     unsigned max_retries, unsigned argc, const char *argv[], unsigned *retries,
     redis_server_t *server, unsigned asking, unsigned master, unsigned slot)
 {
@@ -1029,7 +1029,7 @@ new_execution_plan(VRT_CTX, struct vmod_redis_db *db)
 
 void
 populate_simple_execution_plan(
-    VRT_CTX, struct plan *plan, struct vmod_redis_db *db, thread_state_t *state,
+    VRT_CTX, struct plan *plan, struct vmod_redis_db *db, task_state_t *state,
     unsigned max_size, redis_server_t *server)
 {
     // Populate list of contexts?
@@ -1092,7 +1092,7 @@ populate_simple_execution_plan(
 
 void
 populate_execution_plan(
-    VRT_CTX, struct plan *plan, struct vmod_redis_db *db, thread_state_t *state,
+    VRT_CTX, struct plan *plan, struct vmod_redis_db *db, task_state_t *state,
     unsigned max_size, unsigned master, unsigned slot)
 {
     // Initializations.
@@ -1293,7 +1293,7 @@ populate_execution_plan(
 
 static struct plan *
 plan_execution(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,
+    VRT_CTX, struct vmod_redis_db *db, task_state_t *state,
     unsigned max_size, redis_server_t *server, unsigned master, unsigned slot)
 {
     // Initializations.
@@ -1315,7 +1315,7 @@ plan_execution(
 
 static redis_context_t *
 lock_private_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, struct plan *plan)
+    VRT_CTX, struct vmod_redis_db *db, task_state_t *state, struct plan *plan)
 {
     // Initializations.
     redis_context_t *result = NULL;
@@ -1363,7 +1363,7 @@ lock_private_redis_context(
 
 static redis_context_t *
 lock_shared_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, struct plan *plan)
+    VRT_CTX, struct vmod_redis_db *db, task_state_t *state, struct plan *plan)
 {
     // Initializations.
     redis_context_t *result = NULL;
@@ -1436,7 +1436,7 @@ retry:
 
 static redis_context_t *
 lock_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, struct plan *plan)
+    VRT_CTX, struct vmod_redis_db *db, task_state_t *state, struct plan *plan)
 {
     if (db->shared_connections) {
         return lock_shared_redis_context(ctx, db, state, plan);
@@ -1463,7 +1463,7 @@ unlock_shared_redis_context(
 
 static void
 unlock_redis_context(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state,  redis_context_t *context)
+    VRT_CTX, struct vmod_redis_db *db, task_state_t *state,  redis_context_t *context)
 {
     if (db->shared_connections) {
         return unlock_shared_redis_context(ctx, db, context);
