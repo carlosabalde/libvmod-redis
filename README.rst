@@ -198,7 +198,7 @@ Clustered setup
             shared_connections=true,
             max_connections=128,
             max_cluster_hops=16);
-        cluster.add_server("192.168.1.101:6379", cluster);
+        db.add_server("192.168.1.101:6379", cluster);
     }
 
     sub vcl_deliver {
