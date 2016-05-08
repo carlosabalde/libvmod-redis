@@ -205,9 +205,9 @@ struct vmod_redis_db {
     } stats;
 };
 
-typedef struct thread_state {
+typedef struct task_state {
     // Object marker.
-#define THREAD_STATE_MAGIC 0xa6bc103e
+#define TASK_STATE_MAGIC 0xa6bc103e
     unsigned magic;
 
     // Private contexts (allocated in the heap).
@@ -227,7 +227,7 @@ typedef struct thread_state {
         const char *argv[MAX_REDIS_COMMAND_ARGS];
         redisReply *reply;
     } command;
-} thread_state_t;
+} task_state_t;
 
 typedef struct subnet {
     // Object marker.
@@ -363,8 +363,8 @@ struct vmod_redis_db *new_vmod_redis_db(
     unsigned sickness_ttl, unsigned clustered, unsigned max_cluster_hops);
 void free_vmod_redis_db(struct vmod_redis_db *db);
 
-thread_state_t *new_thread_state();
-void free_thread_state(thread_state_t *state);
+task_state_t *new_task_state();
+void free_task_state(task_state_t *state);
 
 vcl_state_t *new_vcl_state();
 void free_vcl_state(vcl_state_t *priv);
@@ -376,7 +376,7 @@ database_t *new_database(struct vmod_redis_db *db);
 void free_database(database_t *db);
 
 redisReply *redis_execute(
-    VRT_CTX, struct vmod_redis_db *db, thread_state_t *state, struct timeval timeout,
+    VRT_CTX, struct vmod_redis_db *db, task_state_t *state, struct timeval timeout,
     unsigned max_retries, unsigned argc, const char *argv[], unsigned *retries,
     redis_server_t *server, unsigned asking, unsigned master, unsigned slot);
 
