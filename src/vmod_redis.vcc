@@ -32,15 +32,15 @@ Arguments
     executing a Redis command. It can be overridden during command execution
     with ``.timeout()``.
 
-    command_retries: number of retries to be executed after a failed command
+    max_command_retries: number of retries to be executed after a failed command
     execution. It can be overridden during command execution with
     ``.retries()``.
 
-    shared_contexts: if enabled, Redis connections are not local to Varnish
+    shared_connections: if enabled, Redis connections are not local to Varnish
     worker threads, but shared by all threads using one or more pools.
 
-    max_contexts:
-        When ``shared_contexts`` is enabled, the VMOD creates one pool of
+    max_connections:
+        When ``shared_connections`` is enabled, the VMOD creates one pool of
         Redis connections per location and database instance. This option sets
         the maximum number of connections in each pool. All Varnish worker
         threads using the same database instance will share connections in these
@@ -50,7 +50,7 @@ Arguments
         server is the cluster is internally labeled by the VMOD with its
         location (host + port).
 
-        When ``shared_contexts`` is disabled, Redis connections are local to
+        When ``shared_connections`` is disabled, Redis connections are local to
         each Varnish worker thread. This option sets the maximum number of Redis
         connections per Varnish worker thread. Each thread keeps up to one
         connection per location and database instance. If more than one (database,
@@ -119,7 +119,7 @@ Description
 $Method VOID .retries(INT)
 
 Arguments
-    command_retries: number of retries to be executed after a failed command
+    max_command_retries: number of retries to be executed after a failed command
     execution.
 Description
     Allows overriding the default number of retries provided when calling
@@ -142,51 +142,51 @@ Description
 $Method BOOL .replied()
 
 Return value
-    TRUE if a previously executed Redis command using
-    ``.execute()`` returned any reply. Not returning a reply usually means
-    a failed connection, a connection timeout, etc.
+    TRUE if a previously executed Redis command using ``.execute()`` returned
+    any reply. Not returning a reply usually means a failed connection, a
+    connection timeout, etc.
 
 $Method BOOL .reply_is_error()
 
 Return value
-    TRUE if a previously executed Redis command using
-    ``.execute()`` returned an error reply.
+    TRUE if a previously executed Redis command using ``.execute()`` returned
+    an error reply.
 
 $Method BOOL .reply_is_nil()
 
 Return value
-    TRUE if a previously executed Redis command using
-    ``.execute()`` returned a nil reply.
+    TRUE if a previously executed Redis command using ``.execute()`` returned a
+    nil reply.
 
 $Method BOOL .reply_is_status()
 
 Return value
-    TRUE if a previously executed Redis command using
-    ``.execute()`` returned a status reply.
+    TRUE if a previously executed Redis command using ``.execute()`` returned a
+    status reply.
 
 $Method BOOL .reply_is_integer()
 
 Return value
-    TRUE if a previously executed Redis command
-    ``.execute()`` returned an integer reply.
+    TRUE if a previously executed Redis command ``.execute()`` returned an
+    integer reply.
 
 $Method BOOL .reply_is_string()
 
 Return value
-    TRUE if a previously executed Redis command
-    ``.execute()`` returned a string reply.
+    TRUE if a previously executed Redis command ``.execute()`` returned a
+    string reply.
 
 $Method BOOL .reply_is_array()
 
 Return value
-    TRUE if a previously executed Redis command using
-    ``.execute()`` returned an array reply.
+    TRUE if a previously executed Redis command using ``.execute()`` returned
+    an array reply.
 
 $Method STRING .get_reply()
 
 Return value
-    A string representation of the reply of a previously executed
-    Redis command using ``.execute()``.
+    A string representation of the reply of a previously executed Redis command
+    using ``.execute()``.
 Description
     Do not use this function to access to array replies.
 
@@ -212,7 +212,7 @@ Return value
 $Method STRING .get_string_reply()
 
 Return value
-    If a previously executed Redis command using ``.execute()`` returned
+    If a previously executed Redis command using ``.execute()`` returned a
     string reply, this function returns a string representation of that reply.
 
 $Method INT .get_array_reply_length()
@@ -280,7 +280,7 @@ Description
 $Method STRING .stats()
 
 Description
-    Returns internal stats.
+    Returns internal stats represented as a JSON string.
 
 $Method INT .counter(STRING)
 
