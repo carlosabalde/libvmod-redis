@@ -10,7 +10,7 @@ Highlights:
 * **Full support for execution of LUA scripts** (i.e. ``EVAL`` command), including optimistic automatic execution of ``EVALSHA`` commands.
 * **All Redis reply data types are supported**, including partial support to access to components of simple (i.e. not nested) array replies.
 * **Redis pipelines are not (and won't be) supported**. LUA scripting, which is fully supported by the VMOD, it's a much more flexible alternative to pipelines for atomic execution and minimizing latency. Pipelines are hard to use and error prone, specially when using the ``WATCH`` command.
-* **Support for classic Redis deployments** using multiple Redis servers (replicated or standalone) **and for clustered deployments based on Redis Cluster**.
+* **Support for classic Redis deployments** using multiple replicated Redis servers **and for clustered deployments based on Redis Cluster**.
 * **Support for multiple Redis connections**, local to each Varnish worker thread, or shared using one or more pools.
 
 Please, check out `the project wiki <https://github.com/carlosabalde/libvmod-redis/wiki>`_ for some extra information and useful links.
@@ -26,14 +26,14 @@ import redis;
 
     # Configuration.
     Object db(
-        LOCATION, CONNECTION_TIMEOUT, CONNECTION_TTL, COMMAND_TIMEOUT, COMMAND_RETRIES,
-        SHARED_CONTEXTS, MAX_CONTEXTS, PASSWORD, CLUSTERED, MAX_CLUSTER_HOPS)
+        LOCATION, CONNECTION_TIMEOUT, CONNECTION_TTL, COMMAND_TIMEOUT, MAX_COMMAND_RETRIES,
+        SHARED_CONNECTIONS, MAX_CONNECTIONS, PASSWORD, CLUSTERED, MAX_CLUSTER_HOPS)
     Method VOID .add_server(LOCATION)
 
     # Command execution.
     Method VOID .command(COMMAND)
     Method VOID .timeout(COMMAND_TIMEOUT)
-    Method VOID .retries(COMMAND_RETRIES)
+    Method VOID .retries(MAX_COMMAND_RETRIES)
     Method VOID .push(ARGUMENT)
     Method VOID .execute()
 
@@ -156,22 +156,22 @@ Clustered setup
         # connections are not discarded when switching VCL. They are only closed
         # when the old VCL is discarded! This limitation will be fixed in future
         # versions.
-        new cluster = redis.db("192.168.1.100:6379", 500, 0, 0, 0, true, 100, "", true, 16);
-        cluster.add_server("192.168.1.101:6379");
+        new db = redis.db("192.168.1.100:6379", 500, 0, 0, 0, true, 100, "", true, 16);
+        db.add_server("192.168.1.101:6379");
     }
 
     sub vcl_deliver {
         # SET internally routed to the destination server.
-        cluster.command("SET");
-        cluster.push("foo");
-        cluster.push("Hello world!");
-        cluster.execute();
+        db.command("SET");
+        db.push("foo");
+        db.push("Hello world!");
+        db.execute();
 
         # GET internally routed to the destination server.
-        cluster.command("GET");
-        cluster.push("foo");
-        cluster.execute();
-        set req.http.X-Foo = cluster.get_string_reply();
+        db.command("GET");
+        db.push("foo");
+        db.execute();
+        set req.http.X-Foo = db.get_string_reply();
     }
 
 INSTALLATION

@@ -1,3 +1,9 @@
+libvmod-redis (2.1-1) unstable; urgency=low
+
+  * Fixes & improved backported from 4.1 branch
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Wed, 18 May 2016 17:00:00 +0200
+
 libvmod-redis (2.0-1) unstable; urgency=low
 
   * New version numbering scheme

@@ -12,15 +12,11 @@
 #include "cluster.h"
 #include "core.h"
 
-static unsigned version = 0;
-
-static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-
 static pthread_once_t thread_once = PTHREAD_ONCE_INIT;
 static pthread_key_t thread_key;
 
 static thread_state_t *get_thread_state(VRT_CTX, unsigned flush);
-static void make_thread_key();
+static void flush_thread_state(thread_state_t *state);
 
 static const char *get_reply(VRT_CTX, redisReply *reply);
 
@@ -28,28 +24,27 @@ static const char *get_reply(VRT_CTX, redisReply *reply);
  * VMOD INITIALIZATION.
  *****************************************************************************/
 
+static void
+make_thread_key()
+{
+    AZ(pthread_key_create(&thread_key, (void *) free_thread_state));
+}
+
 int
 init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
 {
-    // Initialize global state shared with all VCLs. This code *is
-    // required* to be thread safe.
-    //   - Initialize (once) the key required to store thread-specific data.
-    //   - Increase (every time the VMOD is initialized) the global version.
-    //     This will be used to reestablish Redis connections binded to
-    //     worker threads during reloads. Pooled connections shared between
-    //     threads are stored in a VMOD object, which is regenerated every
-    //     time the VCL is reloaded.
+    // Initialize (once) the key required to store thread-specific data.
     AZ(pthread_once(&thread_once, make_thread_key));
-    AZ(pthread_mutex_lock(&mutex));
-    version++;
-    AZ(pthread_mutex_unlock(&mutex));
 
-    // Initialize the local VCL data structure and set its free function.
-    // Code initializing / freeing the VCL private data structure *is
-    // not required* to be thread safe.
+    // Increase global version
+    AZ(pthread_mutex_lock(&vmod_state.mutex));
+    vmod_state.version++;
+    AZ(pthread_mutex_unlock(&vmod_state.mutex));
+
+    // Initialize configuration in the local VCL data structure.
     if (vcl_priv->priv == NULL) {
-        vcl_priv->priv = new_vcl_priv();
-        vcl_priv->free = (vmod_priv_free_f *)free_vcl_priv;
+        vcl_priv->priv = new_vcl_state();
+        vcl_priv->free = (vmod_priv_free_f *)free_vcl_state;
     }
 
     // Done!
@@ -63,9 +58,9 @@ init_function(struct vmod_priv *vcl_priv, const struct VCL_conf *conf)
 VCL_VOID
 vmod_db__init(
     VRT_CTX, struct vmod_redis_db **db, const char *vcl_name,
-    VCL_STRING location, VCL_INT connection_timeout, VCL_INT context_ttl,
-    VCL_INT command_timeout, VCL_INT command_retries, VCL_BOOL shared_contexts,
-    VCL_INT max_contexts, VCL_STRING password, VCL_BOOL clustered,
+    VCL_STRING location, VCL_INT connection_timeout, VCL_INT connection_ttl,
+    VCL_INT command_timeout, VCL_INT max_command_retries, VCL_BOOL shared_connections,
+    VCL_INT max_connections, VCL_STRING password, VCL_BOOL clustered,
     VCL_INT max_cluster_hops)
 {
     // Assert input.
@@ -75,8 +70,13 @@ vmod_db__init(
 
     // Check input.
     if ((location != NULL) && (strlen(location) > 0) &&
-        (max_contexts > 0) &&
-        (password != NULL)) {
+        (connection_timeout >= 0) &&
+        (connection_ttl >= 0) &&
+        (command_timeout >= 0) &&
+        (max_command_retries >= 0) &&
+        (max_connections >= 0) &&
+        (password != NULL) &&
+        (max_cluster_hops >= 0)) {
         // Initializations.
         struct timeval connection_timeout_tv;
         connection_timeout_tv.tv_sec = connection_timeout / 1000;
@@ -87,22 +87,29 @@ vmod_db__init(
 
         // Create new database instance.
         struct vmod_redis_db *instance = new_vmod_redis_db(
-            vcl_name, connection_timeout_tv, context_ttl, command_timeout_tv,
-            command_retries, shared_contexts, max_contexts,
+            vcl_name, connection_timeout_tv, connection_ttl, command_timeout_tv,
+            max_command_retries, shared_connections, max_connections,
             password, clustered, max_cluster_hops);
 
         // Add initial server.
+        AZ(pthread_mutex_lock(&instance->mutex));
         redis_server_t *server = unsafe_add_redis_server(ctx, instance, location);
+        AZ(pthread_mutex_unlock(&instance->mutex));
 
         // Do not continue if we failed to create the server instance.
         if (server != NULL) {
-            // Populate the slots-servers mapping.
+            // Launch initial discovery of the cluster topology?
             if (instance->cluster.enabled) {
                 discover_cluster_slots(ctx, instance, server);
             }
 
             // Return the new database instance.
             *db = instance;
+
+            // Log event.
+            REDIS_LOG_INFO(ctx,
+                "New database instance registered (db=%s)",
+                instance->name);
         } else {
             free_vmod_redis_db(instance);
             *db = NULL;
@@ -117,7 +124,12 @@ vmod_db__fini(struct vmod_redis_db **db)
     AN(db);
     AN(*db);
 
-    // Release database instance.
+    // Log event.
+    REDIS_LOG_INFO(NULL,
+        "Unregistering database instance (db=%s)",
+        (*db)->name);
+
+    // Unregister database instance.
     free_vmod_redis_db(*db);
     *db = NULL;
 }
@@ -150,7 +162,7 @@ vmod_db_command(VRT_CTX, struct vmod_redis_db *db, VCL_STRING name)
         // Initialize.
         state->command.db = db;
         state->command.timeout = db->command_timeout;
-        state->command.retries = db->command_retries;
+        state->command.max_retries = db->max_command_retries;
         state->command.argc = 1;
         state->command.argv[0] = WS_Copy(ctx->ws, name, -1);
         AN(state->command.argv[0]);
@@ -180,7 +192,7 @@ vmod_db_timeout(VRT_CTX, struct vmod_redis_db *db, VCL_INT command_timeout)
  *****************************************************************************/
 
 VCL_VOID
-vmod_db_retries(VRT_CTX, struct vmod_redis_db *db, VCL_INT command_retries)
+vmod_db_retries(VRT_CTX, struct vmod_redis_db *db, VCL_INT max_command_retries)
 {
     // Fetch local thread state.
     thread_state_t *state = get_thread_state(ctx, 0);
@@ -188,7 +200,7 @@ vmod_db_retries(VRT_CTX, struct vmod_redis_db *db, VCL_INT command_retries)
     // Do not continue if the initial call to .command() was not executed
     // or if running this in a different database.
     if ((state->command.argc >= 1) && (state->command.db == db)) {
-        state->command.retries = command_retries;
+        state->command.max_retries = max_command_retries;
     }
 }
 
@@ -216,7 +228,7 @@ vmod_db_push(VRT_CTX, struct vmod_redis_db *db, VCL_STRING arg)
         }
         AN(state->command.argv[state->command.argc - 1]);
     } else {
-        REDIS_LOG(ctx,
+        REDIS_LOG_ERROR(ctx,
             "Failed to push Redis argument (limit is %d)",
             MAX_REDIS_COMMAND_ARGS);
     }
@@ -235,25 +247,25 @@ vmod_db_execute(VRT_CTX, struct vmod_redis_db *db)
     // Do not continue if the initial call to .command() was not executed
     // or if running this in a different database.
     if ((state->command.argc >= 1) && (state->command.db == db)) {
-        // Clustered vs. classic execution.
+        // Clustered vs. standalone execution.
         if (db->cluster.enabled) {
             state->command.reply = cluster_execute(
-                ctx, db, state, version,
-                state->command.timeout, state->command.retries,
+                ctx, db, state,
+                state->command.timeout, state->command.max_retries,
                 state->command.argc, state->command.argv);
         } else {
-            int tries = 1 + state->command.retries;
+            int tries = 1 + state->command.max_retries;
             while ((tries > 0) && (state->command.reply == NULL)) {
                 state->command.reply = redis_execute(
-                    ctx, db, state, NULL, version,
+                    ctx, db, state, NULL,
                     state->command.timeout,
                     state->command.argc, state->command.argv, 0);
                 tries--;
             }
 
-            if (tries < state->command.retries) {
+            if (tries < state->command.max_retries) {
                 AZ(pthread_mutex_lock(&db->mutex));
-                db->stats.commands.retried += state->command.retries - tries;
+                db->stats.commands.retried += state->command.max_retries - tries;
                 AZ(pthread_mutex_unlock(&db->mutex));
             }
         }
@@ -262,10 +274,9 @@ vmod_db_execute(VRT_CTX, struct vmod_redis_db *db)
         // commands).
         if ((state->command.reply != NULL) &&
             (state->command.reply->type == REDIS_REPLY_ERROR)) {
-            REDIS_LOG(ctx,
-                "Got error reply while executing Redis command (%s): %s",
-                state->command.argv[0],
-                state->command.reply->str);
+            REDIS_LOG_ERROR(ctx,
+                "Got error reply while executing command (command=%s, db=%s): %s",
+                state->command.argv[0], db->name, state->command.reply->str);
 
             AZ(pthread_mutex_lock(&db->mutex));
             db->stats.commands.error++;
@@ -558,7 +569,7 @@ vmod_db_counter(VRT_CTX, struct vmod_redis_db *db, VCL_STRING name)
     } else if (strcmp(name, "cluster.replies.ask") == 0) {
         return db->stats.cluster.replies.ask;
     } else {
-        REDIS_LOG(ctx,
+        REDIS_LOG_ERROR(ctx,
             "Failed to fetch counter '%s'",
             name);
         return 0;
@@ -585,14 +596,7 @@ get_thread_state(VRT_CTX, unsigned flush)
 
     // Flush enqueued command?
     if (flush) {
-        result->command.db = NULL;
-        result->command.timeout = (struct timeval){ 0 };
-        result->command.retries = 0;
-        result->command.argc = 0;
-        if (result->command.reply != NULL) {
-            freeReplyObject(result->command.reply);
-            result->command.reply = NULL;
-        }
+        flush_thread_state(result);
     }
 
     // Done!
@@ -600,9 +604,16 @@ get_thread_state(VRT_CTX, unsigned flush)
 }
 
 static void
-make_thread_key()
+flush_thread_state(thread_state_t *state)
 {
-    AZ(pthread_key_create(&thread_key, (void *) free_thread_state));
+    state->command.db = NULL;
+    state->command.timeout = (struct timeval){ 0 };
+    state->command.max_retries = 0;
+    state->command.argc = 0;
+    if (state->command.reply != NULL) {
+        freeReplyObject(state->command.reply);
+        state->command.reply = NULL;
+    }
 }
 
 static const char *
