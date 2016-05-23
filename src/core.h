@@ -259,7 +259,7 @@ typedef struct database {
     VTAILQ_ENTRY(database) list;
 } database_t;
 
-typedef struct vcl_state {
+struct vcl_state {
     // Object marker.
 #define VCL_STATE_MAGIC 0x77feec11
     unsigned magic;
@@ -286,7 +286,7 @@ typedef struct vcl_state {
         unsigned active;
         unsigned discovery;
     } sentinels;
-} vcl_state_t;
+};
 
 typedef struct vmod_state {
     // Mutex.
