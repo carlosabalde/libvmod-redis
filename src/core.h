@@ -12,6 +12,10 @@
 #define NREDIS_SERVER_WEIGHTS 4
 #define NREDIS_CLUSTER_SLOTS 16384
 
+// Required lock ordering to avoid deadlocks:
+//   1. vcl_state->mutex.
+//   3. vmod_redis_db->mutex.
+
 // WARNING: ordering of roles in this enumeration is relevant when populating
 // an execution plan.
 enum REDIS_SERVER_ROLE {
@@ -54,12 +58,11 @@ typedef struct redis_server {
 
     // Shared pool.
     struct {
-        // Mutex & condition variable.
-        struct lock mutex;
+        // Condition variable.
         pthread_cond_t cond;
 
-        // Contexts (rw fields -allocated in the heap- to be protected by the
-        // associated mutex and condition variable).
+        // Contexts (rw fields -allocated in the heap- to be protected by
+        // db->mutex and the associated condition variable).
         unsigned ncontexts;
         VTAILQ_HEAD(,redis_context) free_contexts;
         VTAILQ_HEAD(,redis_context) busy_contexts;
@@ -303,7 +306,6 @@ typedef struct vmod_state {
         unsigned refs;
         struct VSC_C_lck *config;
         struct VSC_C_lck *db;
-        struct VSC_C_lck *pool;
     } locks;
 } vmod_state_t;
 
