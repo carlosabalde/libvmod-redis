@@ -25,9 +25,11 @@ static unsigned get_cluster_slot(const char *key);
 void
 discover_cluster_slots(VRT_CTX, struct vmod_redis_db *db, redis_server_t *server)
 {
+    Lck_Lock(&db->config->mutex);
     Lck_Lock(&db->mutex);
     unsafe_discover_slots(ctx, db, server);
     Lck_Unlock(&db->mutex);
+    Lck_Unlock(&db->config->mutex);
 }
 
 redisReply *
@@ -81,7 +83,8 @@ cluster_execute(
                     // Set hop flag.
                     hop = 1;
 
-                    // Get database lock.
+                    // Get config & database locks.
+                    Lck_Lock(&db->config->mutex);
                     Lck_Lock(&db->mutex);
 
                     // Add / fetch server.
@@ -119,8 +122,9 @@ cluster_execute(
                         asking = 1;
                     }
 
-                    // Release database lock.
+                    // Release config & database locks.
                     Lck_Unlock(&db->mutex);
+                    Lck_Unlock(&db->config->mutex);
 
                     // Release reply object.
                     freeReplyObject(result);
@@ -171,6 +175,7 @@ unsafe_add_slot(
     char *host, int port, enum REDIS_SERVER_ROLE role)
 {
     // Assertions.
+    Lck_AssertHeld(&db->config->mutex);
     Lck_AssertHeld(&db->mutex);
 
     // Add / update server.
@@ -189,6 +194,7 @@ static unsigned
 unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *server)
 {
     // Assertions.
+    Lck_AssertHeld(&db->config->mutex);
     Lck_AssertHeld(&db->mutex);
     assert(server->location.type == REDIS_SERVER_LOCATION_HOST_TYPE);
 
@@ -323,6 +329,7 @@ static void
 unsafe_discover_slots(VRT_CTX, struct vmod_redis_db *db, redis_server_t *server)
 {
     // Assertions.
+    Lck_AssertHeld(&db->config->mutex);
     Lck_AssertHeld(&db->mutex);
 
     // Contact already known servers and try to fetch the slots-servers mapping.
