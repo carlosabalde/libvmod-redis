@@ -46,8 +46,6 @@ handle_vcl_load_event(VRT_CTX, struct vmod_priv *vcl_priv)
         AN(vmod_state.locks.config);
         vmod_state.locks.db = Lck_CreateClass("redis.db");
         AN(vmod_state.locks.db);
-        vmod_state.locks.pool = Lck_CreateClass("redis.pool");
-        AN(vmod_state.locks.pool);
     }
     vmod_state.locks.refs++;
 
@@ -121,9 +119,6 @@ handle_vcl_cold_event(VRT_CTX, vcl_state_t *config)
                     // Assertions.
                     CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
 
-                    // Get pool lock.
-                    Lck_Lock(&iserver->pool.mutex);
-
                     // Release all contexts (both free an busy; this method is
                     // assumed to be called when threads are not using the pool).
                     iserver->pool.ncontexts = 0;
@@ -142,9 +137,6 @@ handle_vcl_cold_event(VRT_CTX, vcl_state_t *config)
                         VTAILQ_REMOVE(&iserver->pool.busy_contexts, icontext, list);
                         free_redis_context(icontext);
                     }
-
-                    // Release pool lock.
-                    Lck_Unlock(&iserver->pool.mutex);
                 }
             }
         }
@@ -172,7 +164,6 @@ handle_vcl_discard_event(VRT_CTX, vcl_state_t *config)
     if (vmod_state.locks.refs == 0) {
         VSM_Free(vmod_state.locks.config);
         VSM_Free(vmod_state.locks.db);
-        VSM_Free(vmod_state.locks.pool);
     }
 
     // Done!
@@ -455,9 +446,11 @@ vmod_db__init(
             password, sickness_ttl, clustered, max_cluster_hops);
 
         // Add initial server.
+        Lck_Lock(&config->mutex);
         Lck_Lock(&instance->mutex);
         redis_server_t *server = unsafe_add_redis_server(ctx, instance, location, role);
         Lck_Unlock(&instance->mutex);
+        Lck_Unlock(&config->mutex);
 
         // Do not continue if we failed to create the server instance.
         if (server != NULL) {
@@ -539,9 +532,11 @@ vmod_db_add_server(
         }
 
         // Add server.
+        Lck_Lock(&db->config->mutex);
         Lck_Lock(&db->mutex);
         unsafe_add_redis_server(ctx, db, location, role);
         Lck_Unlock(&db->mutex);
+        Lck_Unlock(&db->config->mutex);
     }
 }
 

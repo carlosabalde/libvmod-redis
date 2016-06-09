@@ -21,8 +21,7 @@ vmod_state_t vmod_state = {
     .version = 0,
     .locks.refs = 0,
     .locks.config = NULL,
-    .locks.db = NULL,
-    .locks.pool = NULL
+    .locks.db = NULL
 };
 
 struct plan {
@@ -103,7 +102,6 @@ new_redis_server(
 
     result->weight = 0;
 
-    Lck_New(&result->pool.mutex, vmod_state.locks.pool);
     AZ(pthread_cond_init(&result->pool.cond, NULL));
 
     result->pool.ncontexts = 0;
@@ -145,7 +143,6 @@ free_redis_server(redis_server_t *server)
 
     server->weight = 0;
 
-    Lck_Delete(&server->pool.mutex);
     AZ(pthread_cond_destroy(&server->pool.cond));
 
     server->pool.ncontexts = 0;
@@ -625,6 +622,7 @@ unsafe_add_redis_server(
     VRT_CTX, struct vmod_redis_db *db, const char *location, enum REDIS_SERVER_ROLE role)
 {
     // Assertions.
+    Lck_AssertHeld(&db->config->mutex);
     Lck_AssertHeld(&db->mutex);
 
     // Initializations.
@@ -668,7 +666,6 @@ unsafe_add_redis_server(
                 if (inet_pton(AF_INET, result->location.parsed.address.host, &ia4)) {
                     result->weight = NREDIS_SERVER_WEIGHTS - 1;
                     subnet_t *isubnet;
-                    Lck_Lock(&db->config->mutex);
                     VTAILQ_FOREACH(isubnet, &db->config->subnets, list) {
                         CHECK_OBJ_NOTNULL(isubnet, SUBNET_MAGIC);
                         if ((ntohl(ia4.s_addr) & isubnet->mask.s_addr) ==
@@ -677,7 +674,6 @@ unsafe_add_redis_server(
                             break;
                         }
                     }
-                    Lck_Unlock(&db->config->mutex);
                 } else {
                     result->weight = NREDIS_SERVER_WEIGHTS - 1;
                 }
@@ -736,9 +732,7 @@ unsafe_add_redis_server(
 
         // Trigger Sentinel discovery?
         if ((db->config->sentinels.active) && (!db->cluster.enabled)) {
-            Lck_Lock(&db->config->mutex);
             unsafe_sentinel_discovery(db->config);
-            Lck_Unlock(&db->config->mutex);
         }
     }
 
@@ -950,42 +944,45 @@ unsafe_discover_redis_server_role(VRT_CTX, redis_server_t *server)
 }
 
 static unsigned
-is_valid_redis_context(redis_context_t *context, time_t now)
+is_valid_redis_context(redis_context_t *context, time_t now, unsigned dblocked)
 {
+    // Assertions.
+    if (dblocked) Lck_AssertHeld(&context->server->db->mutex);
+
     // Check if context is in an error state.
     if (context->rcontext->err) {
-        Lck_Lock(&context->server->db->mutex);
+        if (!dblocked) Lck_Lock(&context->server->db->mutex);
         context->server->db->stats.connections.dropped.error++;
-        Lck_Unlock(&context->server->db->mutex);
+        if (!dblocked) Lck_Unlock(&context->server->db->mutex);
         return 0;
     }
 
     // Check if context is too old (version).
     if (context->version != vmod_state.version) {
-        Lck_Lock(&context->server->db->mutex);
+        if (!dblocked) Lck_Lock(&context->server->db->mutex);
         context->server->db->stats.connections.dropped.version++;
-        Lck_Unlock(&context->server->db->mutex);
+        if (!dblocked) Lck_Unlock(&context->server->db->mutex);
         return 0;
     }
 
     // Check if context is too old (TTL).
     if ((context->server->db->connection_ttl > 0) &&
         (now - context->tst > context->server->db->connection_ttl)) {
-        Lck_Lock(&context->server->db->mutex);
+        if (!dblocked) Lck_Lock(&context->server->db->mutex);
         context->server->db->stats.connections.dropped.ttl++;
-        Lck_Unlock(&context->server->db->mutex);
+        if (!dblocked) Lck_Unlock(&context->server->db->mutex);
         return 0;
     }
 
     // Check if context was created before the server was flagged
     // as sick.
     unsigned sick = 0;
-    Lck_Lock(&context->server->db->mutex);
+    if (!dblocked) Lck_Lock(&context->server->db->mutex);
     if (context->tst <= context->server->sickness.tst) {
         sick = 1;
         context->server->db->stats.connections.dropped.sick++;
     }
-    Lck_Unlock(&context->server->db->mutex);
+    if (!dblocked) Lck_Unlock(&context->server->db->mutex);
     if (sick) {
         return 0;
     }
@@ -995,9 +992,9 @@ is_valid_redis_context(redis_context_t *context, time_t now)
     fds.fd = context->rcontext->fd;
     fds.events = POLLOUT;
     if ((poll(&fds, 1, 0) != 1) || (fds.revents & POLLHUP)) {
-        Lck_Lock(&context->server->db->mutex);
+        if (!dblocked) Lck_Lock(&context->server->db->mutex);
         context->server->db->stats.connections.dropped.hung_up++;
-        Lck_Unlock(&context->server->db->mutex);
+        if (!dblocked) Lck_Unlock(&context->server->db->mutex);
         return 0;
     }
 
@@ -1047,7 +1044,7 @@ populate_simple_execution_plan(
             CHECK_OBJ_NOTNULL(icontext, REDIS_CONTEXT_MAGIC);
             if ((icontext->server->db == db) &&
                 (icontext->server == server)) {
-                if (is_valid_redis_context(icontext, now)) {
+                if (is_valid_redis_context(icontext, now, 0)) {
                     if (free_ws >= sizeof(redis_context_t *)) {
                         used_ws += sizeof(redis_context_t *);
                         plan->contexts.list[plan->contexts.n++] = icontext;
@@ -1115,7 +1112,7 @@ populate_execution_plan(
                  (!master && (icontext->server->role != REDIS_SERVER_MASTER_ROLE))) &&
                 ((!db->cluster.enabled) ||
                  (icontext->server->cluster.slots[slot]))) {
-                if (is_valid_redis_context(icontext, now)) {
+                if (is_valid_redis_context(icontext, now, 0)) {
                     if (free_ws >= sizeof(redis_context_t *)) {
                         used_ws += sizeof(redis_context_t *);
                         plan->contexts.list[plan->contexts.n++] = icontext;
@@ -1374,8 +1371,8 @@ lock_shared_redis_context(
     redis_server_t *server = plan->servers.list[plan->servers.next];
     plan->servers.next = (plan->servers.next + 1) % plan->servers.n;
 
-    // Get pool lock.
-    Lck_Lock(&server->pool.mutex);
+    // Get database lock.
+    Lck_Lock(&server->db->mutex);
 
 retry:
     // Look for an existing free context.
@@ -1389,7 +1386,7 @@ retry:
         VTAILQ_INSERT_TAIL(&server->pool.busy_contexts, result, list);
 
         // Is the context valid?
-        if (!is_valid_redis_context(result, now)) {
+        if (!is_valid_redis_context(result, now, 1)) {
             // Release context.
             VTAILQ_REMOVE(&server->pool.busy_contexts, result, list);
             server->pool.ncontexts--;
@@ -1410,16 +1407,14 @@ retry:
     if (result == NULL) {
         // If an no more contexts can be created, wait for another thread.
         if (server->pool.ncontexts >= db->max_connections) {
-            Lck_CondWait(&server->pool.cond, &server->pool.mutex, 0);
-            Lck_Lock(&db->mutex);
+            Lck_CondWait(&server->pool.cond, &server->db->mutex, 0);
             db->stats.workers.blocked++;
-            Lck_Unlock(&db->mutex);
             goto retry;
         }
 
         // Create new context using the previously selected server. If any
         // error arises discard the context and return.
-        redisContext *rcontext = new_rcontext(ctx, server, now, 0, 0);
+        redisContext *rcontext = new_rcontext(ctx, server, now, 0, 1);
         if (rcontext != NULL) {
             result = new_redis_context(server, rcontext, now);
             VTAILQ_INSERT_TAIL(&server->pool.busy_contexts, result, list);
@@ -1427,8 +1422,8 @@ retry:
         }
     }
 
-    // Release pool lock.
-    Lck_Unlock(&server->pool.mutex);
+    // Release database lock.
+    Lck_Unlock(&server->db->mutex);
 
     // Done!
     return result;
@@ -1454,11 +1449,11 @@ unlock_shared_redis_context(
     CHECK_OBJ_NOTNULL(context->server, REDIS_SERVER_MAGIC);
 
     // Return context to the pool's free list.
-    Lck_Lock(&context->server->pool.mutex);
+    Lck_Lock(&context->server->db->mutex);
     VTAILQ_REMOVE(&context->server->pool.busy_contexts, context, list);
     VTAILQ_INSERT_TAIL(&context->server->pool.free_contexts, context, list);
     AZ(pthread_cond_signal(&context->server->pool.cond));
-    Lck_Unlock(&context->server->pool.mutex);
+    Lck_Unlock(&context->server->db->mutex);
 }
 
 static void
