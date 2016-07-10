@@ -21,8 +21,7 @@
 enum REDIS_SERVER_ROLE {
     REDIS_SERVER_SLAVE_ROLE = 0,
     REDIS_SERVER_MASTER_ROLE = 1,
-    REDIS_SERVER_TBD_ROLE = 2,
-    REDIS_SERVER_UNKNOWN_ROLE // Better keep this one last and unspecified!
+    REDIS_SERVER_TBD_ROLE = 2
 };
 
 enum REDIS_SERVER_LOCATION_TYPE {
@@ -383,13 +382,7 @@ redisReply *redis_execute(
     unsigned max_retries, unsigned argc, const char *argv[], unsigned *retries,
     redis_server_t *server, unsigned asking, unsigned master, unsigned slot);
 
-redis_server_t * find_redis_server(
-    VRT_CTX, struct vmod_redis_db *db, const char *location, enum REDIS_SERVER_ROLE role,
-    unsigned *iweight, enum REDIS_SERVER_ROLE *irole);
 redis_server_t * unsafe_add_redis_server(
     VRT_CTX, struct vmod_redis_db *db, const char *location, enum REDIS_SERVER_ROLE role);
-
-enum REDIS_SERVER_ROLE find_redis_server_role(
-    VCL_ENUM type);
 
 #endif
