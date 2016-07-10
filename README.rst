@@ -38,8 +38,8 @@ import redis;
 
     # Databases.
     Object db(
-        STRING location,
-        ENUM { master, slave, auto, cluster } type,
+        STRING location="",
+        ENUM { master, slave, auto, cluster } type="auto",
         INT connection_timeout=1000,
         INT connection_ttl=0,
         INT command_timeout=0,

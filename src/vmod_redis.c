@@ -21,6 +21,8 @@ static pthread_key_t thread_key;
 static task_state_t *get_task_state(VRT_CTX, unsigned flush);
 static void flush_task_state(task_state_t *state);
 
+static enum REDIS_SERVER_ROLE type2role(const char *type);
+
 static const char *get_reply(VRT_CTX, redisReply *reply);
 
 /******************************************************************************
@@ -402,8 +404,7 @@ vmod_db__init(
     AZ(*db);
 
     // Check input.
-    if ((location != NULL) && (strlen(location) > 0) &&
-        (connection_timeout >= 0) &&
+    if ((connection_timeout >= 0) &&
         (connection_ttl >= 0) &&
         (command_timeout >= 0) &&
         (max_command_retries >= 0) &&
@@ -421,23 +422,8 @@ vmod_db__init(
         command_timeout_tv.tv_usec = (command_timeout % 1000) * 1000;
 
         // Extract role & clustering flag.
-        unsigned clustered;
-        enum REDIS_SERVER_ROLE role;
-        if (strcmp(type, "master") == 0) {
-            role = REDIS_SERVER_MASTER_ROLE;
-            clustered = 0;
-        } else if (strcmp(type, "slave") == 0) {
-            role = REDIS_SERVER_SLAVE_ROLE;
-            clustered = 0;
-        } else if (strcmp(type, "auto") == 0) {
-            role = REDIS_SERVER_TBD_ROLE;
-            clustered = 0;
-        } else if (strcmp(type, "cluster") == 0) {
-            role = REDIS_SERVER_TBD_ROLE;
-            clustered = 1;
-        } else {
-            WRONG("Invalid server type value.");
-        }
+        enum REDIS_SERVER_ROLE role = type2role(type);
+        unsigned clustered = strcmp(type, "cluster") == 0;
 
         // Create new database instance.
         struct vmod_redis_db *instance = new_vmod_redis_db(
@@ -445,35 +431,34 @@ vmod_db__init(
             command_timeout_tv, max_command_retries, shared_connections, max_connections,
             password, sickness_ttl, clustered, max_cluster_hops);
 
-        // Add initial server.
-        Lck_Lock(&config->mutex);
-        Lck_Lock(&instance->mutex);
-        redis_server_t *server = unsafe_add_redis_server(ctx, instance, location, role);
-        Lck_Unlock(&instance->mutex);
-        Lck_Unlock(&config->mutex);
+        // Add initial server if provided.
+        if ((location != NULL) && (strlen(location) > 0)) {
+            // Add initial server.
+            Lck_Lock(&config->mutex);
+            Lck_Lock(&instance->mutex);
+            redis_server_t *server = unsafe_add_redis_server(ctx, instance, location, role);
+            Lck_Unlock(&instance->mutex);
+            Lck_Unlock(&config->mutex);
 
-        // Do not continue if we failed to create the server instance.
-        if (server != NULL) {
-            // Launch initial discovery of the cluster topology?
+            // Launch initial discovery of the cluster topology? This is not
+            // required (i.e. it will be executed on demand) but it's a nice
+            // thing to do while bootstrapping a new database instance.
             if (instance->cluster.enabled) {
                 discover_cluster_slots(ctx, instance, server);
             }
-
-            // Register & return the new database instance.
-            database_t *database = new_database(instance);
-            Lck_Lock(&config->mutex);
-            VTAILQ_INSERT_TAIL(&config->dbs, database, list);
-            Lck_Unlock(&config->mutex);
-            *db = instance;
-
-            // Log event.
-            REDIS_LOG_INFO(ctx,
-                "New database instance registered (db=%s)",
-                instance->name);
-        } else {
-            free_vmod_redis_db(instance);
-            *db = NULL;
         }
+
+        // Register & return the new database instance.
+        database_t *database = new_database(instance);
+        Lck_Lock(&config->mutex);
+        VTAILQ_INSERT_TAIL(&config->dbs, database, list);
+        Lck_Unlock(&config->mutex);
+        *db = instance;
+
+        // Log event.
+        REDIS_LOG_INFO(ctx,
+            "New database instance registered (db=%s)",
+            instance->name);
     }
 }
 
@@ -518,25 +503,25 @@ vmod_db_add_server(
     if ((location != NULL) && (strlen(location) > 0) &&
         ((!db->cluster.enabled || strcmp(type, "cluster") == 0))) {
         // Extract role.
-        enum REDIS_SERVER_ROLE role;
-        if (strcmp(type, "master") == 0) {
-            role = REDIS_SERVER_MASTER_ROLE;
-        } else if (strcmp(type, "slave") == 0) {
-            role = REDIS_SERVER_SLAVE_ROLE;
-        } else if (strcmp(type, "auto") == 0) {
-            role = REDIS_SERVER_TBD_ROLE;
-        } else if (strcmp(type, "cluster") == 0) {
-            role = REDIS_SERVER_TBD_ROLE;
-        } else {
-            WRONG("Invalid server type value.");
-        }
+        enum REDIS_SERVER_ROLE role = type2role(type);
 
         // Add server.
         Lck_Lock(&db->config->mutex);
         Lck_Lock(&db->mutex);
-        unsafe_add_redis_server(ctx, db, location, role);
+        redis_server_t *server = unsafe_add_redis_server(ctx, db, location, role);
+        unsigned discovery =
+            (server != NULL) &&
+            (db->cluster.enabled) &&
+            ((db->stats.cluster.discoveries.total -
+              db->stats.cluster.discoveries.failed) == 0);
         Lck_Unlock(&db->mutex);
         Lck_Unlock(&db->config->mutex);
+
+        // Launch initial discovery of the cluster topology? This flag has been
+        // previously calculated while holding the appropriate locks.
+        if (discovery) {
+            discover_cluster_slots(ctx, db, server);
+        }
     }
 }
 
@@ -1034,6 +1019,24 @@ flush_task_state(task_state_t *state)
         freeReplyObject(state->command.reply);
         state->command.reply = NULL;
     }
+}
+
+static enum REDIS_SERVER_ROLE
+type2role(const char *type)
+{
+    enum REDIS_SERVER_ROLE result;
+    if (strcmp(type, "master") == 0) {
+        result = REDIS_SERVER_MASTER_ROLE;
+    } else if (strcmp(type, "slave") == 0) {
+        result = REDIS_SERVER_SLAVE_ROLE;
+    } else if (strcmp(type, "auto") == 0) {
+        result = REDIS_SERVER_TBD_ROLE;
+    } else if (strcmp(type, "cluster") == 0) {
+        result = REDIS_SERVER_TBD_ROLE;
+    } else {
+        WRONG("Invalid server type value.");
+    }
+    return result;
 }
 
 static const char *

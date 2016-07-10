@@ -14,7 +14,7 @@
 
 // Required lock ordering to avoid deadlocks:
 //   1. vcl_state->mutex.
-//   3. vmod_redis_db->mutex.
+//   2. vmod_redis_db->mutex.
 
 // WARNING: ordering of roles in this enumeration is relevant when populating
 // an execution plan.
