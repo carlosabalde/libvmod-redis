@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 3.5
+Version: 3.6
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,8 +36,10 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Mon Jul 11 2016 Carlos Abalde <carlos.abalde@gmail.com> - 3.6-1.20160711
+- Allowed server-less database instantiation.
 * Thu Jun 09 2016 Carlos Abalde <carlos.abalde@gmail.com> - 3.5-1.20160609
-- Avoid deadlocks enforcing lock ordering + simplifying locking model.
+- Avoided deadlocks enforcing lock ordering + simplifying locking model.
 * Mon May 02 2016 Carlos Abalde <carlos.abalde@gmail.com> - 3.4-1.20160502
 - Stop assuming down flag on +switch-master events.
 * Wed Apr 20 2016 Carlos Abalde <carlos.abalde@gmail.com> - 3.3-1.20160420
