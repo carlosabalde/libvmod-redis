@@ -402,8 +402,7 @@ vmod_db__init(
     AZ(*db);
 
     // Check input.
-    if ((location != NULL) && (strlen(location) > 0) &&
-        (connection_timeout >= 0) &&
+    if ((connection_timeout >= 0) &&
         (connection_ttl >= 0) &&
         (command_timeout >= 0) &&
         (max_command_retries >= 0) &&
@@ -423,57 +422,42 @@ vmod_db__init(
         // Extract role & clustering flag.
         unsigned clustered;
         enum REDIS_SERVER_ROLE role;
-        if (strcmp(type, "master") == 0) {
-            role = REDIS_SERVER_MASTER_ROLE;
-            clustered = 0;
-        } else if (strcmp(type, "slave") == 0) {
-            role = REDIS_SERVER_SLAVE_ROLE;
-            clustered = 0;
-        } else if (strcmp(type, "auto") == 0) {
-            role = REDIS_SERVER_TBD_ROLE;
-            clustered = 0;
-        } else if (strcmp(type, "cluster") == 0) {
-            role = REDIS_SERVER_TBD_ROLE;
-            clustered = 1;
-        } else {
+        role = find_redis_server_role(type);
+        if (role == REDIS_SERVER_UNKNOWN_ROLE) {
             WRONG("Invalid server type value.");
         }
+        clustered = role == REDIS_SERVER_TBD_ROLE;
 
         // Create new database instance.
-        struct vmod_redis_db *instance = new_vmod_redis_db(
+        *db = new_vmod_redis_db(
             config, vcl_name, connection_timeout_tv, connection_ttl,
             command_timeout_tv, max_command_retries, shared_connections, max_connections,
             password, sickness_ttl, clustered, max_cluster_hops);
 
-        // Add initial server.
+        if ((location != NULL) && (strlen(location) > 0)) {
+            vmod_db_add_server(ctx, *db, location, type);
+
+            // Play nice and don't change interface: original interface did free memory
+            // and nulified db when unable to add redis server.
+            unsigned iweight;
+            enum REDIS_SERVER_ROLE irole;
+            if (!find_redis_server(ctx, *db, location, role, &iweight, &irole)) {
+                free_vmod_redis_db(*db);
+                *db = NULL;
+                return;
+            }
+        }
+
+        // Register & return the new database instance.
+        database_t *database = new_database(*db);
         Lck_Lock(&config->mutex);
-        Lck_Lock(&instance->mutex);
-        redis_server_t *server = unsafe_add_redis_server(ctx, instance, location, role);
-        Lck_Unlock(&instance->mutex);
+        VTAILQ_INSERT_TAIL(&config->dbs, database, list);
         Lck_Unlock(&config->mutex);
 
-        // Do not continue if we failed to create the server instance.
-        if (server != NULL) {
-            // Launch initial discovery of the cluster topology?
-            if (instance->cluster.enabled) {
-                discover_cluster_slots(ctx, instance, server);
-            }
-
-            // Register & return the new database instance.
-            database_t *database = new_database(instance);
-            Lck_Lock(&config->mutex);
-            VTAILQ_INSERT_TAIL(&config->dbs, database, list);
-            Lck_Unlock(&config->mutex);
-            *db = instance;
-
-            // Log event.
-            REDIS_LOG_INFO(ctx,
-                "New database instance registered (db=%s)",
-                instance->name);
-        } else {
-            free_vmod_redis_db(instance);
-            *db = NULL;
-        }
+        // Log event.
+        REDIS_LOG_INFO(ctx,
+            "New database instance registered (db=%s)",
+            (*db)->name);
     }
 }
 
@@ -515,28 +499,29 @@ VCL_VOID
 vmod_db_add_server(
     VRT_CTX, struct vmod_redis_db *db, VCL_STRING location, VCL_ENUM type)
 {
-    if ((location != NULL) && (strlen(location) > 0) &&
-        ((!db->cluster.enabled || strcmp(type, "cluster") == 0))) {
+    if ((location != NULL) && (strlen(location) > 0)) {
         // Extract role.
         enum REDIS_SERVER_ROLE role;
-        if (strcmp(type, "master") == 0) {
-            role = REDIS_SERVER_MASTER_ROLE;
-        } else if (strcmp(type, "slave") == 0) {
-            role = REDIS_SERVER_SLAVE_ROLE;
-        } else if (strcmp(type, "auto") == 0) {
-            role = REDIS_SERVER_TBD_ROLE;
-        } else if (strcmp(type, "cluster") == 0) {
-            role = REDIS_SERVER_TBD_ROLE;
-        } else {
+        role = find_redis_server_role(type);
+        if (role == REDIS_SERVER_UNKNOWN_ROLE) {
             WRONG("Invalid server type value.");
         }
 
         // Add server.
         Lck_Lock(&db->config->mutex);
         Lck_Lock(&db->mutex);
-        unsafe_add_redis_server(ctx, db, location, role);
+        redis_server_t *server = unsafe_add_redis_server(ctx, db, location, role);
         Lck_Unlock(&db->mutex);
         Lck_Unlock(&db->config->mutex);
+
+        // Launch initial discovery of the cluster topology, if we have
+        // been able to add our first redis server, this is a cluster and
+        // no initial discoveries have been launched so far.
+        if ((server != NULL) && (db->cluster.enabled) &&
+            ((db->stats.cluster.discoveries.total == 0) &&
+             (db->stats.cluster.discoveries.failed == 0))) {
+                discover_cluster_slots(ctx, db, server);
+        }
     }
 }
 

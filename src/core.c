@@ -618,6 +618,33 @@ redis_execute(
 }
 
 redis_server_t *
+find_redis_server(
+    VRT_CTX, struct vmod_redis_db *db, const char *location, enum REDIS_SERVER_ROLE role,
+    unsigned *iweight, enum REDIS_SERVER_ROLE *irole)
+{
+    // Initializations.
+    redis_server_t *result = NULL;
+
+    for (*iweight = 0;
+         result == NULL && *iweight < NREDIS_SERVER_WEIGHTS;
+         (*iweight)++) {
+        for (*irole = 0;
+             result == NULL && *irole < NREDIS_SERVER_ROLES;
+             (*irole)++) {
+            redis_server_t *iserver;
+            VTAILQ_FOREACH(iserver, &db->servers[*iweight][*irole], list) {
+                CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
+                if (strcmp(iserver->location.raw, location) == 0) {
+                    result = iserver;
+                    break;
+                }
+            }
+        }
+    }
+    return(result);
+}
+
+redis_server_t *
 unsafe_add_redis_server(
     VRT_CTX, struct vmod_redis_db *db, const char *location, enum REDIS_SERVER_ROLE role)
 {
@@ -627,25 +654,14 @@ unsafe_add_redis_server(
 
     // Initializations.
     redis_server_t *result = NULL;
+    unsigned iweight;
+    enum REDIS_SERVER_ROLE irole;
 
     // Look for a server matching the location. If found, remove if from the
     // list. It would be reinserted later, perhaps in a different list.
-    for (unsigned iweight = 0;
-         result == NULL && iweight < NREDIS_SERVER_WEIGHTS;
-         iweight++) {
-        for (enum REDIS_SERVER_ROLE irole = 0;
-             result == NULL && irole < NREDIS_SERVER_ROLES;
-             irole++) {
-            redis_server_t *iserver;
-            VTAILQ_FOREACH(iserver, &db->servers[iweight][irole], list) {
-                CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
-                if (strcmp(iserver->location.raw, location) == 0) {
-                    VTAILQ_REMOVE(&db->servers[iweight][irole], iserver, list);
-                    result = iserver;
-                    break;
-                }
-            }
-        }
+    result = find_redis_server(ctx, db, location, role, &iweight, &irole);
+    if (result) {
+        VTAILQ_REMOVE(&db->servers[iweight][irole], result, list);
     }
 
     // Create a new server instance?
@@ -738,6 +754,24 @@ unsafe_add_redis_server(
 
     // Done!
     return result;
+}
+
+enum REDIS_SERVER_ROLE
+find_redis_server_role(VCL_ENUM type)
+{
+    enum REDIS_SERVER_ROLE role;
+    if (strcmp(type, "master") == 0) {
+        role = REDIS_SERVER_MASTER_ROLE;
+    } else if (strcmp(type, "slave") == 0) {
+        role = REDIS_SERVER_SLAVE_ROLE;
+    } else if (strcmp(type, "auto") == 0) {
+        role = REDIS_SERVER_TBD_ROLE;
+    } else if (strcmp(type, "cluster") == 0) {
+        role = REDIS_SERVER_TBD_ROLE;
+    } else {
+        role = REDIS_SERVER_UNKNOWN_ROLE;
+    }
+    return role;
 }
 
 /******************************************************************************
