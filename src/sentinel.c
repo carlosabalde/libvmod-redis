@@ -208,6 +208,10 @@ sentinel_loop(void *object)
         state->config->sentinels.period);
     Lck_Unlock(&state->config->mutex);
 
+    // Initializations.
+    struct ev_loop* loop = ev_loop_new(EVFLAG_AUTO);
+    AN(loop);
+
     // Thread loop.
     while (1) {
         // Assertions.
@@ -248,7 +252,7 @@ sentinel_loop(void *object)
                 isentinel->context = redisAsyncConnect(isentinel->host, isentinel->port);
                 if ((isentinel->context != NULL ) && (!isentinel->context->err)) {
                     isentinel->context->data = isentinel;
-                    redisLibevAttach(EV_DEFAULT_ isentinel->context);
+                    redisLibevAttach(loop, isentinel->context);
                     redisAsyncSetConnectCallback(isentinel->context, connectCallback);
                     redisAsyncSetDisconnectCallback(isentinel->context, disconnectCallback);
                     redisAsyncCommand(isentinel->context, subscribeCallback, isentinel, SUBSCRIPTION_COMMAND);
@@ -271,7 +275,7 @@ sentinel_loop(void *object)
 
         // Look for pending Pub/Sub events, handle those events, update servers
         // and continue execution.
-        ev_loop(EV_DEFAULT_ EVRUN_NOWAIT);
+        ev_loop(loop, EVRUN_NOWAIT);
 
         // Only update database objects if a proactive discovery has been
         // explicitly requested or if some change was found during this check.
@@ -296,6 +300,7 @@ sentinel_loop(void *object)
     Lck_Unlock(&state->config->mutex);
 
     // Done!
+    ev_loop_destroy(loop);
     free_state(state);
     return NULL;
 }
