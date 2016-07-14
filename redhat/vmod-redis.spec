@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 3.7
+Version: 3.8
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,6 +36,8 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Tue Jul 14 2016 Carlos Abalde <carlos.abalde@gmail.com> - 3.8-1.20160714
+- Fixed crash when destroying ev loops.
 * Mon Jul 13 2016 Carlos Abalde <carlos.abalde@gmail.com> - 3.7-1.20160713
 - Fixed shared ev loop.
 * Mon Jul 11 2016 Carlos Abalde <carlos.abalde@gmail.com> - 3.6-1.20160711

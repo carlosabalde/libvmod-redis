@@ -300,8 +300,8 @@ sentinel_loop(void *object)
     Lck_Unlock(&state->config->mutex);
 
     // Done!
-    ev_loop_destroy(loop);
     free_state(state);
+    ev_loop_destroy(loop);
     return NULL;
 }
 
