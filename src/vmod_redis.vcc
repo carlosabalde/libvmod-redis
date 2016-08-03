@@ -135,8 +135,9 @@ Arguments
         experience inconsistent behavior.
 
     password: if not empty, requests for authentication using the ``AUTH``
-    command will be submitted when creating new Redis connections. This argument
-    is ignored when Redis Cluster support is enabled.
+    command will be submitted when creating new Redis connections. This
+    password will be used for all Redis servers, including discovered servers
+    when Redis Cluster support is enabled.
 
     sickness_ttl: TTL (seconds) of the sickness flag (0 means no sickness flags)
     associated to a Redis server. Once a server is flagged as sick and while the

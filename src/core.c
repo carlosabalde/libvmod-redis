@@ -229,7 +229,7 @@ new_vmod_redis_db(
     result->max_command_retries = max_command_retries;
     result->shared_connections = shared_connections;
     result->max_connections = max_connections;
-    if (!clustered && (strlen(password) > 0)) {
+    if (strlen(password) > 0) {
         result->password = strdup(password);
         AN(result->password);
     } else {
@@ -803,38 +803,11 @@ new_rcontext(
 
     // Submit AUTH command.
     if ((result != NULL) && (server->db->password != NULL)) {
-        // Send command.
-        redisReply *reply = redisCommand(result, "AUTH %s", server->db->password);
-
-        // Check reply.
-        if ((result->err) ||
-            (reply == NULL) ||
-            (reply->type != REDIS_REPLY_STATUS) ||
-            (strcmp(reply->str, "OK") != 0)) {
-            if (result->err) {
-                REDIS_LOG_ERROR(ctx,
-                    "Failed to authenticate connection (error=%d, db=%s, server=%s): %s",
-                    result->err, server->db->name, server->location.raw, result->errstr);
-            } else if ((reply != NULL) &&
-                       ((reply->type == REDIS_REPLY_ERROR) ||
-                        (reply->type == REDIS_REPLY_STATUS) ||
-                        (reply->type == REDIS_REPLY_STRING))) {
-                REDIS_LOG_ERROR(ctx,
-                    "Failed to authenticate connection (error=%d, db=%s, server=%s): %s",
-                    reply->type, server->db->name, server->location.raw, reply->str);
-            } else {
-                REDIS_LOG_ERROR(ctx,
-                    "Failed to authenticate connection (db=%s, server=%s)",
-                    server->db->name, server->location.raw);
-            }
-            redisFree(result);
-            result = NULL;
-        }
-
-        // Release reply.
-        if (reply != NULL) {
-            freeReplyObject(reply);
-        }
+        REDIS_AUTH(
+            ctx, result, server->db->password,
+            "Failed to authenticate connection",
+            "db=%s, server=%s",
+            server->db->name, server->location.raw);
     }
 
     // Update stats & sickness flag.
