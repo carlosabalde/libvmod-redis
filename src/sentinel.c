@@ -184,7 +184,7 @@ disconnectCallback(const redisAsyncContext *context, int status)
 }
 
 static void
-subscribeCallback(redisAsyncContext *conext, void *reply, void *s)
+subscribeCallback(redisAsyncContext *context, void *reply, void *s)
 {
     struct sentinel *sentinel;
     CAST_OBJ_NOTNULL(sentinel, s, SENTINEL_MAGIC);
@@ -255,7 +255,15 @@ sentinel_loop(void *object)
                     redisLibevAttach(loop, isentinel->context);
                     redisAsyncSetConnectCallback(isentinel->context, connectCallback);
                     redisAsyncSetDisconnectCallback(isentinel->context, disconnectCallback);
-                    redisAsyncCommand(isentinel->context, subscribeCallback, isentinel, SUBSCRIPTION_COMMAND);
+                    if (redisAsyncCommand(
+                            isentinel->context, subscribeCallback, isentinel,
+                            SUBSCRIPTION_COMMAND) != REDIS_OK) {
+                        redisAsyncFree(isentinel->context);
+                        isentinel->context = NULL;
+                        REDIS_LOG_ERROR(NULL,
+                            "Failed to enqueue asynchronous Sentinel command (sentinel=%s:%d)",
+                            isentinel->host, isentinel->port);
+                    }
                 } else {
                     if (isentinel->context != NULL) {
                         redisAsyncFree(isentinel->context);
