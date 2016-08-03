@@ -350,6 +350,39 @@ extern vmod_state_t vmod_state;
 #define REDIS_LOG_INFO(ctx, message, ...) \
     REDIS_LOG(ctx, LOG_INFO, message, ##__VA_ARGS__)
 
+#define REDIS_AUTH(ctx, rcontext, password, message1, message2, ...) \
+    do { \
+        redisReply *reply = redisCommand(rcontext, "AUTH %s", password); \
+        \
+        if ((rcontext->err) || \
+            (reply == NULL) || \
+            (reply->type != REDIS_REPLY_STATUS) || \
+            (strcmp(reply->str, "OK") != 0)) { \
+            if (rcontext->err) { \
+                REDIS_LOG_ERROR(ctx, \
+                    message1 " (error=%d, " message2 "): %s", \
+                    rcontext->err, ##__VA_ARGS__, rcontext->errstr); \
+            } else if ((reply != NULL) && \
+                       ((reply->type == REDIS_REPLY_ERROR) || \
+                        (reply->type == REDIS_REPLY_STATUS) || \
+                        (reply->type == REDIS_REPLY_STRING))) { \
+                REDIS_LOG_ERROR(ctx, \
+                    message1 " (error=%d, " message2 "): %s", \
+                    reply->type, ##__VA_ARGS__, reply->str); \
+            } else { \
+                REDIS_LOG_ERROR(ctx, \
+                    message1 " (" message2 ")", \
+                    ##__VA_ARGS__); \
+            } \
+            redisFree(rcontext); \
+            rcontext = NULL; \
+        } \
+         \
+        if (reply != NULL) {  \
+            freeReplyObject(reply);  \
+        } \
+    } while (0)
+
 redis_server_t *new_redis_server(
     struct vmod_redis_db *db, const char *location, enum REDIS_SERVER_ROLE role);
 void free_redis_server(redis_server_t *server);

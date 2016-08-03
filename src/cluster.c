@@ -222,86 +222,100 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
 
     // Check context.
     if ((rcontext != NULL) && (!rcontext->err)) {
-        // Set command execution timeout.
-        int tr = redisSetTimeout(rcontext, db->command_timeout);
-        if (tr != REDIS_OK) {
-            REDIS_LOG_ERROR(ctx,
-                "Failed to set cluster discovery command execution timeout (error=%d, db=%s, server=%s)",
-                tr, server->db->name, server->location.raw);
+        // Submit AUTH command.
+        if (server->db->password != NULL) {
+            REDIS_AUTH(
+                ctx, rcontext, server->db->password,
+                "Failed to authenticate cluster discovery connection",
+                "db=%s, server=%s",
+                server->db->name, server->location.raw);
         }
 
-        // Send command.
-        redisReply *reply = redisCommand(rcontext, CLUSTER_DISCOVERY_COMMAND);
-
-        // Check reply.
-        if ((!rcontext->err) &&
-            (reply != NULL) &&
-            (reply->type == REDIS_REPLY_ARRAY)) {
-            // Reset previous slots.
-            redis_server_t *iserver;
-            for (unsigned iweight = 0; iweight < NREDIS_SERVER_WEIGHTS; iweight++) {
-                for (enum REDIS_SERVER_ROLE irole = 0; irole < NREDIS_SERVER_ROLES; irole++) {
-                    VTAILQ_FOREACH(iserver, &db->servers[iweight][irole], list) {
-                        for (int i = 0; i < NREDIS_CLUSTER_SLOTS; i++) {
-                            iserver->cluster.slots[i] = 0;
-                        }
-                    }
-                }
+        // Do not continue if failed to authenticate the connection.
+        if (rcontext != NULL) {
+            // Set command execution timeout.
+            int tr = redisSetTimeout(rcontext, db->command_timeout);
+            if (tr != REDIS_OK) {
+                REDIS_LOG_ERROR(ctx,
+                    "Failed to set cluster discovery command execution timeout (error=%d, db=%s, server=%s)",
+                    tr, server->db->name, server->location.raw);
             }
 
-            // Extract slots.
-            for (int i = 0; i < reply->elements; i++) {
-                if ((reply->element[i]->type == REDIS_REPLY_ARRAY) &&
-                    (reply->element[i]->elements >= 3) &&
-                    (reply->element[i]->element[0]->type == REDIS_REPLY_INTEGER) &&
-                    (reply->element[i]->element[1]->type == REDIS_REPLY_INTEGER) &&
-                    (reply->element[i]->element[2]->type == REDIS_REPLY_ARRAY) &&
-                    (reply->element[i]->element[2]->elements >= 2) &&
-                    (reply->element[i]->element[2]->element[0]->type == REDIS_REPLY_STRING) &&
-                    (reply->element[i]->element[2]->element[1]->type == REDIS_REPLY_INTEGER)) {
-                    // Extract slot data.
-                    int start = reply->element[i]->element[0]->integer;
-                    int end = reply->element[i]->element[1]->integer;
+            // Send command.
+            redisReply *reply = redisCommand(rcontext, CLUSTER_DISCOVERY_COMMAND);
 
-                    // Check slot data.
-                    if ((start >= 0) && (start < NREDIS_CLUSTER_SLOTS) &&
-                        (end >= 0) && (end < NREDIS_CLUSTER_SLOTS)) {
-                        unsafe_add_slot(
-                            ctx, db, start, end,
-                            reply->element[i]->element[2]->element[0]->str,
-                            reply->element[i]->element[2]->element[1]->integer,
-                            REDIS_SERVER_MASTER_ROLE);
-
-                        // Extract slave servers data.
-                        for (int j = 3; j < reply->element[i]->elements; j++) {
-                            if ((reply->element[i]->element[j]->type == REDIS_REPLY_ARRAY) &&
-                                (reply->element[i]->element[j]->elements >= 2) &&
-                                (reply->element[i]->element[j]->element[0]->type == REDIS_REPLY_STRING) &&
-                                (reply->element[i]->element[j]->element[1]->type == REDIS_REPLY_INTEGER)) {
-                                unsafe_add_slot(
-                                    ctx, db, start, end,
-                                    reply->element[i]->element[j]->element[0]->str,
-                                    reply->element[i]->element[j]->element[1]->integer,
-                                    REDIS_SERVER_SLAVE_ROLE);
+            // Check reply.
+            if ((!rcontext->err) &&
+                (reply != NULL) &&
+                (reply->type == REDIS_REPLY_ARRAY)) {
+                // Reset previous slots.
+                redis_server_t *iserver;
+                for (unsigned iweight = 0; iweight < NREDIS_SERVER_WEIGHTS; iweight++) {
+                    for (enum REDIS_SERVER_ROLE irole = 0; irole < NREDIS_SERVER_ROLES; irole++) {
+                        VTAILQ_FOREACH(iserver, &db->servers[iweight][irole], list) {
+                            for (int i = 0; i < NREDIS_CLUSTER_SLOTS; i++) {
+                                iserver->cluster.slots[i] = 0;
                             }
                         }
                     }
                 }
+
+                // Extract slots.
+                for (int i = 0; i < reply->elements; i++) {
+                    if ((reply->element[i]->type == REDIS_REPLY_ARRAY) &&
+                        (reply->element[i]->elements >= 3) &&
+                        (reply->element[i]->element[0]->type == REDIS_REPLY_INTEGER) &&
+                        (reply->element[i]->element[1]->type == REDIS_REPLY_INTEGER) &&
+                        (reply->element[i]->element[2]->type == REDIS_REPLY_ARRAY) &&
+                        (reply->element[i]->element[2]->elements >= 2) &&
+                        (reply->element[i]->element[2]->element[0]->type == REDIS_REPLY_STRING) &&
+                        (reply->element[i]->element[2]->element[1]->type == REDIS_REPLY_INTEGER)) {
+                        // Extract slot data.
+                        int start = reply->element[i]->element[0]->integer;
+                        int end = reply->element[i]->element[1]->integer;
+
+                        // Check slot data.
+                        if ((start >= 0) && (start < NREDIS_CLUSTER_SLOTS) &&
+                            (end >= 0) && (end < NREDIS_CLUSTER_SLOTS)) {
+                            unsafe_add_slot(
+                                ctx, db, start, end,
+                                reply->element[i]->element[2]->element[0]->str,
+                                reply->element[i]->element[2]->element[1]->integer,
+                                REDIS_SERVER_MASTER_ROLE);
+
+                            // Extract slave servers data.
+                            for (int j = 3; j < reply->element[i]->elements; j++) {
+                                if ((reply->element[i]->element[j]->type == REDIS_REPLY_ARRAY) &&
+                                    (reply->element[i]->element[j]->elements >= 2) &&
+                                    (reply->element[i]->element[j]->element[0]->type == REDIS_REPLY_STRING) &&
+                                    (reply->element[i]->element[j]->element[1]->type == REDIS_REPLY_INTEGER)) {
+                                    unsafe_add_slot(
+                                        ctx, db, start, end,
+                                        reply->element[i]->element[j]->element[0]->str,
+                                        reply->element[i]->element[j]->element[1]->integer,
+                                        REDIS_SERVER_SLAVE_ROLE);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Stop execution.
+                done = 1;
+                db->stats.cluster.discoveries.total++;
+            } else {
+                REDIS_LOG_ERROR(ctx,
+                    "Failed to execute cluster discovery command (db=%s, server=%s)",
+                    db->name, server->location.raw);
+                db->stats.cluster.discoveries.failed++;
             }
 
-            // Stop execution.
-            done = 1;
-            db->stats.cluster.discoveries.total++;
+            // Release reply.
+            if (reply != NULL) {
+                freeReplyObject(reply);
+            }
         } else {
-            REDIS_LOG_ERROR(ctx,
-                "Failed to execute cluster discovery command (db=%s, server=%s)",
-                db->name, server->location.raw);
             db->stats.cluster.discoveries.failed++;
-        }
-
-        // Release reply.
-        if (reply != NULL) {
-            freeReplyObject(reply);
         }
     } else {
         if (rcontext != NULL) {
