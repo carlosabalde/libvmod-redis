@@ -48,12 +48,11 @@ Arguments
         priority of unreachable servers when creating execution plans. This is
         **not** designed for auto-discovery of Redis Servers.
 
-    period: how frequently (seconds) Redis Sentinel proactive checks are
-    executed (0 means disabling periodical proactive checks). Beware
-    (1) proactive checks are also executed anytime a new non-clustered server
-    is registered using ``redis.db()`` or ``.add_server()``; and (2) Sentinel
-    Pub/Sub events are listened and processed even when periodical proactive
-    checks are disabled.
+    period: how frequently (seconds) Redis Sentinel periodical checks are
+    executed (0 means disabling periodical checks). Beware (1) proactive checks
+    are also executed anytime the VCL state is changed to warm; and (2) Sentinel
+    Pub/Sub events are listened and processed even when periodical checks are
+    disabled.
 
     connection_timeout: connection timeout (milliseconds; 0 means no timeout)
     to the Redis Sentinel servers.
@@ -61,9 +60,7 @@ Arguments
     command_timeout: command timeout (milliseconds; 0 means no timeout) when
     executing Redis Sentinel commands.
 Description
-    Using this function is not mandatory. If used, it must be called during
-    ``vcl_init`` before creating any database instance. If a database instance
-    has already been created calls to this function are silently ignored.
+    Using this function is not mandatory.
 
 $Object db(PRIV_VCL,
     STRING location="",
