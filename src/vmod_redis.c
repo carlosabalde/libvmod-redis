@@ -341,45 +341,41 @@ vmod_sentinels(
     // Get configuration lock.
     Lck_Lock(&config->mutex);
 
-    // Silently ignore calls to this function if any database instance has
-    // already been registered.
-    if (VTAILQ_EMPTY(&config->dbs)) {
-        // Do not continue if Sentinels have already been set.
-        if (config->sentinels.locations == NULL) {
-            if ((connection_timeout >= 0) &&
-                (command_timeout >= 0)) {
-                // Store settings.
-                const char *value = NULL;
-                if ((locations != NULL) && (strlen(locations) > 0)) {
-                    value = locations;
-                } else {
-                    value = getenv("VMOD_REDIS_SENTINELS");
-                }
-                if ((value != NULL) && (strlen(value) > 0)) {
-                    config->sentinels.locations = strdup(value);
-                    AN(config->sentinels.locations);
-                    config->sentinels.period = period;
-                    config->sentinels.connection_timeout.tv_sec =
-                        connection_timeout / 1000;
-                    config->sentinels.connection_timeout.tv_usec =
-                        (connection_timeout % 1000) * 1000;
-                    config->sentinels.command_timeout.tv_sec =
-                        command_timeout / 1000;
-                    config->sentinels.command_timeout.tv_usec =
-                        (command_timeout % 1000) * 1000;
-                }
-
-                // Start Sentinel thread?
-                if ((config->sentinels.locations != NULL) &&
-                    (!config->sentinels.active)) {
-                    unsafe_sentinel_start(config);
-                }
+    // Do not continue if Sentinels have already been set.
+    if (config->sentinels.locations == NULL) {
+        if ((connection_timeout >= 0) &&
+            (command_timeout >= 0)) {
+            // Store settings.
+            const char *value = NULL;
+            if ((locations != NULL) && (strlen(locations) > 0)) {
+                value = locations;
+            } else {
+                value = getenv("VMOD_REDIS_SENTINELS");
             }
-        } else {
-            REDIS_LOG_ERROR(ctx,
-                "%s already set",
-                "Sentinels");
+            if ((value != NULL) && (strlen(value) > 0)) {
+                config->sentinels.locations = strdup(value);
+                AN(config->sentinels.locations);
+                config->sentinels.period = period;
+                config->sentinels.connection_timeout.tv_sec =
+                    connection_timeout / 1000;
+                config->sentinels.connection_timeout.tv_usec =
+                    (connection_timeout % 1000) * 1000;
+                config->sentinels.command_timeout.tv_sec =
+                    command_timeout / 1000;
+                config->sentinels.command_timeout.tv_usec =
+                    (command_timeout % 1000) * 1000;
+            }
+
+            // If required, startup of the Sentinel thread and execution of
+            // the initial discovery will be triggered during 'warm' event.
+            // That cannot be done here because execution of logic in
+            // 'vcl_init' after a 'load' event is not necessarily followed
+            // by a 'warm' event.
         }
+    } else {
+        REDIS_LOG_ERROR(ctx,
+            "%s already set",
+            "Sentinels");
     }
 
     // Release configuration lock.

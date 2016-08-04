@@ -729,11 +729,6 @@ unsafe_add_redis_server(
             &db->servers[result->weight][result->role],
             result,
             list);
-
-        // Trigger Sentinel discovery?
-        if ((db->config->sentinels.active) && (!db->cluster.enabled)) {
-            unsafe_sentinel_discovery(db->config);
-        }
     }
 
     // Done!
