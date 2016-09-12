@@ -149,6 +149,7 @@ Description
     Creates a new database instance.
 
 $Method VOID .add_server(
+    PRIV_VCL,
     STRING location,
     ENUM { master, slave, auto, cluster } type)
 
@@ -213,7 +214,7 @@ Arguments
 Description
     Provides an argument to a previously enqueued Redis command.
 
-$Method VOID .execute(PRIV_TASK, BOOL master=1)
+$Method VOID .execute(PRIV_VCL, PRIV_TASK, BOOL master=1)
 
 Arguments
     master: when enabled slave servers are not considered for execution.

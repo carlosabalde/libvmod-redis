@@ -17,26 +17,28 @@
 
 #define CLUSTER_DISCOVERY_COMMAND "CLUSTER SLOTS"
 
-static void unsafe_discover_slots(VRT_CTX, struct vmod_redis_db *db, redis_server_t *server);
+static void unsafe_discover_slots(
+    VRT_CTX, struct vmod_redis_db *db, vcl_state_t *config, redis_server_t *server);
 
 static int get_key_index(const char *command);
 static unsigned get_cluster_slot(const char *key);
 
 void
-discover_cluster_slots(VRT_CTX, struct vmod_redis_db *db, redis_server_t *server)
+discover_cluster_slots(
+    VRT_CTX, struct vmod_redis_db *db, vcl_state_t *config, redis_server_t *server)
 {
-    Lck_Lock(&db->config->mutex);
+    Lck_Lock(&config->mutex);
     Lck_Lock(&db->mutex);
-    unsafe_discover_slots(ctx, db, server);
+    unsafe_discover_slots(ctx, db, config, server);
     Lck_Unlock(&db->mutex);
-    Lck_Unlock(&db->config->mutex);
+    Lck_Unlock(&config->mutex);
 }
 
 redisReply *
 cluster_execute(
-    VRT_CTX, struct vmod_redis_db *db, task_state_t *state, struct timeval timeout,
-    unsigned max_retries, unsigned argc, const char *argv[], unsigned *retries,
-    unsigned master)
+    VRT_CTX, struct vmod_redis_db *db, vcl_state_t *config, task_state_t *state,
+    struct timeval timeout, unsigned max_retries, unsigned argc, const char *argv[],
+    unsigned *retries, unsigned master)
 {
     // Initializations.
     redisReply *result = NULL;
@@ -84,12 +86,12 @@ cluster_execute(
                     hop = 1;
 
                     // Get config & database locks.
-                    Lck_Lock(&db->config->mutex);
+                    Lck_Lock(&config->mutex);
                     Lck_Lock(&db->mutex);
 
                     // Add / fetch server.
                     server = unsafe_add_redis_server(
-                        ctx, db, location, REDIS_SERVER_TBD_ROLE);
+                        ctx, db, config, location, REDIS_SERVER_TBD_ROLE);
                     AN(server);
 
                     // ASK vs. MOVED.
@@ -112,7 +114,7 @@ cluster_execute(
                         // XXX: at the moment this implementation may result in
                         // multiple threads executing multiple -serialized-
                         // cluster discoveries.
-                        unsafe_discover_slots(ctx, db, server);
+                        unsafe_discover_slots(ctx, db, config, server);
                     } else {
                         // Update stats.
                         db->stats.cluster.replies.ask++;
@@ -124,7 +126,7 @@ cluster_execute(
 
                     // Release config & database locks.
                     Lck_Unlock(&db->mutex);
-                    Lck_Unlock(&db->config->mutex);
+                    Lck_Unlock(&config->mutex);
 
                     // Release reply object.
                     freeReplyObject(result);
@@ -171,17 +173,17 @@ cluster_execute(
 
 static void
 unsafe_add_slot(
-    VRT_CTX, struct vmod_redis_db *db, unsigned start, unsigned stop,
-    char *host, int port, enum REDIS_SERVER_ROLE role)
+    VRT_CTX, struct vmod_redis_db *db, vcl_state_t *config, unsigned start,
+    unsigned stop, char *host, int port, enum REDIS_SERVER_ROLE role)
 {
     // Assertions.
-    Lck_AssertHeld(&db->config->mutex);
+    Lck_AssertHeld(&config->mutex);
     Lck_AssertHeld(&db->mutex);
 
     // Add / update server.
     char location[256];
     snprintf(location, sizeof(location), "%s:%d", host, port);
-    redis_server_t *server = unsafe_add_redis_server(ctx, db, location, role);
+    redis_server_t *server = unsafe_add_redis_server(ctx, db, config, location, role);
     AN(server);
 
     // Register slots.
@@ -191,10 +193,11 @@ unsafe_add_slot(
 }
 
 static unsigned
-unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *server)
+unsafe_discover_slots_aux(
+    VRT_CTX, struct vmod_redis_db *db, vcl_state_t *config, redis_server_t *server)
 {
     // Assertions.
-    Lck_AssertHeld(&db->config->mutex);
+    Lck_AssertHeld(&config->mutex);
     Lck_AssertHeld(&db->mutex);
     assert(server->location.type == REDIS_SERVER_LOCATION_HOST_TYPE);
 
@@ -278,7 +281,7 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
                         if ((start >= 0) && (start < NREDIS_CLUSTER_SLOTS) &&
                             (end >= 0) && (end < NREDIS_CLUSTER_SLOTS)) {
                             unsafe_add_slot(
-                                ctx, db, start, end,
+                                ctx, db, config, start, end,
                                 reply->element[i]->element[2]->element[0]->str,
                                 reply->element[i]->element[2]->element[1]->integer,
                                 REDIS_SERVER_MASTER_ROLE);
@@ -290,7 +293,7 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
                                     (reply->element[i]->element[j]->element[0]->type == REDIS_REPLY_STRING) &&
                                     (reply->element[i]->element[j]->element[1]->type == REDIS_REPLY_INTEGER)) {
                                     unsafe_add_slot(
-                                        ctx, db, start, end,
+                                        ctx, db, config, start, end,
                                         reply->element[i]->element[j]->element[0]->str,
                                         reply->element[i]->element[j]->element[1]->integer,
                                         REDIS_SERVER_SLAVE_ROLE);
@@ -340,22 +343,23 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
 }
 
 static void
-unsafe_discover_slots(VRT_CTX, struct vmod_redis_db *db, redis_server_t *server)
+unsafe_discover_slots(
+    VRT_CTX, struct vmod_redis_db *db, vcl_state_t *config, redis_server_t *server)
 {
     // Assertions.
-    Lck_AssertHeld(&db->config->mutex);
+    Lck_AssertHeld(&config->mutex);
     Lck_AssertHeld(&db->mutex);
 
     // Contact already known servers and try to fetch the slots-servers mapping.
     // Always use the provided server instance in the first place.
-    if (!unsafe_discover_slots_aux(ctx, db, server)) {
+    if (!unsafe_discover_slots_aux(ctx, db, config, server)) {
         for (unsigned iweight = 0; iweight < NREDIS_SERVER_WEIGHTS; iweight++) {
             for (enum REDIS_SERVER_ROLE irole = 0; irole < NREDIS_SERVER_ROLES; irole++) {
                 redis_server_t *iserver;
                 VTAILQ_FOREACH(iserver, &db->servers[iweight][irole], list) {
                     CHECK_OBJ_NOTNULL(iserver, REDIS_SERVER_MAGIC);
                     if ((iserver != server) &&
-                        (unsafe_discover_slots_aux(ctx, db, iserver))) {
+                        (unsafe_discover_slots_aux(ctx, db, config, iserver))) {
                         // Lists of servers are only modified on a successful
                         // discovery ==> it's safe to iterate on these data
                         // structures because once they are modified the

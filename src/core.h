@@ -114,9 +114,9 @@ struct vmod_redis_db {
     struct lock mutex;
 
     // Configuration.
-    // XXX: required because PRIV_VCL pointers are not available (1) when
-    // invoking object methods; and (2) when the VMOD releases database
-    // instances. This should be fixed in future Varnish releases.
+    // XXX: required because PRIV_VCL pointers are not available when the
+    // VMOD releases database instances. This should be fixed in future
+    // Varnish releases.
     vcl_state_t *config;
 
     // General options (allocated in the heap).
@@ -416,6 +416,7 @@ redisReply *redis_execute(
     redis_server_t *server, unsigned asking, unsigned master, unsigned slot);
 
 redis_server_t * unsafe_add_redis_server(
-    VRT_CTX, struct vmod_redis_db *db, const char *location, enum REDIS_SERVER_ROLE role);
+    VRT_CTX, struct vmod_redis_db *db, vcl_state_t *config,
+    const char *location, enum REDIS_SERVER_ROLE role);
 
 #endif

@@ -418,7 +418,7 @@ vmod_db__init(
             // Add initial server.
             Lck_Lock(&config->mutex);
             Lck_Lock(&instance->mutex);
-            redis_server_t *server = unsafe_add_redis_server(ctx, instance, location, role);
+            redis_server_t *server = unsafe_add_redis_server(ctx, instance, config, location, role);
             Lck_Unlock(&instance->mutex);
             Lck_Unlock(&config->mutex);
 
@@ -426,7 +426,7 @@ vmod_db__init(
             // required (i.e. it will be executed on demand) but it's a nice
             // thing to do while bootstrapping a new database instance.
             if (instance->cluster.enabled) {
-                discover_cluster_slots(ctx, instance, server);
+                discover_cluster_slots(ctx, instance, config, server);
             }
         }
 
@@ -480,29 +480,31 @@ vmod_db__fini(struct vmod_redis_db **db)
 
 VCL_VOID
 vmod_db_add_server(
-    VRT_CTX, struct vmod_redis_db *db, VCL_STRING location, VCL_ENUM type)
+    VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *vcl_priv,
+    VCL_STRING location, VCL_ENUM type)
 {
     if ((location != NULL) && (strlen(location) > 0) &&
         ((!db->cluster.enabled || strcmp(type, "cluster") == 0))) {
-        // Extract role.
+        // Initializations.
+        vcl_state_t *config = vcl_priv->priv;
         enum REDIS_SERVER_ROLE role = type2role(type);
 
         // Add server.
-        Lck_Lock(&db->config->mutex);
+        Lck_Lock(&config->mutex);
         Lck_Lock(&db->mutex);
-        redis_server_t *server = unsafe_add_redis_server(ctx, db, location, role);
+        redis_server_t *server = unsafe_add_redis_server(ctx, db, config, location, role);
         unsigned discovery =
             (server != NULL) &&
             (db->cluster.enabled) &&
             ((db->stats.cluster.discoveries.total -
               db->stats.cluster.discoveries.failed) == 0);
         Lck_Unlock(&db->mutex);
-        Lck_Unlock(&db->config->mutex);
+        Lck_Unlock(&config->mutex);
 
         // Launch initial discovery of the cluster topology? This flag has been
         // previously calculated while holding the appropriate locks.
         if (discovery) {
-            discover_cluster_slots(ctx, db, server);
+            discover_cluster_slots(ctx, db, config, server);
         }
     }
 }
@@ -617,8 +619,8 @@ vmod_db_push(
 
 VCL_VOID
 vmod_db_execute(
-    VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *task_priv,
-    VCL_BOOL master)
+    VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *vcl_priv,
+    struct vmod_priv *task_priv, VCL_BOOL master)
 {
     // Fetch thread state.
     task_state_t *state = get_task_state(ctx, task_priv, 0);
@@ -630,6 +632,7 @@ vmod_db_execute(
         (state->command.db == db) &&
         (!WS_Overflowed(ctx->ws))) {
         // Initializations.
+        vcl_state_t *config = vcl_priv->priv;
         unsigned retries = 0;
 
         // Force execution of LUA scripts in a master server when Redis Cluster
@@ -648,7 +651,7 @@ vmod_db_execute(
         // Clustered vs. standalone execution.
         if (db->cluster.enabled) {
             state->command.reply = cluster_execute(
-                ctx, db, state,
+                ctx, db, config, state,
                 state->command.timeout, state->command.max_retries,
                 state->command.argc, state->command.argv,
                 &retries, master);

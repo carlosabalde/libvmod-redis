@@ -619,10 +619,11 @@ redis_execute(
 
 redis_server_t *
 unsafe_add_redis_server(
-    VRT_CTX, struct vmod_redis_db *db, const char *location, enum REDIS_SERVER_ROLE role)
+    VRT_CTX, struct vmod_redis_db *db, vcl_state_t *config,
+    const char *location, enum REDIS_SERVER_ROLE role)
 {
     // Assertions.
-    Lck_AssertHeld(&db->config->mutex);
+    Lck_AssertHeld(&config->mutex);
     Lck_AssertHeld(&db->mutex);
 
     // Initializations.
@@ -666,7 +667,7 @@ unsafe_add_redis_server(
                 if (inet_pton(AF_INET, result->location.parsed.address.host, &ia4)) {
                     result->weight = NREDIS_SERVER_WEIGHTS - 1;
                     subnet_t *isubnet;
-                    VTAILQ_FOREACH(isubnet, &db->config->subnets, list) {
+                    VTAILQ_FOREACH(isubnet, &config->subnets, list) {
                         CHECK_OBJ_NOTNULL(isubnet, SUBNET_MAGIC);
                         if ((ntohl(ia4.s_addr) & isubnet->mask.s_addr) ==
                             (isubnet->address.s_addr & isubnet->mask.s_addr)) {
