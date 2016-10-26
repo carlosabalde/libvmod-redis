@@ -205,7 +205,8 @@ new_vmod_redis_db(
     vcl_state_t *config, const char *name, struct timeval connection_timeout,
     unsigned connection_ttl, struct timeval command_timeout, unsigned max_command_retries,
     unsigned shared_connections, unsigned max_connections, const char *password,
-    unsigned sickness_ttl, unsigned clustered, unsigned max_cluster_hops)
+    unsigned sickness_ttl, unsigned ignore_slaves, unsigned clustered,
+    unsigned max_cluster_hops)
 {
     struct vmod_redis_db *result;
     ALLOC_OBJ(result, VMOD_REDIS_DATABASE_MAGIC);
@@ -236,6 +237,7 @@ new_vmod_redis_db(
         result->password = NULL;
     }
     result->sickness_ttl = sickness_ttl;
+    result->ignore_slaves = ignore_slaves;
 
     result->cluster.enabled = clustered;
     result->cluster.max_hops = max_cluster_hops;
@@ -296,6 +298,7 @@ free_vmod_redis_db(struct vmod_redis_db *db)
         db->password = NULL;
     }
     db->sickness_ttl = 0;
+    db->ignore_slaves = 0;
 
     db->cluster.enabled = 0;
     db->cluster.max_hops = 0;

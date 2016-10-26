@@ -73,6 +73,7 @@ $Object db(PRIV_VCL,
     INT max_connections=128,
     STRING password="",
     INT sickness_ttl=60,
+    BOOL ignore_slaves=0,
     INT max_cluster_hops=32)
 
 Arguments
@@ -142,6 +143,10 @@ Arguments
     server and it will try to avoid it as much as possible when creating
     execution plans. This TTL is overridden when Redis Sentinel servers are
     configured and some Sentinel discovers an unreachable server.
+
+    ignore_slaves: if enabled, slave servers are not considered when executing
+    commands. In other words, enabling this option implicitly forces
+    ``master == true`` when using the ``.execute()`` method.
 
     max_cluster_hops: maximum number of redirections (0 means no limit) when
     executing a command and Redis Cluster support has been enabled.

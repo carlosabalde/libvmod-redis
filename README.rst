@@ -48,6 +48,7 @@ import redis;
         INT max_connections=128,
         STRING password="",
         INT sickness_ttl=60,
+        BOOL ignore_slaves=false,
         INT max_cluster_hops=32)
     Method VOID .add_server(
         STRING location,

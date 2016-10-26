@@ -29,6 +29,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
             max_connections=1,
             password="",
             sickness_ttl=0,
+            ignore_slaves=false,
             max_cluster_hops=0);
 
         new master2 = redis.db(
@@ -42,6 +43,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
             max_connections=1,
             password="",
             sickness_ttl=0,
+            ignore_slaves=false,
             max_cluster_hops=0);
     }
 

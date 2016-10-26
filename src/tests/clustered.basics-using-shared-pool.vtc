@@ -29,6 +29,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
             max_connections=32,
             password="",
             sickness_ttl=0,
+            ignore_slaves=false,
             max_cluster_hops=16);
         db.add_server("${redis_master2_ip}:${redis_master2_port}", cluster);
         db.add_server("${redis_master3_ip}:${redis_master3_port}", cluster);

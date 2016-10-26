@@ -1,3 +1,9 @@
+libvmod-redis (3.11-1) unstable; urgency=low
+
+  * Added 'ignore_slaves' option to redis.db()
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Wed, 26 Oct 2016 17:00:00 +0200
+
 libvmod-redis (3.10-1) unstable; urgency=low
 
   * Fixed Sentinel-related crash
