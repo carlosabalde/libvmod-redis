@@ -29,6 +29,7 @@ varnish v1 -vcl+backend {
             max_connections=1,
             password="",
             sickness_ttl=0,
+            ignore_slaves=false,
             max_cluster_hops=0);
 
         new db2 = redis.db(
@@ -42,6 +43,7 @@ varnish v1 -vcl+backend {
             max_connections=32,
             password="",
             sickness_ttl=0,
+            ignore_slaves=false,
             max_cluster_hops=0);
     }
 } -start

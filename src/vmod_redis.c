@@ -378,7 +378,7 @@ vmod_db__init(
     VCL_STRING location, VCL_ENUM type, VCL_INT connection_timeout, VCL_INT connection_ttl,
     VCL_INT command_timeout, VCL_INT max_command_retries, VCL_BOOL shared_connections,
     VCL_INT max_connections, VCL_STRING password, VCL_INT sickness_ttl,
-    VCL_INT max_cluster_hops)
+    VCL_BOOL ignore_slaves, VCL_INT max_cluster_hops)
 {
     // Assert input.
     CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
@@ -411,7 +411,7 @@ vmod_db__init(
         struct vmod_redis_db *instance = new_vmod_redis_db(
             config, vcl_name, connection_timeout_tv, connection_ttl,
             command_timeout_tv, max_command_retries, shared_connections, max_connections,
-            password, sickness_ttl, clustered, max_cluster_hops);
+            password, sickness_ttl, ignore_slaves, clustered, max_cluster_hops);
 
         // Add initial server if provided.
         if ((location != NULL) && (strlen(location) > 0)) {
@@ -634,6 +634,11 @@ vmod_db_execute(
         // Initializations.
         vcl_state_t *config = vcl_priv->priv;
         unsigned retries = 0;
+
+        // Ignore slave servers if globally requested.
+        if ((!master) && (db->ignore_slaves)) {
+            master = 1;
+        }
 
         // Force execution of LUA scripts in a master server when Redis Cluster
         // support is enabled. It's responsibility of the caller to avoid

@@ -36,6 +36,7 @@ varnish v1 -vcl+backend {
             max_connections=2,
             password="",
             sickness_ttl=0,
+            ignore_slaves=false,
             max_cluster_hops=0);
         db.add_server("${redis_slave1_1_ip}:${redis_slave1_1_port}", auto);
         db.add_server("${redis_slave1_2_ip}:${redis_slave1_2_port}", auto);
