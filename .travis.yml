@@ -10,7 +10,7 @@ before_install:
   - make
   - sudo make PREFIX="/usr/local" install
   - cd ..
-  - wget http://download.redis.io/releases/redis-3.2.3.tar.gz
+  - wget http://download.redis.io/releases/redis-3.2.5.tar.gz
   - tar zxvf redis-*.tar.gz
   - cd redis-*
   - make
