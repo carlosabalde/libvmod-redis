@@ -20,6 +20,13 @@ before_install:
   - make -sj32
   - sudo make PREFIX="/usr/local" install
   - popd
+  - wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.13.3.zip -O hiredis-0.13.3.zip
+  - unzip hiredis-*.zip
+  - pushd hiredis-*
+  - make
+  - sudo make PREFIX="/usr/local" install
+  - sudo ldconfig
+  - popd
   - wget http://download.redis.io/releases/redis-3.2.6.tar.gz
   - tar zxvf redis-*.tar.gz
   - pushd redis-*
@@ -27,13 +34,6 @@ before_install:
   - sudo make PREFIX="/usr/local" install
   - sudo ldconfig
   - sudo cp src/redis-trib.rb /usr/local/bin
-  - popd
-  - wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.13.3.zip -O hiredis-0.13.3.zip
-  - unzip hiredis-*.zip
-  - pushd hiredis-*
-  - make
-  - sudo make PREFIX="/usr/local" install
-  - sudo ldconfig
   - popd
   - gem install redis
 
