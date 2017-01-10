@@ -19,6 +19,7 @@ before_install:
   - ./configure
   - make -sj32
   - sudo make PREFIX="/usr/local" install
+  - sudo ldconfig
   - popd
   - wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.13.3.zip -O hiredis-0.13.3.zip
   - unzip hiredis-*.zip

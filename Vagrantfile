@@ -21,7 +21,8 @@ $script = <<SCRIPT
     ./autogen.sh; \
     ./configure; \
     make; \
-    sudo make PREFIX="/usr/local" install'
+    sudo make PREFIX="/usr/local" install; \
+    sudo ldconfig'
 
   # hiredis.
   sudo -u vagrant bash -c '\
