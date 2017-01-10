@@ -9,7 +9,7 @@ addons:
     packages:
     - libev-dev
     - python-docutils
-    - rubygems
+    - ruby
 
 before_install:
   - set -e
