@@ -1,33 +1,46 @@
+---
+sudo: required
+dist: trusty
+
 language: c
 
+addons:
+  apt:
+    packages:
+    - python-docutils
+    - ruby
+
 before_install:
-  - sudo apt-get update -q
-  - sudo apt-get install -qq apt-transport-https python-docutils rubygems
-  - curl https://repo.varnish-cache.org/debian/GPG-key.txt | sudo apt-key add -
-  - echo "deb https://repo.varnish-cache.org/ubuntu/ precise varnish-4.0" | sudo tee /etc/apt/sources.list.d/varnish-cache.list
-  - sudo apt-get update -q
-  - sudo apt-get install -qq varnish libvarnishapi-dev
-  - wget http://download.redis.io/releases/redis-3.0.7.tar.gz
+  - set -e
+  - wget --no-check-certificate https://repo.varnish-cache.org/source/varnish-4.0.4.tar.gz
+  - tar zxvf varnish-*.tar.gz
+  - pushd varnish-*
+  - ./autogen.sh
+  - ./configure
+  - make -sj32
+  - sudo make PREFIX="/usr/local" install
+  - popd
+  - wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.13.3.zip -O hiredis-0.13.3.zip
+  - unzip hiredis-*.zip
+  - pushd hiredis-*
+  - make
+  - sudo make PREFIX="/usr/local" install
+  - sudo ldconfig
+  - popd
+  - wget http://download.redis.io/releases/redis-3.2.6.tar.gz
   - tar zxvf redis-*.tar.gz
-  - cd redis-*
+  - pushd redis-*
   - make
   - sudo make PREFIX="/usr/local" install
   - sudo ldconfig
   - sudo cp src/redis-trib.rb /usr/local/bin
-  - cd ..
-  - wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.13.3.zip -O hiredis-0.13.3.zip
-  - unzip hiredis-*.zip
-  - cd hiredis-*
-  - make
-  - sudo make PREFIX="/usr/local" install
-  - sudo ldconfig
-  - cd ..
+  - popd
   - gem install redis
 
 before_script:
   - ./autogen.sh
   - ./configure --prefix=/usr
-  - make -j1
+  - make -j4
 
 script:
   - make check -j1
