@@ -7,12 +7,13 @@ libvmod_redis_la_LDFLAGS = -module -export-dynamic -avoid-version
 libvmod_redis_la_LIBADD = -lhiredis
 
 libvmod_redis_la_SOURCES = \
-    config.h \
-    crc16.c crc16.h \
-    sha1.c sha1.h \
-    cluster.c cluster.h \
-    core.c core.h \
-    vmod_redis.c
+	config.h \
+	crc16.c crc16.h \
+	sha1.c sha1.h \
+	cluster.c cluster.h \
+	core.c core.h \
+	solarisfixes.h \
+	vmod_redis.c
 
 nodist_libvmod_redis_la_SOURCES = \
 	vcc_if.c \
@@ -34,6 +35,8 @@ $(top_srcdir)/src/tests/*.vtc: libvmod_redis.la
 check: $(VMOD_TESTS)
 
 EXTRA_DIST = \
+	tests/hashslot-keys.txt \
+	tests/runner.sh \
 	vmod_redis.vcc \
 	$(VMOD_TESTS)
 
