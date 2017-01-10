@@ -4,7 +4,7 @@ SUBDIRS = src
 
 dist_doc_DATA = README.rst LICENSE
 
-# lcov support
+# lcov support
 
 CODE_COVERAGE_OUTPUT_DIRECTORY = lcov
 CODE_COVERAGE_IGNORE_PATTERN = "/usr/*"
