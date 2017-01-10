@@ -1,45 +1,34 @@
-AM_CPPFLAGS = @VMOD_INCLUDES@ -Wall -D_GNU_SOURCE=1 -DEV_COMPAT3=1
+AM_CFLAGS = $(VARNISHAPI_CFLAGS) -Wall -D_GNU_SOURCE=1 -DEV_COMPAT3=1
+AM_LDFLAGS = $(VARNISHAPI_LIBS) $(VMOD_LDFLAGS) $(CODE_COVERAGE_LDFLAGS)
 
-vmoddir = @VMOD_DIR@
 vmod_LTLIBRARIES = libvmod_redis.la
 
-libvmod_redis_la_LDFLAGS = -module -export-dynamic -avoid-version
-libvmod_redis_la_LIBADD = -lhiredis -lev
-
 libvmod_redis_la_SOURCES = \
-    config.h \
-    crc16.c crc16.h \
-    sha1.c sha1.h \
-    cluster.c cluster.h \
-    core.c core.h \
-    sentinel.c sentinel.h \
-    vmod_redis.c
+	config.h \
+	crc16.c crc16.h \
+	sha1.c sha1.h \
+	cluster.c cluster.h \
+	core.c core.h \
+	sentinel.c sentinel.h \
+	vmod_redis.c
 
 nodist_libvmod_redis_la_SOURCES = \
-	vcc_if.c \
-	vcc_if.h
+	vcc_redis_if.c \
+	vcc_redis_if.h
 
-vmod_redis.lo: vcc_if.c vcc_if.h
+dist_man_MANS = vmod_redis.3
 
-vcc_if.c: vcc_if.h
+@BUILD_VMOD_REDIS@
 
-vcc_if.h: @VMODTOOL@ $(top_srcdir)/src/vmod_redis.vcc
-	@VMODTOOL@ $(top_srcdir)/src/vmod_redis.vcc
+AM_TESTS_ENVIRONMENT = \
+	PATH="$(VMOD_TEST_PATH)" \
+	LD_LIBRARY_PATH="$(VARNISH_LIBRARY_PATH)"
+TEST_EXTENSIONS = .vtc
+VTC_LOG_COMPILER = tests/runner.sh varnishtest -v
+AM_VTC_LOG_FLAGS = -Dvmod_redis="$(VMOD_REDIS)"
 
-VMOD_TESTS = $(top_srcdir)/src/tests/*.vtc
-.PHONY: $(VMOD_TESTS)
-
-$(top_srcdir)/src/tests/*.vtc: libvmod_redis.la
-	tests/runner.sh @VARNISHTEST@ $@ -Dvarnishd=@VARNISHD@ -Dvmod_topbuild=$(abs_top_builddir)
-
-check: $(VMOD_TESTS)
+TESTS = @VMOD_TESTS@
 
 EXTRA_DIST = \
-	vmod_redis.vcc \
+	vmod_example.vcc \
 	$(VMOD_TESTS)
-
-CLEANFILES = \
-	$(builddir)/vcc_if.c \
-	$(builddir)/vcc_if.h \
-	$(builddir)/vmod_redis.rst \
-	$(builddir)/vmod_redis.man.rst

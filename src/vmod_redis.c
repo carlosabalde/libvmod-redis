@@ -9,7 +9,7 @@
 #include "vcl.h"
 #include "vrt.h"
 #include "cache/cache.h"
-#include "vcc_if.h"
+#include "vcc_redis_if.h"
 
 #include "cluster.h"
 #include "core.h"

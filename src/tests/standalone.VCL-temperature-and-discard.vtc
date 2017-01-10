@@ -6,7 +6,7 @@ server s1 {
 } -repeat 1 -start
 
 varnish v1 -vcl+backend {
-    import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
+    import ${vmod_redis};
 
     sub vcl_init {
         redis.subnets(
