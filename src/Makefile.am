@@ -10,6 +10,7 @@ libvmod_redis_la_SOURCES = \
 	cluster.c cluster.h \
 	core.c core.h \
 	sentinel.c sentinel.h \
+	solarisfixes.h \
 	vmod_redis.c
 
 nodist_libvmod_redis_la_SOURCES = \
@@ -30,5 +31,7 @@ AM_VTC_LOG_FLAGS = -Dvmod_redis="$(VMOD_REDIS)"
 TESTS = @VMOD_TESTS@
 
 EXTRA_DIST = \
-	vmod_example.vcc \
+	tests/hashslot-keys.txt \
+	tests/runner.sh \
+	vmod_redis.vcc \
 	$(VMOD_TESTS)
