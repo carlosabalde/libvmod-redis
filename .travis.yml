@@ -4,9 +4,19 @@ dist: trusty
 
 language: c
 
+compiler:
+  - clang
+  - gcc
+
+matrix:
+  include:
+    - compiler: gcc
+      env: MAKE_TARGET=lcov CONFIGURE_FLAGS=--enable-code-coverage
+
 addons:
   apt:
     packages:
+    - lcov
     - libev-dev
     - python-docutils
     - ruby
@@ -37,15 +47,18 @@ before_install:
   - sudo cp src/redis-trib.rb /usr/local/bin
   - popd
   - gem install redis
+  - wget http://git.savannah.gnu.org/cgit/autoconf-archive.git/plain/m4/ax_code_coverage.m4
+  - sudo mv ax_code_coverage.m4 /usr/share/aclocal/
 
 before_script:
   - ./autogen.sh
-  - ./configure --prefix=/usr
+  - ./configure --prefix=/usr $CONFIGURE_FLAGS
   - make -j4
 
 script:
-  - make check -j1
+  - make ${MAKE_TARGET:-check} -j1
 
-compiler:
-  - clang
-  - gcc
+after_success:
+  - test "$MAKE_TARGET" = lcov || exit 0
+  - cp libvmod-redis-*-coverage.info codecov.info
+  - bash <(curl -s https://codecov.io/bash) -X gcov -X coveragepy
