@@ -48,6 +48,7 @@ cleanup() {
 ## Initializations.
 ##
 set -e
+ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 TMP=`mktemp -d`
 SKIP=1
 CONTEXT=""
@@ -176,7 +177,7 @@ EOF
                 $CONTEXT \
                 -Dredis_master${INDEX}_ip=$(echo $LINE | cut -f 2 -d ' ' | cut -f 1 -d ':') \
                 -Dredis_master${INDEX}_port=$(echo $LINE | cut -f 2 -d ' ' | cut -f 2 -d ':') \
-                -Dredis_key_in_master${INDEX}=$(grep "^$(echo $LINE | cut -f 9 -d ' ' | cut -f 1 -d '-'): " tests/hashslot-keys.txt | cut -f 2 -d ' ')"
+                -Dredis_key_in_master${INDEX}=$(grep "^$(echo $LINE | cut -f 9 -d ' ' | cut -f 1 -d '-'): " $ROOT/hashslot-keys.txt | cut -f 2 -d ' ')"
             INDEX=$(( INDEX + 1 ))
         done <<< "$(redis-cli -p $((REDIS_CLUSTER_START_PORT+1)) CLUSTER NODES | grep master | sort -k 9 -n)"
     fi
@@ -187,7 +188,5 @@ fi
 ##
 if [[ $SKIP == 0 ]]; then
     set -x
-    VARNISHTEST="$1"
-    shift
-    "$VARNISHTEST" "$@" $CONTEXT
+    "$@" $CONTEXT
 fi
