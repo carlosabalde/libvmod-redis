@@ -8,6 +8,10 @@ compiler:
   - clang
   - gcc
 
+env:
+  matrix:
+    - MAKE_TARGET=distcheck
+
 matrix:
   include:
     - compiler: gcc
