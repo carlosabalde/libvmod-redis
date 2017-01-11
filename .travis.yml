@@ -10,6 +10,7 @@ compiler:
 
 env:
   matrix:
+    - MAKE_TARGET=check
     - MAKE_TARGET=distcheck
 
 matrix:
@@ -58,7 +59,7 @@ before_script:
   - make -j4
 
 script:
-  - make ${MAKE_TARGET:-check} -j1
+  - make $MAKE_TARGET -j1
 
 after_success:
   - test "$MAKE_TARGET" = lcov || exit 0
