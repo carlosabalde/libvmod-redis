@@ -1,14 +1,14 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 4.0
+Version: 5.0
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
 Group: System Environment/Daemons
 Source0: libvmod-redis.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
-Requires: varnish >= 5.0.0, hiredis >= 0.11.0, libev >= 4.03
-BuildRequires: make, python-docutils, varnish >= 5.0.0, varnish-libs-devel >= 5.0.0, hiredis-devel >= 0.11.0, libev-devel >= 4.03
+Requires: varnish >= 5.1.0, hiredis >= 0.11.0, libev >= 4.03
+BuildRequires: make, python-docutils, varnish >= 5.1.0, varnish-libs-devel >= 5.1.0, hiredis-devel >= 0.11.0, libev-devel >= 4.03
 
 %description
 Redis VMOD for Varnish
@@ -36,6 +36,8 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Fri Mar 17 2017 Carlos Abalde <carlos.abalde@gmail.com> - 5.0-1.20170317
+- Migrated to Varnish Cache 5.1.x.
 * Fri Mar 17 2017 Carlos Abalde <carlos.abalde@gmail.com> - 4.0-1.20170317
 - Migrated to Varnish Cache 5.0.x.
 * Wed Oct 26 2016 Carlos Abalde <carlos.abalde@gmail.com> - 3.11-1.20161026

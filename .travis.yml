@@ -28,7 +28,7 @@ addons:
 
 before_install:
   - set -e
-  - wget --no-check-certificate https://repo.varnish-cache.org/source/varnish-5.0.0.tar.gz
+  - wget --no-check-certificate https://repo.varnish-cache.org/source/varnish-5.1.1.tar.gz
   - tar zxvf varnish-*.tar.gz
   - pushd varnish-*
   - ./autogen.sh

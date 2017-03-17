@@ -1,3 +1,9 @@
+libvmod-redis (5.0-1) stable; urgency=low
+
+  * Migrated to Varnish Cache 5.1.x
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Fri, 17 Mar 2017 16:00:00 +0100
+
 libvmod-redis (4.0-1) stable; urgency=low
 
   * Migrated to Varnish Cache 5.0.x
