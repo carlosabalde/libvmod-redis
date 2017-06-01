@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 5.0
+Version: 5.1
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,6 +36,8 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Thu Jun 01 2017 Carlos Abalde <carlos.abalde@gmail.com> - 5.1-1.20170601
+- Added proxied methods.
 * Fri Mar 17 2017 Carlos Abalde <carlos.abalde@gmail.com> - 5.0-1.20170317
 - Migrated to Varnish Cache 5.1.x.
 * Fri Mar 17 2017 Carlos Abalde <carlos.abalde@gmail.com> - 4.0-1.20170317
