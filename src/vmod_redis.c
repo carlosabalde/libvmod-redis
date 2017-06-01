@@ -983,6 +983,183 @@ vmod_db_counter(VRT_CTX, struct vmod_redis_db *db, VCL_STRING name)
 }
 
 /******************************************************************************
+ * PROXY.
+ *****************************************************************************/
+
+static struct vmod_redis_db *
+get_db_instance(VRT_CTX, vcl_state_t *config, const char *db)
+{
+    // Initializations.
+    struct vmod_redis_db *result = NULL;
+
+    // Search database instance.
+    Lck_Lock(&config->mutex);
+    database_t *idb;
+    VTAILQ_FOREACH(idb, &config->dbs, list) {
+        CHECK_OBJ_NOTNULL(idb, DATABASE_MAGIC);
+        if (strcmp(idb->db->name, db) == 0) {
+            result = idb->db;
+            break;
+        }
+    }
+    Lck_Unlock(&config->mutex);
+
+    // Done!
+    return result;
+}
+
+VCL_VOID
+vmod_use(VRT_CTX, struct vmod_priv *vcl_priv, VCL_STRING db)
+{
+    // Fetch thread state & flush previous command.
+    task_state_t *state = get_task_state(ctx, 1);
+
+    // Check input.
+    if ((db != NULL) && (strlen(db) > 0)) {
+        vcl_state_t *config = vcl_priv->priv;
+        state->db = get_db_instance(ctx, config, db);
+    } else {
+        state->db = NULL;
+    }
+
+    // Log error?
+    if (state->db == NULL) {
+        REDIS_LOG_ERROR(ctx,
+            "Failed to use database (db=%s)",
+            db);
+    }
+}
+
+#define _COMMA_ ,
+
+#define VMOD_PROXIED_METHOD(type, fallback, method, margs, fargs...) \
+VCL_ ## type \
+vmod_ ## method(VRT_CTX, struct vmod_priv *vcl_priv, ##fargs, VCL_STRING db) \
+{ \
+    struct vmod_redis_db *instance; \
+    if ((db != NULL) && (strlen(db) > 0)) { \
+        vcl_state_t *config = vcl_priv->priv; \
+        instance = get_db_instance(ctx, config, db); \
+    } else { \
+        task_state_t *state = get_task_state(ctx, 0); \
+        instance = state->db; \
+    } \
+    \
+    if (instance != NULL) { \
+        return vmod_db_ ## method(ctx, instance margs); \
+    } else { \
+        REDIS_LOG_ERROR(ctx, \
+            "Database instance not available%s", \
+            ""); \
+        return fallback; \
+    } \
+}
+
+VMOD_PROXIED_METHOD(
+    VOID, , add_server,
+    _COMMA_ location _COMMA_ type,
+    VCL_STRING location, VCL_ENUM type)
+VMOD_PROXIED_METHOD(
+    VOID, , command,
+    _COMMA_ name,
+    VCL_STRING name)
+VMOD_PROXIED_METHOD(
+    VOID, , timeout,
+    _COMMA_ command_timeout,
+    VCL_INT command_timeout)
+VMOD_PROXIED_METHOD(
+    VOID, , retries,
+    _COMMA_ max_command_retries,
+    VCL_INT max_command_retries)
+VMOD_PROXIED_METHOD(
+    VOID, , push,
+    _COMMA_ arg,
+    VCL_STRING arg)
+VMOD_PROXIED_METHOD(
+    VOID, , execute,
+    _COMMA_ master,
+    VCL_BOOL master)
+VMOD_PROXIED_METHOD(
+    BOOL, 0, replied,
+    )
+VMOD_PROXIED_METHOD(
+    BOOL, 0, reply_is_error,
+    )
+VMOD_PROXIED_METHOD(
+    BOOL, 0, reply_is_nil,
+    )
+VMOD_PROXIED_METHOD(
+    BOOL, 0, reply_is_status,
+    )
+VMOD_PROXIED_METHOD(
+    BOOL, 0, reply_is_integer,
+    )
+VMOD_PROXIED_METHOD(
+    BOOL, 0, reply_is_string,
+    )
+VMOD_PROXIED_METHOD(
+    BOOL, 0, reply_is_array,
+    )
+VMOD_PROXIED_METHOD(
+    STRING, NULL, get_reply,
+    )
+VMOD_PROXIED_METHOD(
+    STRING, NULL, get_error_reply,
+    )
+VMOD_PROXIED_METHOD(
+    STRING, NULL, get_status_reply,
+    )
+VMOD_PROXIED_METHOD(
+    INT, 0, get_integer_reply,
+    )
+VMOD_PROXIED_METHOD(
+    STRING, NULL, get_string_reply,
+    )
+VMOD_PROXIED_METHOD(
+    INT, 0, get_array_reply_length,
+    )
+VMOD_PROXIED_METHOD(
+    BOOL, 0, array_reply_is_error,
+    _COMMA_ index,
+    VCL_INT index)
+VMOD_PROXIED_METHOD(
+    BOOL, 0, array_reply_is_nil,
+    _COMMA_ index,
+    VCL_INT index)
+VMOD_PROXIED_METHOD(
+    BOOL, 0, array_reply_is_status,
+    _COMMA_ index,
+    VCL_INT index)
+VMOD_PROXIED_METHOD(
+    BOOL, 0, array_reply_is_integer,
+    _COMMA_ index,
+    VCL_INT index)
+VMOD_PROXIED_METHOD(
+    BOOL, 0, array_reply_is_string,
+    _COMMA_ index,
+    VCL_INT index)
+VMOD_PROXIED_METHOD(
+    BOOL, 0, array_reply_is_array,
+    _COMMA_ index,
+    VCL_INT index)
+VMOD_PROXIED_METHOD(
+    STRING, NULL, get_array_reply_value,
+    _COMMA_ index,
+    VCL_INT index)
+VMOD_PROXIED_METHOD(
+    VOID, , free,
+    )
+VMOD_PROXIED_METHOD(
+    STRING, NULL, stats,
+    )
+VMOD_PROXIED_METHOD(
+    INT, 0, counter,
+    _COMMA_ name,
+    VCL_STRING name)
+
+#undef _COMMA_
+
+/******************************************************************************
  * UTILITIES.
  *****************************************************************************/
 

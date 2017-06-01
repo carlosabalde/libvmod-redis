@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 3.11
+Version: 3.12
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,6 +36,8 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Thu Jun 01 2017 Carlos Abalde <carlos.abalde@gmail.com> - 3.12-1.20170601
+- Added proxied methods.
 * Wed Oct 26 2016 Carlos Abalde <carlos.abalde@gmail.com> - 3.11-1.20161026
 - Added 'ignore_slaves' option to redis.db().
 * Thu Aug 04 2016 Carlos Abalde <carlos.abalde@gmail.com> - 3.10-1.20160804

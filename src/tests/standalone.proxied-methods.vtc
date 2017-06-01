@@ -1,0 +1,131 @@
+varnishtest "Tests proxied methods"
+
+server s1 {
+   rxreq
+   txresp
+} -repeat 1 -start
+
+varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
+    import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
+
+    sub vcl_init {
+        redis.subnets(
+            masks={""});
+
+        redis.sentinels(
+            locations={""},
+            period=0,
+            connection_timeout=500,
+            command_timeout=0);
+
+        new master1 = redis.db(
+            location="${redis_master1_ip}:${redis_master1_port}",
+            type=master,
+            connection_timeout=500,
+            connection_ttl=0,
+            command_timeout=0,
+            max_command_retries=0,
+            shared_connections=false,
+            max_connections=1,
+            password="",
+            sickness_ttl=0,
+            ignore_slaves=false,
+            max_cluster_hops=0);
+
+        new master2 = redis.db(
+            location="${redis_master2_ip}:${redis_master2_port}",
+            type=master,
+            connection_timeout=500,
+            connection_ttl=0,
+            command_timeout=0,
+            max_command_retries=0,
+            shared_connections=false,
+            max_connections=1,
+            password="",
+            sickness_ttl=0,
+            ignore_slaves=false,
+            max_cluster_hops=0);
+    }
+
+    sub vcl_deliver {
+        # SET (master1) -> GET (master1) -> GET (master2).
+        redis.use("master1");
+        redis.command("SET");
+        redis.push("foo");
+        redis.push("Hello world!");
+        redis.execute(true);
+
+        redis.command("GET");
+        redis.push("foo");
+        redis.execute(true);
+        set resp.http.Reply-1 = redis.get_reply();
+
+        redis.command("GET", db="master2");
+        redis.push("foo", db="master2");
+        redis.execute(true, db="master2");
+        set resp.http.Reply-2 = redis.get_reply(db="master2");
+
+        # SET (master2) -> GET (master2) -> GET (master1).
+        redis.use("master2");
+        redis.command("SET");
+        redis.push("bar");
+        redis.push("Hello world!");
+        redis.execute(true);
+
+        redis.command("GET");
+        redis.push("bar");
+        redis.execute(true);
+        set resp.http.Reply-3 = redis.get_reply();
+
+        redis.command("GET", db="master1");
+        redis.push("bar", db="master1");
+        redis.execute(true, db="master1");
+        set resp.http.Reply-4 = redis.get_reply(db="master1");
+
+        # Stats.
+        set resp.http.master1-stats = redis.stats(db="master1");
+        set resp.http.master1-servers-total = redis.counter("servers.total", db="master1");
+        redis.use("master1");
+        set resp.http.master1-connections-total = redis.counter("connections.total");
+        set resp.http.master1-connections-dropped-overflow = redis.counter("connections.dropped.overflow");
+        set resp.http.master1-commands-total = redis.counter("commands.total");
+        set resp.http.master1-commands-error = redis.counter("commands.error");
+        set resp.http.master1-commands-noscript = redis.counter("commands.noscript");
+
+        set resp.http.master2-stats = redis.stats(db="master2");
+        set resp.http.master2-servers-total = redis.counter("servers.total", db="master2");
+        redis.use("master2");
+        set resp.http.master2-connections-dropped-overflow = redis.counter("connections.dropped.overflow");
+        set resp.http.master2-connections-total = redis.counter("connections.total");
+        set resp.http.master2-commands-total = redis.counter("commands.total");
+        set resp.http.master2-commands-error = redis.counter("commands.error");
+        set resp.http.master2-commands-noscript = redis.counter("commands.noscript");
+    }
+} -start
+
+client c1 {
+    txreq
+    rxresp
+
+    expect resp.http.Reply-1 == "Hello world!"
+    expect resp.http.Reply-2 == ""
+
+    expect resp.http.Reply-3 == "Hello world!"
+    expect resp.http.Reply-4 == ""
+
+    expect resp.http.master1-servers-total == "1"
+    expect resp.http.master1-connections-total == "2"
+    expect resp.http.master1-connections-dropped-overflow == "1"
+    expect resp.http.master1-commands-total == "3"
+    expect resp.http.master1-commands-error == "0"
+    expect resp.http.master1-commands-noscript == "0"
+
+    expect resp.http.master2-servers-total == "1"
+    expect resp.http.master2-connections-total == "1"
+    expect resp.http.master2-connections-dropped-overflow == "1"
+    expect resp.http.master2-commands-total == "3"
+    expect resp.http.master2-commands-error == "0"
+    expect resp.http.master2-commands-noscript == "0"
+} -run
+
+varnish v1 -expect client_req == 1

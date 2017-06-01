@@ -7,13 +7,14 @@ libvmod_redis_la_LDFLAGS = -module -export-dynamic -avoid-version
 libvmod_redis_la_LIBADD = -lhiredis -lev
 
 libvmod_redis_la_SOURCES = \
-    config.h \
-    crc16.c crc16.h \
-    sha1.c sha1.h \
-    cluster.c cluster.h \
-    core.c core.h \
-    sentinel.c sentinel.h \
-    vmod_redis.c
+	config.h \
+	crc16.c crc16.h \
+	sha1.c sha1.h \
+	cluster.c cluster.h \
+	core.c core.h \
+	sentinel.c sentinel.h \
+	solarisfixes.h \
+	vmod_redis.c
 
 nodist_libvmod_redis_la_SOURCES = \
 	vcc_if.c \
@@ -30,11 +31,13 @@ VMOD_TESTS = $(top_srcdir)/src/tests/*.vtc
 .PHONY: $(VMOD_TESTS)
 
 $(top_srcdir)/src/tests/*.vtc: libvmod_redis.la
-	tests/runner.sh @VARNISHTEST@ $@ -Dvarnishd=@VARNISHD@ -Dvmod_topbuild=$(abs_top_builddir)
+	$(abs_srcdir)/tests/runner.sh @VARNISHTEST@ $@ -Dvarnishd=@VARNISHD@ -Dvmod_topbuild=$(abs_top_builddir)
 
 check: $(VMOD_TESTS)
 
 EXTRA_DIST = \
+	tests/hashslot-keys.txt \
+	tests/runner.sh \
 	vmod_redis.vcc \
 	$(VMOD_TESTS)
 

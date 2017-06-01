@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2014-2016 Carlos Abalde <carlos.abalde@gmail.com>
+# Copyright (c) 2014-2017 Carlos Abalde <carlos.abalde@gmail.com>
 #
 # You're free to use and distribute this under terms in the
 # LICENSE file.
@@ -61,6 +61,163 @@ Arguments
     executing Redis Sentinel commands.
 Description
     Using this function is not mandatory.
+
+$Function VOID use(PRIV_VCL, STRING db)
+
+Arguments
+    db: VCL name of the database instance.
+Description
+    Sets the current database instance to be used by proxied methods (if none
+    is specified with their ``db`` argument).
+
+$Function VOID add_server(
+    PRIV_VCL,
+    STRING location,
+    ENUM { master, slave, auto, cluster } type,
+    STRING db="")
+
+Description
+    Proxied version of ``.add_server()``.
+
+$Function VOID command(PRIV_VCL, STRING name, STRING db="")
+
+Description
+    Proxied version of ``.command()``.
+
+$Function VOID timeout(PRIV_VCL, INT command_timeout, STRING db="")
+
+Description
+    Proxied version of ``.timeout()``.
+
+$Function VOID retries(PRIV_VCL, INT max_command_retries, STRING db="")
+
+Description
+    Proxied version of ``.retries()``.
+
+$Function VOID push(PRIV_VCL, STRING arg, STRING db="")
+
+Description
+    Proxied version of ``.push()``.
+
+$Function VOID execute(PRIV_VCL, BOOL master=1, STRING db="")
+
+Description
+    Proxied version of ``.execute()``.
+
+$Function BOOL replied(PRIV_VCL, STRING db="")
+
+Description
+    Proxied version of ``.replied()``.
+
+$Function BOOL reply_is_error(PRIV_VCL, STRING db="")
+
+Description
+    Proxied version of ``.reply_is_error()``.
+
+$Function BOOL reply_is_nil(PRIV_VCL, STRING db="")
+
+Description
+    Proxied version of ``.reply_is_nil()``.
+
+$Function BOOL reply_is_status(PRIV_VCL, STRING db="")
+
+Description
+    Proxied version of ``.reply_is_status()``.
+
+$Function BOOL reply_is_integer(PRIV_VCL, STRING db="")
+
+Description
+    Proxied version of ``.reply_is_integer()``.
+
+$Function BOOL reply_is_string(PRIV_VCL, STRING db="")
+
+Description
+    Proxied version of ``.reply_is_string()``.
+
+$Function BOOL reply_is_array(PRIV_VCL, STRING db="")
+
+Description
+    Proxied version of ``.reply_is_array()``.
+
+$Function STRING get_reply(PRIV_VCL, STRING db="")
+
+Description
+    Proxied version of ``.get_reply()``.
+
+$Function STRING get_error_reply(PRIV_VCL, STRING db="")
+
+Description
+    Proxied version of ``.get_error_reply()``.
+
+$Function STRING get_status_reply(PRIV_VCL, STRING db="")
+
+Description
+    Proxied version of ``.get_status_reply()``.
+
+$Function INT get_integer_reply(PRIV_VCL, STRING db="")
+
+Description
+    Proxied version of ``.get_integer_reply()``.
+
+$Function STRING get_string_reply(PRIV_VCL, STRING db="")
+
+Description
+    Proxied version of ``.get_string_reply()``.
+
+$Function INT get_array_reply_length(PRIV_VCL, STRING db="")
+
+Description
+    Proxied version of ``.get_array_reply_length()``.
+
+$Function BOOL array_reply_is_error(PRIV_VCL, INT index, STRING db="")
+
+Description
+    Proxied version of ``.array_reply_is_error()``.
+
+$Function BOOL array_reply_is_nil(PRIV_VCL, INT index, STRING db="")
+
+Description
+    Proxied version of ``.array_reply_is_nil()``.
+
+$Function BOOL array_reply_is_status(PRIV_VCL, INT index, STRING db="")
+
+Description
+    Proxied version of ``.array_reply_is_status()``.
+
+$Function BOOL array_reply_is_integer(PRIV_VCL, INT index, STRING db="")
+
+Description
+    Proxied version of ``.array_reply_is_integer()``.
+
+$Function BOOL array_reply_is_string(PRIV_VCL, INT index, STRING db="")
+
+Description
+    Proxied version of ``.array_reply_is_string()``.
+
+$Function BOOL array_reply_is_array(PRIV_VCL, INT index, STRING db="")
+
+Description
+    Proxied version of ``.array_reply_is_array()``.
+
+$Function STRING get_array_reply_value(PRIV_VCL, INT index, STRING db="")
+
+Description
+    Proxied version of ``.get_array_reply_value()``.
+
+$Function VOID free(PRIV_VCL, STRING db="")
+
+Description
+    Proxied version of ``.free()``.
+
+$Function STRING stats(PRIV_VCL, STRING db="")
+
+Description
+    Proxied version of ``.stats()``.
+
+$Function INT counter(PRIV_VCL, STRING name, STRING db="")
+
+Description
+    Proxied version of ``.counter()``.
 
 $Object db(PRIV_VCL,
     STRING location="",

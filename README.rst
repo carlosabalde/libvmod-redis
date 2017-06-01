@@ -26,17 +26,43 @@ import redis;
 
 ::
 
-    # Subnets.
+    ##
+    ## Subnets.
+    ##
+
     Function subnets(STRING masks="")
 
-    # Sentinels.
+    ##
+    ## Sentinels.
+    ##
+
     Function sentinels(
         STRING locations="",
         INT period=60,
         INT connection_timeout=500,
         INT command_timeout=0)
 
-    # Databases.
+    ##
+    ## Proxy.
+    ##
+
+    # Instance selection.
+    Function VOID use(STRING db)
+
+    # Proxied methods.
+    Method VOID .add_server(..., STRING db="")
+    Function VOID command(..., STRING db="")
+    Function VOID timeout(..., STRING db="")
+    Function VOID retries(..., STRING db="")
+    ...
+    Method STRING .stats(..., STRING db="")
+    Method INT .counter(..., STRING db="")
+
+    ##
+    ## Databases.
+    ##
+
+    # Constructor.
     Object db(
         STRING location="",
         ENUM { master, slave, auto, cluster } type="auto",
@@ -221,6 +247,8 @@ INSTALLATION
 
 The source tree is based on autotools to configure the building, and does also have the necessary bits in place to do functional unit tests using the varnishtest tool.
 
+**Beware this project contains multiples branches (master, 4.1, 4.0, etc.). Please, select the branch to be used depending on your Varnish Cache version (Varnish trunk → master, Varnish 4.1.x → 4.1, Varnish 4.0.x → 4.0, etc.).**
+
 Dependencies:
 
 * `hiredis <https://github.com/redis/hiredis>`_ - minimalistic C Redis client library.
@@ -239,4 +267,4 @@ Implementation of the SHA-1 and CRC-16 cryptographic hash functions embedded in 
 * http://download.redis.io/redis-stable/src/config.h
 * http://download.redis.io/redis-stable/src/solarisfixes.h
 
-Copyright (c) 2014-2016 Carlos Abalde <carlos.abalde@gmail.com>
+Copyright (c) 2014-2017 Carlos Abalde <carlos.abalde@gmail.com>
