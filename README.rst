@@ -29,17 +29,43 @@ import redis;
 
 ::
 
-    # Subnets.
+    ##
+    ## Subnets.
+    ##
+
     Function subnets(STRING masks="")
 
-    # Sentinels.
+    ##
+    ## Sentinels.
+    ##
+
     Function sentinels(
         STRING locations="",
         INT period=60,
         INT connection_timeout=500,
         INT command_timeout=0)
 
-    # Databases.
+    ##
+    ## Proxy.
+    ##
+
+    # Instance selection.
+    Function VOID use(STRING db)
+
+    # Proxied methods.
+    Method VOID .add_server(..., STRING db="")
+    Function VOID command(..., STRING db="")
+    Function VOID timeout(..., STRING db="")
+    Function VOID retries(..., STRING db="")
+    ...
+    Method STRING .stats(..., STRING db="")
+    Method INT .counter(..., STRING db="")
+
+    ##
+    ## Databases.
+    ##
+
+    # Constructor.
     Object db(
         STRING location="",
         ENUM { master, slave, auto, cluster } type="auto",
