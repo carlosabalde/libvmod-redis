@@ -218,6 +218,9 @@ typedef struct task_state {
     unsigned ncontexts;
     VTAILQ_HEAD(,redis_context) contexts;
 
+    // Current database.
+    struct vmod_redis_db *db;
+
     // Redis command:
     //   - Database.
     //   - Arguments (allocated in the session workspace).

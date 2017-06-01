@@ -337,6 +337,8 @@ new_task_state()
     result->ncontexts = 0;
     VTAILQ_INIT(&result->contexts);
 
+    result->db = NULL;
+
     result->command.db = NULL;
     result->command.timeout = (struct timeval){ 0 };
     result->command.max_retries = 0;
@@ -357,6 +359,8 @@ free_task_state(task_state_t *state)
         VTAILQ_REMOVE(&state->contexts, icontext, list);
         free_redis_context(icontext);
     }
+
+    state->db = NULL;
 
     state->command.db = NULL;
     state->command.timeout = (struct timeval){ 0 };
