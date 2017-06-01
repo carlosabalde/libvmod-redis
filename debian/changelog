@@ -1,3 +1,9 @@
+libvmod-redis (4.1-1) stable; urgency=low
+
+  * Added proxied methods
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Thu, 01 Jun 2017 17:00:00 +0200
+
 libvmod-redis (4.0-1) stable; urgency=low
 
   * Migrated to Varnish Cache 5.0.x
