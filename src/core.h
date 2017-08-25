@@ -315,25 +315,25 @@ typedef struct vmod_state {
 
 extern vmod_state_t vmod_state;
 
-#define REDIS_LOG(ctx, level, message, ...) \
+#define REDIS_LOG(ctx, priority, fmt, ...) \
     do { \
         const struct vrt_ctx *_ctx = ctx; \
         \
         char *_buffer; \
-        if (level == LOG_ERR) { \
+        if (priority <= LOG_ERR) { \
             assert(asprintf( \
                 &_buffer, \
-                "[REDIS][%s] %s", __func__, message) > 0); \
+                "[REDIS][%s] %s", __func__, fmt) > 0); \
         } else { \
             assert(asprintf( \
                 &_buffer, \
-                "[REDIS] %s", message) > 0); \
+                "[REDIS] %s", fmt) > 0); \
         } \
         \
-        syslog(level, _buffer, ##__VA_ARGS__); \
+        syslog(priority, _buffer, ##__VA_ARGS__); \
         \
         unsigned _tag; \
-        if (level == LOG_ERR) { \
+        if (priority <= LOG_ERR) { \
             _tag = SLT_VCL_Error; \
         } else { \
             _tag = SLT_VCL_Log; \
@@ -347,12 +347,12 @@ extern vmod_state_t vmod_state;
         free(_buffer); \
     } while (0)
 
-#define REDIS_LOG_ERROR(ctx, message, ...) \
-    REDIS_LOG(ctx, LOG_ERR, message, ##__VA_ARGS__)
-#define REDIS_LOG_WARNING(ctx, message, ...) \
-    REDIS_LOG(ctx, LOG_WARNING, message, ##__VA_ARGS__)
-#define REDIS_LOG_INFO(ctx, message, ...) \
-    REDIS_LOG(ctx, LOG_INFO, message, ##__VA_ARGS__)
+#define REDIS_LOG_ERROR(ctx, fmt, ...) \
+    REDIS_LOG(ctx, LOG_ERR, fmt, ##__VA_ARGS__)
+#define REDIS_LOG_WARNING(ctx, fmt, ...) \
+    REDIS_LOG(ctx, LOG_WARNING, fmt, ##__VA_ARGS__)
+#define REDIS_LOG_INFO(ctx, fmt, ...) \
+    REDIS_LOG(ctx, LOG_INFO, fmt, ##__VA_ARGS__)
 
 #define REDIS_AUTH(ctx, rcontext, password, message1, message2, ...) \
     do { \
