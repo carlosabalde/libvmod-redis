@@ -91,7 +91,7 @@ $script = <<SCRIPT
       -e "s%^# cluster-enabled .*%cluster-enabled yes%" \
       -e "s%^# cluster-config-file .*%cluster-config-file nodes-$PORT.conf%" \
       -e "s%^# cluster-node-timeout .*%cluster-node-timeout 5000%" \
-      -e "s%^# appendonly .*%appendonly yes%"
+      -e "s%^appendonly .*%appendonly yes%"
 
     service redis-server-$PORT start
   done
