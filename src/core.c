@@ -400,7 +400,10 @@ new_vcl_state()
 void
 free_vcl_state(vcl_state_t *priv)
 {
-    Lck_Delete(&priv->mutex);
+    // XXX: associated lock class (i.e. vmod_state.locks.config) has already
+    // been destroyed during handle_vcl_discard_event(). It's too late to call
+    // Lck_Delete().
+    // Lck_Delete(&priv->mutex);
 
     subnet_t *isubnet;
     while (!VTAILQ_EMPTY(&priv->subnets)) {

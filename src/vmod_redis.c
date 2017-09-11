@@ -151,8 +151,8 @@ handle_vcl_discard_event(VRT_CTX, vcl_state_t *config)
     // Release Varnish locks.
     vmod_state.locks.refs--;
     if (vmod_state.locks.refs == 0) {
-        VSM_Free(vmod_state.locks.config);
-        VSM_Free(vmod_state.locks.db);
+        Lck_DestroyClass(&vmod_state.locks.config);
+        Lck_DestroyClass(&vmod_state.locks.db);
     }
 
     // Done!

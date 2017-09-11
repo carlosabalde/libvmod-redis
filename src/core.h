@@ -308,8 +308,8 @@ typedef struct vmod_state {
     // Varnish locks.
     struct {
         unsigned refs;
-        struct VSC_C_lck *config;
-        struct VSC_C_lck *db;
+        struct VSC_lck *config;
+        struct VSC_lck *db;
     } locks;
 } vmod_state_t;
 
