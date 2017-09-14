@@ -502,7 +502,7 @@ redis_execute(
     if ((plan != NULL) &&
         ((plan->contexts.n > 0) || (plan->servers.n > 0))) {
         // Execute command, retrying up to some limit.
-        while ((result == NULL) && (!WS_Overflowed(ctx->ws))) {
+        while (result == NULL) {
             // Initializations.
             redis_context_t *context = lock_redis_context(ctx, db, state, plan);
 
@@ -510,22 +510,20 @@ redis_execute(
             if (context != NULL) {
                 // Initializations.
                 unsigned done = 0;
+                unsigned failed_ws = 0;
 
                 // When executing EVAL commands, first try with EVALSHA.
                 if ((strcasecmp(argv[0], "EVAL") == 0) && (argc >= 2)) {
                     // Replace EVAL with EVALSHA.
                     argv[0] = WS_Copy(ctx->ws, "EVALSHA", -1);
                     if (argv[0] == NULL) {
-                        *retries = max_retries;
-                        REDIS_LOG_ERROR(ctx,
-                            "Failed to allocate memory in workspace (ws=%p)",
-                            ctx->ws);
+                        failed_ws = 1;
                         goto unlock;
                     }
                     const char *script = argv[1];
                     argv[1] = sha1(ctx, script);
                     if (argv[1] == NULL) {
-                        *retries = max_retries;
+                        failed_ws = 1;
                         goto unlock;
                     }
 
@@ -542,10 +540,7 @@ redis_execute(
                         // Replace EVALSHA with EVAL.
                         argv[0] = WS_Copy(ctx->ws, "EVAL", -1);
                         if (argv[0] == NULL) {
-                            *retries = max_retries;
-                            REDIS_LOG_ERROR(ctx,
-                                "Failed to allocate memory in workspace (ws=%p)",
-                                ctx->ws);
+                            failed_ws = 1;
                             goto unlock;
                         }
                         argv[1] = script;
@@ -585,6 +580,12 @@ redis_execute(
     unlock:
                 // Release context.
                 unlock_redis_context(ctx, db, state, context);
+
+                // Check WS fail flag.
+                if (failed_ws) {
+                    *retries = max_retries;
+                    REDIS_FAIL_WS(ctx, NULL);
+                }
 
             // Context not available.
             } else {
@@ -986,10 +987,7 @@ new_execution_plan(VRT_CTX, struct vmod_redis_db *db)
 {
     struct plan *result = (void *)WS_Alloc(ctx->ws, sizeof(struct plan));
     if (result == NULL) {
-        REDIS_LOG_ERROR(ctx,
-            "Failed to allocate memory in workspace (ws=%p)",
-            ctx->ws);
-        return NULL;
+        REDIS_FAIL_WS(ctx, NULL);
     }
 
     result->contexts.n = 0;
@@ -1031,12 +1029,8 @@ populate_simple_execution_plan(
                             break;
                         }
                     } else {
-                        WS_Release(ctx->ws, used_ws);
-                        WS_MarkOverflow(ctx->ws);
-                        REDIS_LOG_ERROR(ctx,
-                            "Failed to allocate memory in workspace (ws=%p)",
-                            ctx->ws);
-                        return;
+                        WS_Release(ctx->ws, 0);
+                        REDIS_FAIL_WS(ctx, );
                     }
                 } else {
                     VTAILQ_REMOVE(&state->contexts, icontext, list);
@@ -1059,10 +1053,7 @@ populate_simple_execution_plan(
         WS_Release(ctx->ws, sizeof(redis_server_t *));
     } else {
         WS_Release(ctx->ws, 0);
-        WS_MarkOverflow(ctx->ws);
-        REDIS_LOG_ERROR(ctx,
-            "Failed to allocate memory in workspace (ws=%p)",
-            ctx->ws);
+        REDIS_FAIL_WS(ctx, );
     }
 }
 
@@ -1099,12 +1090,8 @@ populate_execution_plan(
                             break;
                         }
                     } else {
-                        WS_Release(ctx->ws, used_ws);
-                        WS_MarkOverflow(ctx->ws);
-                        REDIS_LOG_ERROR(ctx,
-                            "Failed to allocate memory in workspace (ws=%p)",
-                            ctx->ws);
-                        return;
+                        WS_Release(ctx->ws, 0);
+                        REDIS_FAIL_WS(ctx, );
                     }
                 } else {
                     VTAILQ_REMOVE(&state->contexts, icontext, list);
@@ -1182,12 +1169,8 @@ populate_execution_plan(
                                         break;
                                     }
                                 } else {
-                                    WS_Release(ctx->ws, used_ws);
-                                    WS_MarkOverflow(ctx->ws);
-                                    REDIS_LOG_ERROR(ctx,
-                                        "Failed to allocate memory in workspace (ws=%p)",
-                                        ctx->ws);
-                                    return;
+                                    WS_Release(ctx->ws, 0);
+                                    REDIS_FAIL_WS(ctx, );
                                 }
                             }
                         }
@@ -1245,12 +1228,8 @@ populate_execution_plan(
                                         break;
                                     }
                                 } else {
-                                    WS_Release(ctx->ws, used_ws);
-                                    WS_MarkOverflow(ctx->ws);
-                                    REDIS_LOG_ERROR(ctx,
-                                        "Failed to allocate memory in workspace (ws=%p)",
-                                        ctx->ws);
-                                    return;
+                                    WS_Release(ctx->ws, 0);
+                                    REDIS_FAIL_WS(ctx, );
                                 }
                             }
                         }
@@ -1522,16 +1501,13 @@ sha1(VRT_CTX, const char *script)
 
     // Encode.
     char *result = WS_Alloc(ctx->ws, 41);;
-    if (result != NULL) {
-        char *ptr = result;
-        for (int i = 0; i < 20; i++) {
-            sprintf(ptr, "%02x", buffer[i]);
-            ptr += 2;
-        }
-    } else {
-        REDIS_LOG_ERROR(ctx,
-            "Failed to allocate memory in workspace (ws=%p)",
-            ctx->ws);
+    if (result == NULL) {
+        return NULL;
+    }
+    char *ptr = result;
+    for (int i = 0; i < 20; i++) {
+        sprintf(ptr, "%02x", buffer[i]);
+        ptr += 2;
     }
 
     // Done!

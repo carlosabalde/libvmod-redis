@@ -529,10 +529,7 @@ vmod_db_command(
         state->command.argc = 1;
         state->command.argv[0] = WS_Copy(ctx->ws, name, -1);
         if (state->command.argv[0] == NULL) {
-            REDIS_LOG_ERROR(ctx,
-                "Failed to allocate memory in workspace (ws=%p)",
-                ctx->ws);
-            flush_task_state(state);
+            REDIS_FAIL_WS(ctx, );
         }
     }
 }
@@ -601,10 +598,7 @@ vmod_db_push(
             state->command.argv[state->command.argc++] = WS_Copy(ctx->ws, "", -1);
         }
         if (state->command.argv[state->command.argc - 1] == NULL) {
-            REDIS_LOG_ERROR(ctx,
-                "Failed to allocate memory in workspace (ws=%p)",
-                ctx->ws);
-            flush_task_state(state);
+            REDIS_FAIL_WS(ctx, );
         }
     } else {
         REDIS_LOG_ERROR(ctx,
@@ -629,8 +623,7 @@ vmod_db_execute(
     // or if running this in a different database or if the workspace is
     // already overflowed.
     if ((state->command.argc >= 1) &&
-        (state->command.db == db) &&
-        (!WS_Overflowed(ctx->ws))) {
+        (state->command.db == db)) {
         // Initializations.
         vcl_state_t *config = vcl_priv->priv;
         unsigned retries = 0;
@@ -768,9 +761,7 @@ vmod_db_get_ ## lower ## _reply(VRT_CTX, struct vmod_redis_db *db, struct vmod_p
         (state->command.reply->type == REDIS_REPLY_ ## upper)) { \
         char *result = WS_Copy(ctx->ws, state->command.reply->str, state->command.reply->len + 1); \
         if (result == NULL) { \
-            REDIS_LOG_ERROR(ctx, \
-                "Failed to allocate memory in workspace (ws=%p)", \
-                ctx->ws); \
+            REDIS_FAIL_WS(ctx, NULL); \
         } \
         return result; \
     } else { \
@@ -927,6 +918,9 @@ vmod_db_stats(VRT_CTX, struct vmod_redis_db *db)
         db->stats.cluster.replies.moved,
         db->stats.cluster.replies.ask);
     Lck_Unlock(&db->mutex);
+    if (result == NULL) {
+        REDIS_FAIL_WS(ctx, NULL);
+    }
     return result;
 }
 
@@ -1238,18 +1232,14 @@ get_reply(VRT_CTX, redisReply *reply)
         case REDIS_REPLY_STRING:
             result = WS_Copy(ctx->ws, reply->str, reply->len + 1);
             if (result == NULL) {
-                REDIS_LOG_ERROR(ctx,
-                    "Failed to allocate memory in workspace (ws=%p)",
-                    ctx->ws);
+                REDIS_FAIL_WS(ctx, NULL);
             }
             break;
 
         case REDIS_REPLY_INTEGER:
             result = WS_Printf(ctx->ws, "%lld", reply->integer);
             if (result == NULL) {
-                REDIS_LOG_ERROR(ctx,
-                    "Failed to allocate memory in workspace (ws=%p)",
-                    ctx->ws);
+                REDIS_FAIL_WS(ctx, NULL);
             }
             break;
 

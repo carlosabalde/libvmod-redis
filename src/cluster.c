@@ -55,7 +55,7 @@ cluster_execute(
 
         // Execute command, retrying and following redirections up to
         // some limit.
-        while ((result == NULL) && (!WS_Overflowed(ctx->ws))) {
+        while (result == NULL) {
             // Execute command:
             //   - server != NULL ==> only include 'server' in the execution plan.
             //   - !master ==> use READONLY + READWRITE when dealing with slaves.

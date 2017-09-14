@@ -323,7 +323,7 @@ extern vmod_state_t vmod_state;
         if (priority <= LOG_ERR) { \
             assert(asprintf( \
                 &_buffer, \
-                "[REDIS][%s] %s", __func__, fmt) > 0); \
+                "[REDIS][%s:%d] %s", __func__, __LINE__, fmt) > 0); \
         } else { \
             assert(asprintf( \
                 &_buffer, \
@@ -353,6 +353,16 @@ extern vmod_state_t vmod_state;
     REDIS_LOG(ctx, LOG_WARNING, fmt, ##__VA_ARGS__)
 #define REDIS_LOG_INFO(ctx, fmt, ...) \
     REDIS_LOG(ctx, LOG_INFO, fmt, ##__VA_ARGS__)
+
+#define REDIS_FAIL(ctx, result, fmt, ...) \
+    do { \
+        syslog(LOG_ALERT, "[REDIS][%s:%d] " fmt, __func__, __LINE__, ##__VA_ARGS__); \
+        VRT_fail(ctx, "[REDIS][%s:%d] " fmt, __func__, __LINE__, ##__VA_ARGS__); \
+        return result; \
+    } while (0)
+
+#define REDIS_FAIL_WS(ctx, result) \
+    REDIS_FAIL(ctx, result, "Workspace overflow")
 
 #define REDIS_AUTH(ctx, rcontext, password, message1, message2, ...) \
     do { \
