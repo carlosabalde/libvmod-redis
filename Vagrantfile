@@ -16,8 +16,10 @@ $script = <<SCRIPT
 
   # Varnish Cache.
   sudo -u vagrant bash -c '\
-    git clone https://github.com/varnishcache/varnish-cache.git /tmp/varnish; \
-    cd /tmp/varnish; \
+    wget --no-check-certificate https://varnish-cache.org/_downloads/varnish-5.2.0-rc2.tgz; \
+    tar zxvf varnish-*.tgz; \
+    rm -f varnish-*.tgz; \
+    cd varnish-*; \
     ./autogen.sh; \
     ./configure; \
     make; \
@@ -122,7 +124,7 @@ Vagrant.configure('2') do |config|
     ]
   end
 
-  config.vm.define :master do |machine|
+  config.vm.define :v52 do |machine|
     machine.vm.box = 'ubuntu/trusty64'
     machine.vm.box_version = '=14.04'
     machine.vm.box_check_update = true
@@ -130,7 +132,7 @@ Vagrant.configure('2') do |config|
     machine.vm.provider :virtualbox do |vb|
       vb.customize [
         'modifyvm', :id,
-        '--name', 'libvmod-redis (Varnish master)',
+        '--name', 'libvmod-redis (Varnish 5.2.x)',
       ]
     end
   end
