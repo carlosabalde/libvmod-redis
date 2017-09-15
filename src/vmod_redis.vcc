@@ -6,6 +6,7 @@
 #
 
 $Module redis 3 Redis VMOD
+$ABI strict
 
 DESCRIPTION
 ===========
