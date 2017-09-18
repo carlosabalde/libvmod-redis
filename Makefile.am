@@ -7,7 +7,7 @@ dist_doc_DATA = README.rst LICENSE
 # lcov support
 
 CODE_COVERAGE_OUTPUT_DIRECTORY = lcov
-CODE_COVERAGE_IGNORE_PATTERN = "/usr/*"
+CODE_COVERAGE_IGNORE_PATTERN = "/usr/*" crc16.c sha1.c
 CODE_COVERAGE_GENHTML_OPTIONS = --prefix $(abs_top_srcdir)
 
 @CODE_COVERAGE_RULES@
