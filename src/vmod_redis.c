@@ -6,8 +6,6 @@
 #include <hiredis/hiredis.h>
 #include <arpa/inet.h>
 
-#include "vcl.h"
-#include "vrt.h"
 #include "cache/cache.h"
 #include "vcc_redis_if.h"
 
@@ -30,13 +28,16 @@ static int
 handle_vcl_load_event(VRT_CTX, struct vmod_priv *vcl_priv)
 {
     // Initialize Varnish locks.
-    if (vmod_state.locks.refs == 0) {
-        vmod_state.locks.config = Lck_CreateClass("redis.config");
-        AN(vmod_state.locks.config);
-        vmod_state.locks.db = Lck_CreateClass("redis.db");
-        AN(vmod_state.locks.db);
+    if (vmod_state.locks.vsc_config_seg == NULL) {
+        vmod_state.locks.config = Lck_CreateClass(
+            &vmod_state.locks.vsc_config_seg, "redis.config");
     }
-    vmod_state.locks.refs++;
+    AN(vmod_state.locks.config);
+    if (vmod_state.locks.vsc_db_seg == NULL) {
+        vmod_state.locks.db = Lck_CreateClass(
+            &vmod_state.locks.vsc_db_seg, "redis.db");
+    }
+    AN(vmod_state.locks.db);
 
     // Initialize configuration in the local VCL data structure.
     vcl_priv->priv = new_vcl_state();
@@ -145,16 +146,6 @@ handle_vcl_cold_event(VRT_CTX, vcl_state_t *config)
 static int
 handle_vcl_discard_event(VRT_CTX, vcl_state_t *config)
 {
-    // Assertions.
-    assert(vmod_state.locks.refs > 0);
-
-    // Release Varnish locks.
-    vmod_state.locks.refs--;
-    if (vmod_state.locks.refs == 0) {
-        Lck_DestroyClass(&vmod_state.locks.config);
-        Lck_DestroyClass(&vmod_state.locks.db);
-    }
-
     // Done!
     return 0;
 }

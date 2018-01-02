@@ -7,7 +7,6 @@
 #include <hiredis/hiredis.h>
 #include <arpa/inet.h>
 
-#include "vrt.h"
 #include "cache/cache.h"
 
 #include "sha1.h"
@@ -19,7 +18,8 @@
 vmod_state_t vmod_state = {
     .mutex = PTHREAD_MUTEX_INITIALIZER,
     .version = 0,
-    .locks.refs = 0,
+    .locks.vsc_config_seg = NULL,
+    .locks.vsc_db_seg = NULL,
     .locks.config = NULL,
     .locks.db = NULL
 };

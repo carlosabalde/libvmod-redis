@@ -1,11 +1,11 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <limits.h>
 #include <string.h>
 #include <pthread.h>
 #include <hiredis/hiredis.h>
 
-#include "vrt.h"
 #include "cache/cache.h"
 
 #include "crc16.h"

@@ -1,6 +1,8 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <limits.h>
+#include <unistd.h>
 #include <string.h>
 #include <pthread.h>
 #include <hiredis/hiredis.h>
@@ -8,7 +10,6 @@
 #include <hiredis/adapters/libev.h>
 #include <arpa/inet.h>
 
-#include "vrt.h"
 #include "cache/cache.h"
 
 #include "core.h"
