@@ -146,6 +146,14 @@ handle_vcl_cold_event(VRT_CTX, vcl_state_t *config)
 static int
 handle_vcl_discard_event(VRT_CTX, vcl_state_t *config)
 {
+    // Assertions.
+    AN(vmod_state.locks.vsc_config_seg);
+    AN(vmod_state.locks.vsc_db_seg);
+
+    // Release Varnish locks.
+    Lck_DestroyClass(&vmod_state.locks.vsc_config_seg);
+    Lck_DestroyClass(&vmod_state.locks.vsc_db_seg);
+
     // Done!
     return 0;
 }
