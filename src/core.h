@@ -307,8 +307,8 @@ typedef struct vmod_state {
 
     // Varnish locks.
     struct {
-        struct vsc_seg *vsc_config_seg;
-        struct vsc_seg *vsc_db_seg;
+        unsigned refs;
+        struct vsc_seg *vsc_seg;
         struct VSC_lck *config;
         struct VSC_lck *db;
     } locks;

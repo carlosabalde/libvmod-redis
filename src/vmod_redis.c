@@ -28,16 +28,15 @@ static int
 handle_vcl_load_event(VRT_CTX, struct vmod_priv *vcl_priv)
 {
     // Initialize Varnish locks.
-    if (vmod_state.locks.vsc_config_seg == NULL) {
+    if (vmod_state.locks.refs == 0) {
         vmod_state.locks.config = Lck_CreateClass(
-            &vmod_state.locks.vsc_config_seg, "redis.config");
-    }
-    AN(vmod_state.locks.config);
-    if (vmod_state.locks.vsc_db_seg == NULL) {
+            &vmod_state.locks.vsc_seg, "redis.config");
+        AN(vmod_state.locks.config);
         vmod_state.locks.db = Lck_CreateClass(
-            &vmod_state.locks.vsc_db_seg, "redis.db");
+            &vmod_state.locks.vsc_seg, "redis.db");
+        AN(vmod_state.locks.db);
     }
-    AN(vmod_state.locks.db);
+    vmod_state.locks.refs++;
 
     // Initialize configuration in the local VCL data structure.
     vcl_priv->priv = new_vcl_state();
@@ -147,12 +146,13 @@ static int
 handle_vcl_discard_event(VRT_CTX, vcl_state_t *config)
 {
     // Assertions.
-    AN(vmod_state.locks.vsc_config_seg);
-    AN(vmod_state.locks.vsc_db_seg);
+    assert(vmod_state.locks.refs > 0);
 
     // Release Varnish locks.
-    Lck_DestroyClass(&vmod_state.locks.vsc_config_seg);
-    Lck_DestroyClass(&vmod_state.locks.vsc_db_seg);
+    vmod_state.locks.refs--;
+    if (vmod_state.locks.refs == 0) {
+        Lck_DestroyClass(&vmod_state.locks.vsc_seg);
+    }
 
     // Done!
     return 0;
