@@ -120,11 +120,16 @@ Vagrant.configure('2') do |config|
   config.vm.network :public_network
   config.vm.synced_folder '.', '/vagrant', :nfs => false
   config.vm.provider :virtualbox do |vb|
+    vb.memory = 1024
+    vb.cpus = 1
+    vb.linked_clone = Gem::Version.new(Vagrant::VERSION) >= Gem::Version.new('1.8.0')
     vb.customize [
       'modifyvm', :id,
-      '--memory', '1024',
       '--natdnshostresolver1', 'on',
+      '--natdnsproxy1', 'on',
       '--accelerate3d', 'off',
+      '--audio', 'none',
+      '--paravirtprovider', 'Default',
     ]
   end
 
