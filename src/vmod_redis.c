@@ -16,7 +16,7 @@
 static task_state_t *get_task_state(VRT_CTX, struct vmod_priv *task_priv, unsigned flush);
 static void flush_task_state(task_state_t *state);
 
-static enum REDIS_SERVER_ROLE type2role(const char *type);
+static enum REDIS_SERVER_ROLE type2role(VCL_ENUM type);
 
 static const char *get_reply(VRT_CTX, redisReply *reply);
 
@@ -404,7 +404,7 @@ vmod_db__init(
 
         // Extract role & clustering flag.
         enum REDIS_SERVER_ROLE role = type2role(type);
-        unsigned clustered = strcmp(type, "cluster") == 0;
+        unsigned clustered = type == vmod_enum_cluster;
 
         // Create new database instance.
         struct vmod_redis_db *instance = new_vmod_redis_db(
@@ -483,7 +483,7 @@ vmod_db_add_server(
     VCL_STRING location, VCL_ENUM type)
 {
     if ((location != NULL) && (strlen(location) > 0) &&
-        ((!db->cluster.enabled || strcmp(type, "cluster") == 0))) {
+        ((!db->cluster.enabled || type == vmod_enum_cluster))) {
         // Initializations.
         vcl_state_t *config = vcl_priv->priv;
         enum REDIS_SERVER_ROLE role = type2role(type);
@@ -1201,16 +1201,16 @@ flush_task_state(task_state_t *state)
 }
 
 static enum REDIS_SERVER_ROLE
-type2role(const char *type)
+type2role(VCL_ENUM type)
 {
     enum REDIS_SERVER_ROLE result;
-    if (strcmp(type, "master") == 0) {
+    if (type == vmod_enum_master) {
         result = REDIS_SERVER_MASTER_ROLE;
-    } else if (strcmp(type, "slave") == 0) {
+    } else if (type == vmod_enum_slave) {
         result = REDIS_SERVER_SLAVE_ROLE;
-    } else if (strcmp(type, "auto") == 0) {
+    } else if (type == vmod_enum_auto) {
         result = REDIS_SERVER_TBD_ROLE;
-    } else if (strcmp(type, "cluster") == 0) {
+    } else if (type == vmod_enum_cluster) {
         result = REDIS_SERVER_TBD_ROLE;
     } else {
         WRONG("Invalid server type value.");
