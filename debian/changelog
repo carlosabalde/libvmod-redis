@@ -1,3 +1,9 @@
+libvmod-redis (7.1-1) stable; urgency=low
+
+  * Fixed execution plan when clustering enabled
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Thu, 03 May 2018 17:00:00 +0200
+
 libvmod-redis (7.0-1) stable; urgency=low
 
   * Migrated to Varnish Cache 6.0.x
