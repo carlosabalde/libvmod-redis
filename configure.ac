@@ -1,5 +1,5 @@
 AC_PREREQ([2.68])
-AC_INIT([libvmod-redis], [4.1], [], [vmod-redis])
+AC_INIT([libvmod-redis], [4.2], [], [vmod-redis])
 AC_COPYRIGHT([Copyright (c) 2014-2018 Carlos Abalde <carlos.abalde@gmail.com>])
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_AUX_DIR([build-aux])
