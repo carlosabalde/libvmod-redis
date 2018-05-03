@@ -13,8 +13,8 @@ addons:
 
 before_install:
   - set -e
-  - wget --no-check-certificate https://repo.varnish-cache.org/source/varnish-4.1.4.tar.gz
-  - tar zxvf varnish-*.tar.gz
+  - wget --no-check-certificate http://varnish-cache.org/_downloads/varnish-4.1.9.tgz
+  - tar zxvf varnish-*.tgz
   - pushd varnish-*
   - ./autogen.sh
   - ./configure

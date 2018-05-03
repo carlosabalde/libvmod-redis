@@ -1142,9 +1142,9 @@ populate_execution_plan(
         //       + Skip servers not matching 'slot' if clustering is enabled.
         //       + Skip sick servers.
         //       + Skip slave & TBD servers if 'master' is set.
-        //   - Second round:
+        //   - Second round (only if clustering is disabled):
         //       + Consider sick and TBD servers skipped during the first round.
-        for (unsigned round = 1; round <= 2; round++) {
+        for (unsigned round = 1; round <= (db->cluster.enabled ? 1 : 2); round++) {
             for (unsigned iweight = 0;
                  remaining > 0 && iweight < NREDIS_SERVER_WEIGHTS;
                  iweight++) {
