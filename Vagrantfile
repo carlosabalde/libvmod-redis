@@ -16,9 +16,9 @@ $script = <<SCRIPT
 
   # Varnish Cache.
   sudo -u vagrant bash -c '\
-    wget --no-check-certificate https://repo.varnish-cache.org/source/varnish-5.1.1.tar.gz; \
-    tar zxvf varnish-*.tar.gz; \
-    rm -f varnish-*.tar.gz; \
+    wget --no-check-certificate http://varnish-cache.org/_downloads/varnish-5.1.3.tgz; \
+    tar zxvf varnish-*.tgz; \
+    rm -f varnish-*.tgz; \
     cd varnish-*; \
     ./autogen.sh; \
     ./configure; \
@@ -116,11 +116,16 @@ Vagrant.configure('2') do |config|
   config.vm.network :public_network
   config.vm.synced_folder '.', '/vagrant', :nfs => false
   config.vm.provider :virtualbox do |vb|
+    vb.memory = 1024
+    vb.cpus = 1
+    vb.linked_clone = Gem::Version.new(Vagrant::VERSION) >= Gem::Version.new('1.8.0')
     vb.customize [
       'modifyvm', :id,
-      '--memory', '1024',
       '--natdnshostresolver1', 'on',
+      '--natdnsproxy1', 'on',
       '--accelerate3d', 'off',
+      '--audio', 'none',
+      '--paravirtprovider', 'Default',
     ]
   end
 
