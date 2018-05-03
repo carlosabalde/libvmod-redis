@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 7.0
+Version: 7.1
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,6 +36,8 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Thu May 03 2018 Carlos Abalde <carlos.abalde@gmail.com> - 7.1-1.20180503
+- Fixed execution plan when clustering enabled.
 * Thu Mar 15 2018 Carlos Abalde <carlos.abalde@gmail.com> - 7.0-1.20180315
 - Migrated to Varnish Cache 6.0.x.
 * Fri Sep 15 2017 Carlos Abalde <carlos.abalde@gmail.com> - 6.0-1.20170915
