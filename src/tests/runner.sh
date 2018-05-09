@@ -40,6 +40,8 @@ cleanup() {
         fi
     done
 
+    sleep 1
+
     rm -rf "$1"
     echo
 }
