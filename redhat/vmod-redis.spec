@@ -19,8 +19,8 @@ Redis VMOD for Varnish
 %build
 ./autogen.sh
 ./configure --prefix=/usr/ --docdir='${datarootdir}/doc/%{name}'
-%{__make} %{?_smp_mflags}
-%{__make} %{?_smp_mflags} check
+%{__make}
+%{__make} check
 
 %install
 [ %{buildroot} != "/" ] && %{__rm} -rf %{buildroot}
