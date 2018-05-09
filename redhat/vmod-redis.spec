@@ -50,9 +50,9 @@ Redis VMOD for Varnish
 - Fixed Sentinel-related crash.
 * Wed Aug 03 2016 Carlos Abalde <carlos.abalde@gmail.com> - 3.9-1.20160803
 - Added full password support when clustering is enabled.
-* Tue Jul 14 2016 Carlos Abalde <carlos.abalde@gmail.com> - 3.8-1.20160714
+* Thu Jul 14 2016 Carlos Abalde <carlos.abalde@gmail.com> - 3.8-1.20160714
 - Fixed crash when destroying ev loops.
-* Mon Jul 13 2016 Carlos Abalde <carlos.abalde@gmail.com> - 3.7-1.20160713
+* Wed Jul 13 2016 Carlos Abalde <carlos.abalde@gmail.com> - 3.7-1.20160713
 - Fixed shared ev loop.
 * Mon Jul 11 2016 Carlos Abalde <carlos.abalde@gmail.com> - 3.6-1.20160711
 - Allowed server-less database instantiation.
@@ -108,7 +108,7 @@ Redis VMOD for Varnish
 - Updated files borrowed from the Redis implementation.
 * Tue May 12 2015 Carlos Abalde <carlos.abalde@gmail.com> - 0.2.5-1.20150512
 - Do not require C99 standard.
-* Thu Apr 17 2015 Carlos Abalde <carlos.abalde@gmail.com> - 0.2.4-1.20150417
+* Fri Apr 17 2015 Carlos Abalde <carlos.abalde@gmail.com> - 0.2.4-1.20150417
 - Added support for timeouts when executing commands.
 - Maximum number of Redis Cluster hops is now configurable.
 * Wed Jan 28 2015 Carlos Abalde <carlos.abalde@gmail.com> - 0.2.3-1.20150128
