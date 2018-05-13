@@ -27,7 +27,6 @@ addons:
     - ruby
 
 before_install:
-  - set -e
   - git clone https://github.com/varnishcache/varnish-cache.git ./varnish
   - pushd varnish
   - ./autogen.sh
@@ -65,3 +64,16 @@ after_success:
   - test "$MAKE_TARGET" = lcov || exit 0
   - cp libvmod-redis-*-coverage.info codecov.info
   - bash <(curl -s https://codecov.io/bash) -X gcov -X coveragepy
+
+after_failure:
+  - |
+    for log in $(find src/tests/ -name '*.log' | sort); do
+      if grep -q ':test-result: FAIL' $(echo "$log" | sed 's/log$/trs/'); then
+        printf "\n"
+        printf "+==============================================================================+\n"
+        printf "| %-76s |\n" "$log"
+        printf "+==============================================================================+\n"
+        printf "\n"
+        cat "$log"
+      fi
+    done
