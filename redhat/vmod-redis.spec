@@ -8,7 +8,7 @@ Group: System Environment/Daemons
 Source0: libvmod-redis.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 Requires: varnish >= 6.0.0, hiredis >= 0.11.0, libev >= 4.03
-BuildRequires: make, python-docutils, varnish >= 6.0.0, varnish-libs-devel >= 6.0.0, hiredis-devel >= 0.11.0, libev-devel >= 4.03
+BuildRequires: make, python-docutils, varnish >= 6.0.0, varnish-devel >= 6.0.0, hiredis-devel >= 0.11.0, libev-devel >= 4.03
 
 %description
 Redis VMOD for Varnish
