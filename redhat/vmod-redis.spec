@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 3.13
+Version: 3.14
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,6 +36,8 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Tue Jul 14 2018 Carlos Abalde <carlos.abalde@gmail.com> - 3.14-1.20180714
+- Merged missing commit: support for CLUSTER NODES output in 4.x in tests.
 * Thu May 03 2018 Carlos Abalde <carlos.abalde@gmail.com> - 3.13-1.20180503
 - Fixed execution plan when clustering enabled.
 * Thu Jun 01 2017 Carlos Abalde <carlos.abalde@gmail.com> - 3.12-1.20170601
