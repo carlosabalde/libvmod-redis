@@ -108,7 +108,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         master1.push("NODES");
         master1.execute(true);
         if (master1.reply_is_string()) {
-            set resp.http.Migration-NodeOrig = regsub(master1.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master1_ip}:${redis_master1_port} .*$", "\1");
+            set resp.http.Migration-NodeOrig = regsub(master1.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master1_ip}:${redis_master1_port}(?:@\d+)? .*$", "\1");
             if (resp.http.Migration-NodeOrig !~ "[0-9a-f]+") {
                 unset resp.http.Migration-NodeOrig;
             }
@@ -119,7 +119,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         master1.push("NODES");
         master1.execute(true);
         if (master1.reply_is_string()) {
-            set resp.http.Migration-NodeDest = regsub(master1.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master2_ip}:${redis_master2_port} .*$", "\1");
+            set resp.http.Migration-NodeDest = regsub(master1.get_reply(), "(?s)^(?:.+\n)?([0-9a-f]+) ${redis_master2_ip}:${redis_master2_port}(?:@\d+)? .*$", "\1");
             if (resp.http.Migration-NodeDest !~ "[0-9a-f]+") {
                 unset resp.http.Migration-NodeDest;
             }
