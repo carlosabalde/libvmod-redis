@@ -2,10 +2,6 @@
 # vi: set ft=ruby :
 
 $script = <<SCRIPT
-  # Configuration.
-  REDIS_PORTS="6380 6381 6382 6390 6391 6392 6400 6401 6402"
-  REDIS_CLUSTER_PORTS="7000 7001 7002 7003 7004 7005 7006 7007 7008"
-
   # General packages.
   apt-get update -q
   apt-get install -qq unzip apt-transport-https \
@@ -40,7 +36,7 @@ $script = <<SCRIPT
   # Redis.
   sudo -u vagrant bash -c '\
     cd /home/vagrant; \
-    wget http://download.redis.io/releases/redis-4.0.1.tar.gz; \
+    wget http://download.redis.io/releases/redis-4.0.10.tar.gz; \
     tar zxvf redis-*.tar.gz; \
     rm -f redis-*.tar.gz; \
     cd redis-*; \
@@ -48,60 +44,6 @@ $script = <<SCRIPT
     sudo make PREFIX="/usr/local" install; \
     sudo ldconfig; \
     sudo cp src/redis-trib.rb /usr/local/bin'
-
-  # General Redis setup.
-  mkdir -p /etc/redis /var/lib/redis
-  for PORT in $REDIS_PORTS $REDIS_CLUSTER_PORTS; do
-    cp /home/vagrant/redis*/utils/redis_init_script /etc/init.d/redis-server-$PORT
-    sed /etc/init.d/redis-server-$PORT -i \
-      -e "s%^REDISPORT=.*%REDISPORT=$PORT%" \
-      -e "s%^PIDFILE=/var/run/redis_%PIDFILE=/var/run/redis-%"
-    chmod +x /etc/init.d/redis-server-$PORT
-    update-rc.d -f redis-server-$PORT defaults
-
-    cp /home/vagrant/redis*/redis.conf /etc/redis/$PORT.conf
-    sed /etc/redis/$PORT.conf -i \
-      -e "s%^port .*%port $PORT%" \
-      -e "s%^dir .*%dir /var/lib/redis%" \
-      -e "s%^daemonize .*%daemonize yes%" \
-      -e "s%^pidfile .*%pidfile /var/run/redis-$PORT.pid%" \
-      -e "s%^# unixsocket .*%unixsocket /tmp/redis-$PORT.sock%" \
-      -e "s%^# unixsocketperm .*%unixsocketperm 777%" \
-      -e "s%^dbfilename .*%dbfilename dump-$PORT.rdb%" \
-      -e "s%^appendfilename .*%appendfilename appendonly-$PORT.aod%"
-  done
-
-  # Classic Redis setup.
-  for PORT in $REDIS_PORTS; do
-    if [ `expr $PORT % 10` -ne "0" ]; then
-      MASTER_PORT=`expr $PORT - $PORT % 10`
-      sed /etc/redis/$PORT.conf -i \
-        -e "s%^logfile .*%logfile /var/log/redis-$PORT.log%" \
-        -e "s%^# slaveof .*%slaveof 127.0.0.1 $MASTER_PORT%"
-    fi
-
-    service redis-server-$PORT start
-  done
-
-  # Redis Cluster setup.
-  REDIS_CLUSTER_NODES=""
-  for PORT in $REDIS_CLUSTER_PORTS; do
-    REDIS_CLUSTER_NODES="$REDIS_CLUSTER_NODES 127.0.0.1:$PORT"
-
-    sed /etc/redis/$PORT.conf -i \
-      -e "s%^logfile .*%logfile /var/log/redis-$PORT.log%" \
-      -e "s%^# cluster-enabled .*%cluster-enabled yes%" \
-      -e "s%^# cluster-config-file .*%cluster-config-file nodes-$PORT.conf%" \
-      -e "s%^# cluster-node-timeout .*%cluster-node-timeout 5000%" \
-      -e "s%^appendonly .*%appendonly yes%"
-
-    service redis-server-$PORT start
-  done
-
-  sudo -u vagrant bash -c "\
-    echo '/home/vagrant/redis*/src/redis-trib.rb create --replicas 2 $REDIS_CLUSTER_NODES' \
-      > /home/vagrant/create-redis-cluster.sh; \
-    chmod +x /home/vagrant/create-redis-cluster.sh"
 
   # VMOD.
   sudo -u vagrant bash -c '\
