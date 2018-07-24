@@ -42,7 +42,7 @@ before_install:
   - sudo make PREFIX="/usr/local" install
   - sudo ldconfig
   - popd
-  - wget http://download.redis.io/releases/redis-4.0.1.tar.gz
+  - wget http://download.redis.io/releases/redis-4.0.10.tar.gz
   - tar zxvf redis-*.tar.gz
   - pushd redis-*
   - make
@@ -50,7 +50,7 @@ before_install:
   - sudo ldconfig
   - sudo cp src/redis-trib.rb /usr/local/bin
   - popd
-  - gem install redis -v 3.3.3
+  - gem install redis -v 3.3.0
 
 before_script:
   - ./autogen.sh
