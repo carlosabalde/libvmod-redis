@@ -164,7 +164,7 @@ EOF
         yes yes | redis-trib.rb create --replicas $REDIS_CLUSTER_REPLICAS $SERVERS > /dev/null
 
         # Wait at least half of NODE_TIMEOUT for all nodes to get the new configuration.
-        sleep 3
+        sleep 5
 
         # Add to context:
         #   - All master nodes' addresses ordered by the slots they handle
