@@ -8,7 +8,7 @@ $script = <<SCRIPT
     autotools-dev automake libtool python-docutils pkg-config libpcre3-dev \
     libeditline-dev libedit-dev make dpkg-dev git libjemalloc-dev \
     libev-dev libncurses-dev python-sphinx graphviz
-  gem install redis -v 3.3.3
+  gem install redis -v 3.3.0
 
   # Varnish Cache.
   sudo -u vagrant bash -c '\
