@@ -1,3 +1,9 @@
+libvmod-redis (4.3-1) stable; urgency=low
+
+  * Merged missing commit: support for CLUSTER NODES output in 4.x in tests
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Tue, 14 Jul 2018 17:00:00 +0200
+
 libvmod-redis (4.2-1) stable; urgency=low
 
   * Fixed execution plan when clustering enabled
