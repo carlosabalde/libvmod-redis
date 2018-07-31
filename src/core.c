@@ -826,14 +826,16 @@ new_rcontext(
             server->db->stats.connections.total++;
         }
     } else {
-        server->sickness.tst = now;
-        server->sickness.exp = now + server->db->sickness_ttl;
+        if (server->db->sickness_ttl > 0) {
+            server->sickness.tst = now;
+            server->sickness.exp = now + server->db->sickness_ttl;
+            REDIS_LOG_INFO(ctx,
+                "Server sickness tag set (db=%s, server=%s)",
+                server->db->name, server->location.raw);
+        }
         if (!ephemeral) {
             server->db->stats.connections.failed++;
         }
-        REDIS_LOG_INFO(ctx,
-            "Server sickness tag set (db=%s, server=%s)",
-            server->db->name, server->location.raw);
     }
     if (!dblocked) Lck_Unlock(&server->db->mutex);
 
@@ -952,15 +954,17 @@ is_valid_redis_context(redis_context_t *context, time_t now, unsigned dblocked)
 
     // Check if context was created before the server was flagged
     // as sick.
-    unsigned sick = 0;
-    if (!dblocked) Lck_Lock(&context->server->db->mutex);
-    if (context->tst <= context->server->sickness.tst) {
-        sick = 1;
-        context->server->db->stats.connections.dropped.sick++;
-    }
-    if (!dblocked) Lck_Unlock(&context->server->db->mutex);
-    if (sick) {
-        return 0;
+    if (context->server->db->sickness_ttl > 0) {
+        unsigned sick = 0;
+        if (!dblocked) Lck_Lock(&context->server->db->mutex);
+        if (context->tst <= context->server->sickness.tst) {
+            sick = 1;
+            context->server->db->stats.connections.dropped.sick++;
+        }
+        if (!dblocked) Lck_Unlock(&context->server->db->mutex);
+        if (sick) {
+            return 0;
+        }
     }
 
     // Check if context connection has been hung up by the server.
