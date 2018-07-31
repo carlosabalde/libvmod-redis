@@ -598,7 +598,7 @@ vmod_db_push(
                 flush_task_state(state);
             }
         }
-        state->execution.argv[state->execution.argc++] = arg;
+        state->command.argv[state->command.argc++] = arg;
     } else {
         REDIS_LOG_ERROR(ctx,
             "Failed to push argument (db=%s, limit=%d)",
