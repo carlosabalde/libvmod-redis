@@ -527,13 +527,7 @@ vmod_db_command(
         state->command.timeout = db->command_timeout;
         state->command.max_retries = db->max_command_retries;
         state->command.argc = 1;
-        state->command.argv[0] = WS_Copy(ctx->ws, name, -1);
-        if (state->command.argv[0] == NULL) {
-            REDIS_LOG_ERROR(ctx,
-                "Failed to allocate memory in workspace (ws=%p)",
-                ctx->ws);
-            flush_task_state(state);
-        }
+        state->command.argv[0] = name;
     }
 }
 
@@ -595,17 +589,16 @@ vmod_db_push(
         (state->command.argc < MAX_REDIS_COMMAND_ARGS) &&
         (state->command.db == db)) {
         // Handle NULL arguments as empty strings.
-        if (arg != NULL) {
-            state->command.argv[state->command.argc++] = WS_Copy(ctx->ws, arg, -1);;
-        } else {
-            state->command.argv[state->command.argc++] = WS_Copy(ctx->ws, "", -1);
+        if (arg == NULL) {
+            arg = WS_Copy(ctx->ws, "", -1);
+            if (arg == NULL) {
+                REDIS_LOG_ERROR(ctx,
+                    "Failed to allocate memory in workspace (ws=%p)",
+                    ctx->ws);
+                flush_task_state(state);
+            }
         }
-        if (state->command.argv[state->command.argc - 1] == NULL) {
-            REDIS_LOG_ERROR(ctx,
-                "Failed to allocate memory in workspace (ws=%p)",
-                ctx->ws);
-            flush_task_state(state);
-        }
+        state->execution.argv[state->execution.argc++] = arg;
     } else {
         REDIS_LOG_ERROR(ctx,
             "Failed to push argument (db=%s, limit=%d)",
