@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 6.1
+Version: 6.2
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,6 +36,9 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Tue Aug 07 2018 Carlos Abalde <carlos.abalde@gmail.com> - 6.2-1.20180807
+- Allowed disabling sickness TTL feature.
+- Stopped WS-copying input arg in .command() & .push().
 * Thu May 03 2018 Carlos Abalde <carlos.abalde@gmail.com> - 6.1-1.20180503
 - Fixed execution plan when clustering enabled.
 * Fri Sep 15 2017 Carlos Abalde <carlos.abalde@gmail.com> - 6.0-1.20170915
