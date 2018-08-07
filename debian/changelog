@@ -1,3 +1,10 @@
+libvmod-redis (6.2-1) stable; urgency=low
+
+  * Allowed disabling sickness TTL feature
+  * Stopped WS-copying input arg in .command() & .push()
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Tue, 07 Aug 2018 17:00:00 +0200
+
 libvmod-redis (6.1-1) stable; urgency=low
 
   * Fixed execution plan when clustering enabled
