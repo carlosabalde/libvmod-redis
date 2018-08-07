@@ -1,3 +1,10 @@
+libvmod-redis (3.15-1) stable; urgency=low
+
+  * Allowed disabling sickness TTL feature
+  * Stopped WS-copying input arg in .command() & .push()
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Tue, 07 Aug 2018 17:00:00 +0200
+
 libvmod-redis (3.14-1) stable; urgency=low
 
   * Merged missing commit: support for CLUSTER NODES output in 4.x in tests
