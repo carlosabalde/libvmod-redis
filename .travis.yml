@@ -24,6 +24,7 @@ addons:
     - lcov
     - libev-dev
     - python-docutils
+    - python-sphinx
     - ruby
 
 before_install:
@@ -66,3 +67,6 @@ after_success:
   - test "$MAKE_TARGET" = lcov || exit 0
   - cp libvmod-redis-*-coverage.info codecov.info
   - bash <(curl -s https://codecov.io/bash) -X gcov -X coveragepy
+
+after_failure:
+  - cat src/tests/test-suite.log
