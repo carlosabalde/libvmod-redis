@@ -25,9 +25,9 @@ $script = <<SCRIPT
   # hiredis.
   sudo -u vagrant bash -c '\
     cd /home/vagrant; \
-    wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.13.3.zip -O hiredis-0.13.3.zip; \
-    unzip hiredis-0.13.3.zip; \
-    rm -f hiredis-0.13.3.zip; \
+    wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.14.0.zip -O hiredis-0.14.0.zip; \
+    unzip hiredis-0.14.0.zip; \
+    rm -f hiredis-0.14.0.zip; \
     cd hiredis*; \
     make; \
     sudo make PREFIX="/usr/local" install; \
@@ -36,7 +36,7 @@ $script = <<SCRIPT
   # Redis.
   sudo -u vagrant bash -c '\
     cd /home/vagrant; \
-    wget http://download.redis.io/releases/redis-4.0.10.tar.gz; \
+    wget http://download.redis.io/releases/redis-4.0.11.tar.gz; \
     tar zxvf redis-*.tar.gz; \
     rm -f redis-*.tar.gz; \
     cd redis-*; \
