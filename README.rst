@@ -267,4 +267,4 @@ Implementation of the SHA-1 and CRC-16 cryptographic hash functions embedded in 
 * http://download.redis.io/redis-stable/src/config.h
 * http://download.redis.io/redis-stable/src/solarisfixes.h
 
-Copyright (c) 2014-2018 Carlos Abalde <carlos.abalde@gmail.com>
+Copyright (c) 2014-2019 Carlos Abalde <carlos.abalde@gmail.com>
