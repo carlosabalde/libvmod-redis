@@ -404,7 +404,7 @@ vmod_db__init(
 
         // Extract role & clustering flag.
         enum REDIS_SERVER_ROLE role = type2role(type);
-        unsigned clustered = type == vmod_enum_cluster;
+        unsigned clustered = type == enum_vmod_redis_cluster;
 
         // Create new database instance.
         struct vmod_redis_db *instance = new_vmod_redis_db(
@@ -483,7 +483,7 @@ vmod_db_add_server(
     VCL_STRING location, VCL_ENUM type)
 {
     if ((location != NULL) && (strlen(location) > 0) &&
-        ((!db->cluster.enabled || type == vmod_enum_cluster))) {
+        ((!db->cluster.enabled || type == enum_vmod_redis_cluster))) {
         // Initializations.
         vcl_state_t *config = vcl_priv->priv;
         enum REDIS_SERVER_ROLE role = type2role(type);
@@ -1200,13 +1200,13 @@ static enum REDIS_SERVER_ROLE
 type2role(VCL_ENUM type)
 {
     enum REDIS_SERVER_ROLE result;
-    if (type == vmod_enum_master) {
+    if (type == enum_vmod_redis_master) {
         result = REDIS_SERVER_MASTER_ROLE;
-    } else if (type == vmod_enum_slave) {
+    } else if (type == enum_vmod_redis_slave) {
         result = REDIS_SERVER_SLAVE_ROLE;
-    } else if (type == vmod_enum_auto) {
+    } else if (type == enum_vmod_redis_auto) {
         result = REDIS_SERVER_TBD_ROLE;
-    } else if (type == vmod_enum_cluster) {
+    } else if (type == enum_vmod_redis_cluster) {
         result = REDIS_SERVER_TBD_ROLE;
     } else {
         WRONG("Invalid server type value.");
