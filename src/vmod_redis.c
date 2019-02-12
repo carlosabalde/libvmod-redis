@@ -188,7 +188,7 @@ handle_vcl_discard_event(VRT_CTX, vcl_state_t *config)
 }
 
 int
-event_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
+vmod_event_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
 {
     // Initialize logging configuration.
     static int logging_initialized = 0;
