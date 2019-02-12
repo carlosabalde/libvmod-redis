@@ -69,4 +69,4 @@ after_success:
   - bash <(curl -s https://codecov.io/bash) -X gcov -X coveragepy
 
 after_failure:
-  - cat src/tests/test-suite.log
+  - cat src/test-suite.log
