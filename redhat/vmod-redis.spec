@@ -31,7 +31,7 @@ Redis VMOD for Varnish
 
 %files
 %defattr(-,root,root,-)
-%{_libdir}/varnish*/vmods/
+%{_libdir}/varnish*/vmods/lib*
 %doc /usr/share/doc/%{name}/*
 %{_mandir}/man?/*
 
