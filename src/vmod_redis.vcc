@@ -5,7 +5,7 @@
 # LICENSE file.
 #
 
-$Module redis 3 Redis VMOD
+$Module redis 3 'Redis VMOD'
 $ABI strict
 
 DESCRIPTION
