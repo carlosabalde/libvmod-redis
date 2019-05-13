@@ -1014,7 +1014,7 @@ populate_simple_execution_plan(
     if (!db->shared_connections) {
         // Initializations.
         time_t now = time(NULL);
-        unsigned free_ws = WS_Reserve(ctx->ws, 0);
+        unsigned free_ws = WS_ReserveAll(ctx->ws);
         unsigned used_ws = 0;
         plan->contexts.list = (redis_context_t **) WS_Front(ctx->ws);
         plan->contexts.n = 0;
@@ -1049,7 +1049,7 @@ populate_simple_execution_plan(
     }
 
     // Build list of servers.
-    unsigned free_ws = WS_Reserve(ctx->ws, 0);
+    unsigned free_ws = WS_ReserveAll(ctx->ws);
     if (free_ws >= sizeof(redis_server_t *)) {
         plan->servers.list = (redis_server_t **) WS_Front(ctx->ws);
         plan->servers.n = 1;
@@ -1072,7 +1072,7 @@ populate_execution_plan(
     // Populate list of contexts?
     if (!db->shared_connections) {
         // Initializations.
-        unsigned free_ws = WS_Reserve(ctx->ws, 0);
+        unsigned free_ws = WS_ReserveAll(ctx->ws);
         unsigned used_ws = 0;
         plan->contexts.list = (redis_context_t **) WS_Front(ctx->ws);
         plan->contexts.n = 0;
@@ -1121,7 +1121,7 @@ populate_execution_plan(
     if (plan->contexts.n < max_size) {
         // Initializations.
         unsigned remaining = max_size - plan->contexts.n;
-        unsigned free_ws = WS_Reserve(ctx->ws, 0);
+        unsigned free_ws = WS_ReserveAll(ctx->ws);
         unsigned used_ws = 0;
         plan->servers.list = (redis_server_t **) WS_Front(ctx->ws);
         plan->servers.n = 0;
