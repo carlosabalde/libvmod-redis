@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 9.0
+Version: 9.1
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -31,11 +31,14 @@ Redis VMOD for Varnish
 
 %files
 %defattr(-,root,root,-)
-%{_libdir}/varnish*/vmods/
+%{_libdir}/varnish*/vmods/lib*
 %doc /usr/share/doc/%{name}/*
 %{_mandir}/man?/*
 
 %changelog
+* Thu May 23 2019 Carlos Abalde <carlos.abalde@gmail.com> - 9.1-1.20190523
+- Stopped depending on redis-trib.rb.
+- Added REPLICAOF command (i.e. new SLAVEOF name) support.
 * Mon Mar 18 2019 Carlos Abalde <carlos.abalde@gmail.com> - 9.0-1.20190318
 - Migrated to Varnish Cache 6.2.x.
 * Tue Sep 18 2018 Carlos Abalde <carlos.abalde@gmail.com> - 8.0-1.20180918
