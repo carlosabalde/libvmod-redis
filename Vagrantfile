@@ -7,8 +7,7 @@ $script = <<SCRIPT
   apt-get install -qq unzip apt-transport-https \
     autotools-dev automake libtool python-docutils pkg-config libpcre3-dev \
     libeditline-dev libedit-dev make dpkg-dev git libjemalloc-dev \
-    libev-dev libncurses-dev python-sphinx graphviz ruby
-  gem install redis -v 3.3.0
+    libev-dev libncurses-dev python-sphinx graphviz
 
   # Varnish Cache.
   sudo -u vagrant bash -c '\
@@ -36,14 +35,13 @@ $script = <<SCRIPT
   # Redis.
   sudo -u vagrant bash -c '\
     cd /home/vagrant; \
-    wget http://download.redis.io/releases/redis-4.0.11.tar.gz; \
+    wget http://download.redis.io/releases/redis-5.0.5.tar.gz; \
     tar zxvf redis-*.tar.gz; \
     rm -f redis-*.tar.gz; \
     cd redis-*; \
     make; \
     sudo make PREFIX="/usr/local" install; \
-    sudo ldconfig; \
-    sudo cp src/redis-trib.rb /usr/local/bin'
+    sudo ldconfig
 
   # VMOD.
   sudo -u vagrant bash -c '\
