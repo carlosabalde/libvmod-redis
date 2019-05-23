@@ -92,7 +92,7 @@ EOF
                 port $SLAVE_PORT
                 unixsocket $TMP/redis-slave${MASTER_INDEX}_$SLAVE_INDEX.sock
                 pidfile $TMP/redis-slave${MASTER_INDEX}_$SLAVE_INDEX.pid
-                slaveof $MASTER_IP $MASTER_PORT
+                replicaof $MASTER_IP $MASTER_PORT
 EOF
                 redis-server "$TMP/redis-slave${MASTER_INDEX}_$SLAVE_INDEX.conf"
                 CONTEXT="\
@@ -135,7 +135,7 @@ EOF
 ## Launch clustered Redis servers?
 ##
 elif [[ ${@:$#} =~ ^.*clustered\.[^\.]*\.vtc(\.disabled)?$ ]]; then
-    if [ -x "$(command -v redis-cli)" -a -x "$(command -v redis-trib.rb)" ]; then
+    if [ -x "$(command -v redis-cli)" ]; then
         SKIP=0
         SERVERS=""
         for INDEX in $(seq 1 $REDIS_CLUSTER_SERVERS); do
@@ -161,7 +161,7 @@ EOF
             SERVERS="$SERVERS 127.0.0.$INDEX:$((REDIS_CLUSTER_START_PORT+INDEX))"
         done
 
-        yes yes | redis-trib.rb create --replicas $REDIS_CLUSTER_REPLICAS $SERVERS > /dev/null
+        yes yes | redis-cli --cluster create $SERVERS --cluster-replicas $REDIS_CLUSTER_REPLICAS > /dev/null
 
         # Wait at least half of NODE_TIMEOUT for all nodes to get the new configuration.
         sleep 5
