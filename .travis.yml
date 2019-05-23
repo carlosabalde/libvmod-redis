@@ -9,7 +9,7 @@ addons:
     packages:
     - libev-dev
     - python-docutils
-    - ruby
+    - python-sphinx
 
 before_install:
   - set -e
@@ -29,15 +29,13 @@ before_install:
   - sudo make PREFIX="/usr/local" install
   - sudo ldconfig
   - popd
-  - wget http://download.redis.io/releases/redis-4.0.11.tar.gz
+  - wget http://download.redis.io/releases/redis-5.0.5.tar.gz
   - tar zxvf redis-*.tar.gz
   - pushd redis-*
   - make
   - sudo make PREFIX="/usr/local" install
   - sudo ldconfig
-  - sudo cp src/redis-trib.rb /usr/local/bin
   - popd
-  - gem install redis -v 3.3.0
 
 before_script:
   - ./autogen.sh
