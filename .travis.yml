@@ -25,7 +25,6 @@ addons:
     - libev-dev
     - python-docutils
     - python-sphinx
-    - ruby
 
 before_install:
   - wget --no-check-certificate https://varnish-cache.org/_downloads/varnish-6.1.0.tgz
@@ -37,22 +36,20 @@ before_install:
   - sudo make PREFIX="/usr/local" install
   - sudo ldconfig
   - popd
-  - wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.13.3.zip -O hiredis-0.13.3.zip
+  - wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.14.0.zip -O hiredis-0.14.0.zip
   - unzip hiredis-*.zip
   - pushd hiredis-*
   - make
   - sudo make PREFIX="/usr/local" install
   - sudo ldconfig
   - popd
-  - wget http://download.redis.io/releases/redis-4.0.10.tar.gz
+  - wget http://download.redis.io/releases/redis-5.0.5.tar.gz
   - tar zxvf redis-*.tar.gz
   - pushd redis-*
   - make
   - sudo make PREFIX="/usr/local" install
   - sudo ldconfig
-  - sudo cp src/redis-trib.rb /usr/local/bin
   - popd
-  - gem install redis -v 3.3.0
 
 before_script:
   - ./autogen.sh
@@ -68,4 +65,4 @@ after_success:
   - bash <(curl -s https://codecov.io/bash) -X gcov -X coveragepy
 
 after_failure:
-  - cat src/tests/test-suite.log
+  - cat src/test-suite.log
