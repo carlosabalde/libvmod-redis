@@ -1,3 +1,10 @@
+libvmod-redis (3.16-1) stable; urgency=low
+
+  * Stopped depending on redis-trib.rb
+  * Added REPLICAOF command (i.e. new SLAVEOF name) support
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Thu, 23 May 2019 17:00:00 +0200
+
 libvmod-redis (3.15-1) stable; urgency=low
 
   * Allowed disabling sickness TTL feature
