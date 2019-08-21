@@ -69,6 +69,7 @@ struct state {
     unsigned period;
     struct timeval connection_timeout;
     struct timeval command_timeout;
+    const char *password;
 
     // Timestamps.
     time_t last_change;
@@ -82,7 +83,7 @@ static void *sentinel_loop(void *object);
 
 static struct state *new_state(
     vcl_state_t *config, unsigned period, struct timeval connection_timeout,
-    struct timeval command_timeout);
+    struct timeval command_timeout, const char *password);
 static void free_state(struct state *state);
 
 static void unsafe_set_locations(struct state *state, const char *locations);
@@ -104,10 +105,11 @@ unsafe_sentinel_start(vcl_state_t *config)
 
     // Try to start new thread and launch initial proactive discovery.
     struct state *state = new_state(
-            config,
-            config->sentinels.period,
-            config->sentinels.connection_timeout,
-            config->sentinels.command_timeout);
+        config,
+        config->sentinels.period,
+        config->sentinels.connection_timeout,
+        config->sentinels.command_timeout,
+        config->sentinels.password);
     unsafe_set_locations(state, config->sentinels.locations);
     if (!VTAILQ_EMPTY(&state->sentinels)) {
         AZ(pthread_create(
@@ -185,6 +187,21 @@ disconnectCallback(const redisAsyncContext *context, int status)
 }
 
 static void
+authorizeCallback(redisAsyncContext *context, void *r, void *s)
+{
+    redisReply *reply = r;
+
+    struct sentinel *sentinel;
+    CAST_OBJ_NOTNULL(sentinel, s, SENTINEL_MAGIC);
+
+    if (reply == NULL || reply->type != REDIS_REPLY_STRING || strcmp(reply->str, "OK") == 0) {
+        REDIS_LOG_ERROR(NULL,
+            "Failed to authenticate Sentinel connection (sentinel=%s:%d)",
+            sentinel->host, sentinel->port);
+    }
+}
+
+static void
 subscribeCallback(redisAsyncContext *context, void *reply, void *s)
 {
     struct sentinel *sentinel;
@@ -251,19 +268,32 @@ sentinel_loop(void *object)
             CHECK_OBJ_NOTNULL(isentinel, SENTINEL_MAGIC);
             if (isentinel->context == NULL) {
                 isentinel->context = redisAsyncConnect(isentinel->host, isentinel->port);
-                if ((isentinel->context != NULL ) && (!isentinel->context->err)) {
+                if ((isentinel->context != NULL) && (!isentinel->context->err)) {
                     isentinel->context->data = isentinel;
                     redisLibevAttach(loop, isentinel->context);
                     redisAsyncSetConnectCallback(isentinel->context, connectCallback);
                     redisAsyncSetDisconnectCallback(isentinel->context, disconnectCallback);
-                    if (redisAsyncCommand(
-                            isentinel->context, subscribeCallback, isentinel,
-                            SUBSCRIPTION_COMMAND) != REDIS_OK) {
-                        redisAsyncFree(isentinel->context);
-                        isentinel->context = NULL;
-                        REDIS_LOG_ERROR(NULL,
-                            "Failed to enqueue asynchronous Sentinel command (sentinel=%s:%d)",
-                            isentinel->host, isentinel->port);
+                    if (state->config->sentinels.password != NULL) {
+                        if (redisAsyncCommand(
+                                isentinel->context, authorizeCallback, isentinel,
+                                "AUTH %s", state->config->sentinels.password) != REDIS_OK) {
+                            redisAsyncFree(isentinel->context);
+                            isentinel->context = NULL;
+                            REDIS_LOG_ERROR(NULL,
+                                "Failed to enqueue asynchronous Sentinel command (sentinel=%s:%d)",
+                                isentinel->host, isentinel->port);
+                        }
+                    }
+                    if (isentinel->context != NULL) {
+                        if (redisAsyncCommand(
+                                isentinel->context, subscribeCallback, isentinel,
+                                SUBSCRIPTION_COMMAND) != REDIS_OK) {
+                            redisAsyncFree(isentinel->context);
+                            isentinel->context = NULL;
+                            REDIS_LOG_ERROR(NULL,
+                                "Failed to enqueue asynchronous Sentinel command (sentinel=%s:%d)",
+                                isentinel->host, isentinel->port);
+                        }
                     }
                 } else {
                     if (isentinel->context != NULL) {
@@ -392,7 +422,7 @@ free_sentinel(struct sentinel *sentinel)
 static struct state *
 new_state(
     vcl_state_t *config, unsigned period, struct timeval connection_timeout,
-    struct timeval command_timeout)
+    struct timeval command_timeout, const char *password)
 {
     struct state *result;
     ALLOC_OBJ(result, STATE_MAGIC);
@@ -404,6 +434,10 @@ new_state(
     result->period = period;
     result->connection_timeout = connection_timeout;
     result->command_timeout = command_timeout;
+    if (password != NULL) {
+        result->password = strdup(password);
+        AN(result->password);
+    }
 
     result->last_change = 0;
     result->next_discovery = 0;
@@ -428,6 +462,10 @@ free_state(struct state *state)
     state->period = 0;
     state->connection_timeout = (struct timeval){ 0 };
     state->command_timeout = (struct timeval){ 0 };
+    if (state->password != NULL) {
+        free((void *) state->password);
+        state->password = NULL;
+    }
 
     state->last_change = 0;
     state->next_discovery = 0;
