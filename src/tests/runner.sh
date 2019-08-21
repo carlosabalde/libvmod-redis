@@ -104,7 +104,6 @@ EOF
 
             for SENTINEL_INDEX in $(seq 1 $REDIS_STANDALONE_SENTINEL_SERVERS); do
                 cat >> "$TMP/redis-sentinel$SENTINEL_INDEX.conf" <<EOF
-                pidfile $TMP/redis-sentinel$SENTINEL_INDEX.pid
                 sentinel monitor redis-master$MASTER_INDEX $MASTER_IP $MASTER_PORT 1
                 sentinel down-after-milliseconds redis-master$MASTER_INDEX 5000
                 sentinel failover-timeout redis-master$MASTER_INDEX 60000
@@ -122,6 +121,7 @@ EOF
             bind $SENTINEL_IP
             port $SENTINEL_PORT
             pidfile $TMP/redis-sentinel$INDEX.pid
+            requirepass s3cr3t
 EOF
             redis-server "$TMP/redis-sentinel$INDEX.conf" --sentinel
             CONTEXT="\

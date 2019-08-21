@@ -40,7 +40,8 @@ import redis;
         STRING locations="",
         INT period=60,
         INT connection_timeout=500,
-        INT command_timeout=0)
+        INT command_timeout=0,
+        STRING password="")
 
     ##
     ## Proxy.
