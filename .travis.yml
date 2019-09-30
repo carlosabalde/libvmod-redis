@@ -27,8 +27,9 @@ addons:
     - python-sphinx
 
 before_install:
-  - git clone https://github.com/varnishcache/varnish-cache.git ./varnish
-  - pushd varnish
+  - wget --no-check-certificate https://varnish-cache.org/_downloads/varnish-6.3.0.tgz
+  - tar zxvf varnish-*.tgz
+  - pushd varnish-*
   - ./autogen.sh
   - ./configure
   - make -sj32
