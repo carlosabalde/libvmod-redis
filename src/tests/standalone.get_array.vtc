@@ -1,0 +1,59 @@
+varnishtest "Minimal test template"
+
+server s1 {} -start
+
+varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
+    import ${vmod_redis};
+
+    sub vcl_init {
+        redis.subnets(
+            masks={""});
+
+        redis.sentinels(
+            locations={""},
+            period=0,
+            connection_timeout=500,
+            command_timeout=0);
+
+        new db = redis.db(
+            location="${redis_master1_ip}:${redis_master1_port}",
+            type=master,
+            connection_timeout=500,
+            connection_ttl=0,
+            command_timeout=0,
+            max_command_retries=0,
+            shared_connections=false,
+            max_connections=1,
+            password="",
+            sickness_ttl=0,
+            ignore_slaves=false,
+            max_cluster_hops=0);
+    }
+
+    sub vcl_recv {
+	return (synth(200));
+    }
+    sub vcl_synth {
+	db.command("LRANGE");
+	db.push("mylist");
+	db.push("0");
+	db.push("-1");
+	db.execute();
+
+        set resp.http.list = db.get_array_reply(", ");    
+    }
+} -start
+
+shell {
+	cat <<-EOF | redis-cli -h ${redis_master1_ip} -p ${redis_master1_port}
+		RPUSH mylist "hello"
+		RPUSH mylist "world"
+	EOF
+}
+
+client c1 {
+    txreq
+    rxresp
+
+    expect resp.http.list == "hello, world"
+} -run

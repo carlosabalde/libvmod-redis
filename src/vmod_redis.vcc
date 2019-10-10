@@ -171,6 +171,11 @@ $Function INT get_array_reply_length(PRIV_VCL, PRIV_TASK, STRING db="")
 Description
     Proxied version of ``.get_array_reply_length()``.
 
+$Function STRING get_array_reply(PRIV_VCL, PRIV_TASK, sep = "\n", STRING db="")
+
+Description
+    Proxied version of ``.get_array_reply()``.
+
 $Function BOOL array_reply_is_error(PRIV_VCL, PRIV_TASK, INT index, STRING db="")
 
 Description
@@ -498,6 +503,13 @@ $Method INT .get_array_reply_length(PRIV_TASK)
 Return value
     If a previously executed Redis command using ``.execute()`` returned
     an array reply, this function returns the number of elements in that reply.
+
+$Method STRING .get_array_reply(PRIV_TASK, STRING sep = "\n")
+
+Return value
+    If a previously executed Redis command using ``.execute()`` returned
+    an array reply, this function returns a string representation of that reply,
+    joining the replies using the ``sep`` string.
 
 $Method BOOL .array_reply_is_error(PRIV_TASK, INT index)
 

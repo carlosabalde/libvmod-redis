@@ -7,6 +7,7 @@
 #include <arpa/inet.h>
 
 #include "cache/cache.h"
+#include "vsb.h"
 #include "vcc_redis_if.h"
 
 #include "cluster.h"
@@ -768,6 +769,62 @@ VMOD_DB_GET_FOO_REPLY(error, ERROR)
 VMOD_DB_GET_FOO_REPLY(status, STATUS)
 VMOD_DB_GET_FOO_REPLY(string, STRING)
 
+VCL_STRING
+vmod_db_get_array_reply(
+    VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *task_priv,
+    VCL_STRING sep)
+{
+    int i;
+    size_t sl;
+    struct vsb vsb[0];
+    unsigned available;
+
+    CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
+    CHECK_OBJ_ORNULL(db, VMOD_REDIS_DATABASE_MAGIC);
+
+    task_state_t *state = get_task_state(ctx, task_priv, 0);
+
+    CHECK_OBJ_ORNULL(state, TASK_STATE_MAGIC);
+
+    if ((state->command.db != db) ||
+        (state->command.reply == NULL) ||
+        (state->command.reply->type != REDIS_REPLY_ARRAY)) {
+        return NULL;
+    }
+
+    sep = sep ? sep : NULL;
+    sl = strlen(sep);
+
+    /* grab all the work space we can */
+    available = WS_Reserve(ctx->ws, 0);
+    if (!available) {
+        WS_Release(ctx->ws, 0);
+        VRT_fail(ctx, "No workspace for redis");
+        return (NULL);
+    }
+
+    /* create a VSB based on the workspace space we have, it'll make sure we
+     * don't overflow */
+    AN(VSB_new(vsb, ctx->ws->f, available, VSB_FIXEDLEN));
+    for (i = 0; i < state->command.reply->elements; i++) {
+        if (i)
+            VSB_bcat(vsb, sep, sl);
+        VSB_bcat(vsb, state->command.reply->element[i]->str,
+            state->command.reply->element[i]->len);
+    }
+    /* if the null character doesn't fit, erase and fail */
+    if (VSB_putc(vsb, '\0')) {
+        WS_Release(ctx->ws, 0);
+        VRT_fail(ctx, "No workspace for redis");
+        return (NULL);
+    }
+
+    /* if the final character fit, we are good to go*/
+    VSB_finish(vsb);
+    WS_Release(ctx->ws, VSB_len(vsb));
+    return (VSB_data(vsb));
+}
+
 /******************************************************************************
  * .get_array_reply_length();
  *****************************************************************************/
@@ -1113,6 +1170,10 @@ VMOD_PROXIED_METHOD(
 VMOD_PROXIED_METHOD(
     INT, 0, get_array_reply_length,
     _COMMA_ task_priv)
+VMOD_PROXIED_METHOD(
+    STRING, 0, get_array_reply,
+    _COMMA_ task_priv _COMMA_ sep,
+    VCL_STRING sep)
 VMOD_PROXIED_METHOD(
     BOOL, 0, array_reply_is_error,
     _COMMA_ task_priv _COMMA_ index,
