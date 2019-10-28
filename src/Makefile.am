@@ -25,8 +25,8 @@ AM_TESTS_ENVIRONMENT = \
 	PATH="$(VMOD_TEST_PATH)" \
 	LD_LIBRARY_PATH="$(VARNISH_LIBRARY_PATH)"
 TEST_EXTENSIONS = .vtc
-VTC_LOG_COMPILER = $(abs_srcdir)/tests/runner.sh varnishtest -v
-AM_VTC_LOG_FLAGS = -Dvmod_redis="$(VMOD_REDIS)"
+VTC_LOG_COMPILER = $(abs_srcdir)/tests/runner.sh varnishtest
+AM_VTC_LOG_FLAGS = -v -Dvmod_redis="$(VMOD_REDIS)"
 
 TESTS = @VMOD_TESTS@
 
