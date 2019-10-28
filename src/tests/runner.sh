@@ -192,5 +192,5 @@ fi
 ##
 if [[ $SKIP == 0 ]]; then
     set -x
-    "$@" $CONTEXT
+    "$1" $CONTEXT "${@:2}"
 fi
