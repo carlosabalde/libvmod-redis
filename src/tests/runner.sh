@@ -50,6 +50,7 @@ cleanup() {
 set -e
 ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 TMP=`mktemp -d`
+chmod o+rwx "$TMP"
 SKIP=1
 CONTEXT=""
 
