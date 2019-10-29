@@ -62,7 +62,7 @@ trap "cleanup $TMP" EXIT
 ##
 ## Launch standalone Redis servers?
 ##
-if [[ ${@:$#} =~ ^.*standalone\.[^\.]*\.vtc(\.disabled)?$ ]]; then
+if [[ ${@: -1} =~ ^.*standalone\.[^\.]*\.vtc(\.disabled)?$ ]]; then
     if [ -x "$(command -v redis-cli)" ]; then
         SKIP=0
         for MASTER_INDEX in $(seq 1 $REDIS_STANDALONE_MASTER_SERVERS); do
@@ -135,7 +135,7 @@ EOF
 ##
 ## Launch clustered Redis servers?
 ##
-elif [[ ${@:$#} =~ ^.*clustered\.[^\.]*\.vtc(\.disabled)?$ ]]; then
+elif [[ ${@: -1} =~ ^.*clustered\.[^\.]*\.vtc(\.disabled)?$ ]]; then
     if [ -x "$(command -v redis-cli)" ]; then
         SKIP=0
         SERVERS=""
