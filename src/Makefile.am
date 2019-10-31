@@ -8,7 +8,7 @@ libvmod_redis_la_LIBADD = -lhiredis -lev
 
 libvmod_redis_la_SOURCES = \
 	crc16.c crc16.h \
-	sha1.c sha1.h \
+	sha1.c sha1.h sha1_config.h \
 	cluster.c cluster.h \
 	core.c core.h \
 	sentinel.c sentinel.h \
