@@ -1,4 +1,4 @@
-AM_CPPFLAGS = @VMOD_INCLUDES@ -Wall -D_GNU_SOURCE=1 -DEV_COMPAT3=1
+AM_CPPFLAGS = @VMOD_INCLUDES@ -Wall -DEV_COMPAT3=1
 
 vmoddir = @VMOD_DIR@
 vmod_LTLIBRARIES = libvmod_redis.la
@@ -7,7 +7,6 @@ libvmod_redis_la_LDFLAGS = -module -export-dynamic -avoid-version
 libvmod_redis_la_LIBADD = -lhiredis -lev
 
 libvmod_redis_la_SOURCES = \
-	config.h \
 	crc16.c crc16.h \
 	sha1.c sha1.h \
 	cluster.c cluster.h \
