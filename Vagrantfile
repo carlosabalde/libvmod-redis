@@ -41,7 +41,7 @@ $script = <<SCRIPT
     cd redis-*; \
     make; \
     sudo make PREFIX="/usr/local" install; \
-    sudo ldconfig
+    sudo ldconfig'
 
   # VMOD.
   sudo -u vagrant bash -c '\
