@@ -1,10 +1,9 @@
-AM_CFLAGS = $(VARNISHAPI_CFLAGS) $(CODE_COVERAGE_CFLAGS) -Wall -D_GNU_SOURCE=1 -DEV_COMPAT3=1
+AM_CFLAGS = $(VARNISHAPI_CFLAGS) $(CODE_COVERAGE_CFLAGS) -Wall -DEV_COMPAT3=1
 AM_LDFLAGS = $(VARNISHAPI_LIBS) $(VMOD_LDFLAGS) $(CODE_COVERAGE_LDFLAGS)
 
 vmod_LTLIBRARIES = libvmod_redis.la
 
 libvmod_redis_la_SOURCES = \
-	config.h \
 	crc16.c crc16.h \
 	sha1.c sha1.h \
 	cluster.c cluster.h \
