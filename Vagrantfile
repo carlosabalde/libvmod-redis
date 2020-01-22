@@ -54,7 +54,7 @@ SCRIPT
 Vagrant.configure('2') do |config|
   config.vm.hostname = 'dev'
   config.vm.network :public_network
-  config.vm.synced_folder '.', '/vagrant', :nfs => false
+  config.vm.synced_folder '.', '/vagrant', type: 'virtualbox'
   config.vm.provider :virtualbox do |vb|
     vb.memory = 1024
     vb.cpus = 1
