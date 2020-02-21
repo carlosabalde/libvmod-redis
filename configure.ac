@@ -1,10 +1,12 @@
 AC_PREREQ([2.68])
-AC_INIT([libvmod-redis], [7.3], [], [vmod-redis])
-AC_COPYRIGHT([Copyright (c) 2014-2019 Carlos Abalde <carlos.abalde@gmail.com>])
+AC_INIT([libvmod-redis], [7.4], [], [vmod-redis])
+AC_COPYRIGHT([Copyright (c) 2014-2020 Carlos Abalde <carlos.abalde@gmail.com>])
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_SRCDIR(src/vmod_redis.vcc)
 AC_CONFIG_HEADER([config.h])
+
+AC_GNU_SOURCE
 
 AM_INIT_AUTOMAKE([1.12 -Wall -Werror foreign parallel-tests])
 AM_SILENT_RULES([yes])
