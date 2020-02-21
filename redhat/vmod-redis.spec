@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 10.0
+Version: 10.1
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,6 +36,9 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Fri Feb 21 2020 Carlos Abalde <carlos.abalde@gmail.com> - 10.1-1.20200221
+- Added support for Redis Sentinel authentication.
+- Added Linux Alpine fixes.
 * Mon Sep 30 2019 Carlos Abalde <carlos.abalde@gmail.com> - 10.0-1.20190930
 - Migrated to Varnish Cache 6.3.x.
 * Thu May 23 2019 Carlos Abalde <carlos.abalde@gmail.com> - 9.1-1.20190523

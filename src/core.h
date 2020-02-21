@@ -287,6 +287,7 @@ struct vcl_state {
         unsigned period;
         struct timeval connection_timeout;
         struct timeval command_timeout;
+        const char *password;
 
         // Thread reference + shared state.
         pthread_t thread;
