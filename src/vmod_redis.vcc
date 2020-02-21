@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2014-2019 Carlos Abalde <carlos.abalde@gmail.com>
+# Copyright (c) 2014-2020 Carlos Abalde <carlos.abalde@gmail.com>
 #
 # You're free to use and distribute this under terms in the
 # LICENSE file.
@@ -35,7 +35,8 @@ $Function VOID sentinels(PRIV_VCL,
     STRING locations="",
     INT period=60,
     INT connection_timeout=500,
-    INT command_timeout=0)
+    INT command_timeout=0,
+    STRING password="")
 
 Arguments
     locations:
@@ -59,6 +60,10 @@ Arguments
 
     command_timeout: command timeout (milliseconds; 0 means no timeout) when
     executing Redis Sentinel commands.
+
+    password: if not empty, requests for authentication using the ``AUTH``
+    command will be submitted when creating new Redis Sentinel connections.
+    This password will be used for all Redis Sentinel servers.
 Description
     Using this function is not mandatory.
 

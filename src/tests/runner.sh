@@ -50,6 +50,7 @@ cleanup() {
 set -e
 ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 TMP=`mktemp -d`
+chmod o+rwx "$TMP"
 SKIP=1
 CONTEXT=""
 
@@ -61,7 +62,7 @@ trap "cleanup $TMP" EXIT
 ##
 ## Launch standalone Redis servers?
 ##
-if [[ $2 =~ ^.*standalone\.[^\.]*\.vtc(\.disabled)?$ ]]; then
+if [[ ${@: -1} =~ ^.*standalone\.[^\.]*\.vtc(\.disabled)?$ ]]; then
     if [ -x "$(command -v redis-cli)" ]; then
         SKIP=0
         for MASTER_INDEX in $(seq 1 $REDIS_STANDALONE_MASTER_SERVERS); do
@@ -104,7 +105,6 @@ EOF
 
             for SENTINEL_INDEX in $(seq 1 $REDIS_STANDALONE_SENTINEL_SERVERS); do
                 cat >> "$TMP/redis-sentinel$SENTINEL_INDEX.conf" <<EOF
-                pidfile $TMP/redis-sentinel$SENTINEL_INDEX.pid
                 sentinel monitor redis-master$MASTER_INDEX $MASTER_IP $MASTER_PORT 1
                 sentinel down-after-milliseconds redis-master$MASTER_INDEX 5000
                 sentinel failover-timeout redis-master$MASTER_INDEX 60000
@@ -122,6 +122,7 @@ EOF
             bind $SENTINEL_IP
             port $SENTINEL_PORT
             pidfile $TMP/redis-sentinel$INDEX.pid
+            requirepass s3cr3t
 EOF
             redis-server "$TMP/redis-sentinel$INDEX.conf" --sentinel
             CONTEXT="\
@@ -134,7 +135,7 @@ EOF
 ##
 ## Launch clustered Redis servers?
 ##
-elif [[ $2 =~ ^.*clustered\.[^\.]*\.vtc(\.disabled)?$ ]]; then
+elif [[ ${@: -1} =~ ^.*clustered\.[^\.]*\.vtc(\.disabled)?$ ]]; then
     if [ -x "$(command -v redis-cli)" ]; then
         SKIP=0
         SERVERS=""
@@ -192,5 +193,5 @@ fi
 ##
 if [[ $SKIP == 0 ]]; then
     set -x
-    "$@" $CONTEXT
+    "$1" $CONTEXT "${@:2}"
 fi

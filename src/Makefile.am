@@ -1,4 +1,4 @@
-AM_CPPFLAGS = @VMOD_INCLUDES@ -Wall -D_GNU_SOURCE=1 -DEV_COMPAT3=1
+AM_CPPFLAGS = @VMOD_INCLUDES@ -Wall -DEV_COMPAT3=1
 
 vmoddir = @VMOD_DIR@
 vmod_LTLIBRARIES = libvmod_redis.la
@@ -7,9 +7,8 @@ libvmod_redis_la_LDFLAGS = -module -export-dynamic -avoid-version
 libvmod_redis_la_LIBADD = -lhiredis -lev
 
 libvmod_redis_la_SOURCES = \
-	config.h \
 	crc16.c crc16.h \
-	sha1.c sha1.h \
+	sha1.c sha1.h sha1_config.h \
 	cluster.c cluster.h \
 	core.c core.h \
 	sentinel.c sentinel.h \
@@ -31,7 +30,7 @@ VMOD_TESTS = $(top_srcdir)/src/tests/*.vtc
 .PHONY: $(VMOD_TESTS)
 
 $(top_srcdir)/src/tests/*.vtc: libvmod_redis.la
-	$(abs_srcdir)/tests/runner.sh @VARNISHTEST@ $@ -Dvarnishd=@VARNISHD@ -Dvmod_topbuild=$(abs_top_builddir)
+	$(abs_srcdir)/tests/runner.sh @VARNISHTEST@ -Dvarnishd=@VARNISHD@ -Dvmod_topbuild=$(abs_top_builddir) $@
 
 check: $(VMOD_TESTS)
 

@@ -1,3 +1,5 @@
+#include "config.h"
+
 #include <ctype.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -390,6 +392,7 @@ new_vcl_state()
     result->sentinels.period = 0;
     result->sentinels.connection_timeout = (struct timeval){ 0 };
     result->sentinels.command_timeout = (struct timeval){ 0 };
+    result->sentinels.password = NULL;
     result->sentinels.thread = 0;
     result->sentinels.active = 0;
     result->sentinels.discovery = 0;
@@ -425,6 +428,10 @@ free_vcl_state(vcl_state_t *priv)
     priv->sentinels.period = 0;
     priv->sentinels.connection_timeout = (struct timeval){ 0 };
     priv->sentinels.command_timeout = (struct timeval){ 0 };
+    if (priv->sentinels.password != NULL) {
+        free((void *) priv->sentinels.password);
+        priv->sentinels.password = NULL;
+    }
     priv->sentinels.thread = 0;
     priv->sentinels.active = 0;
     priv->sentinels.discovery = 0;

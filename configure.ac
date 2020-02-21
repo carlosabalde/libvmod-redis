@@ -1,6 +1,6 @@
 AC_PREREQ(2.59)
-AC_COPYRIGHT([Copyright (c) 2014-2019 Carlos Abalde <carlos.abalde@gmail.com>])
-AC_INIT([libvmod-redis], [3.16])
+AC_COPYRIGHT([Copyright (c) 2014-2020 Carlos Abalde <carlos.abalde@gmail.com>])
+AC_INIT([libvmod-redis], [3.17])
 AC_CONFIG_MACRO_DIR([m4])
 m4_ifndef([VARNISH_VMOD_INCLUDES], AC_MSG_ERROR([Need varnish.m4 -- see README.rst]))
 AC_CONFIG_SRCDIR(src/vmod_redis.vcc)
@@ -8,6 +8,7 @@ AM_CONFIG_HEADER(config.h)
 
 AC_CANONICAL_SYSTEM
 AC_LANG(C)
+AC_GNU_SOURCE
 
 AM_INIT_AUTOMAKE([foreign])
 

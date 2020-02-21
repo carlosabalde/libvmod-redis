@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 3.16
+Version: 3.17
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,6 +36,9 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Fri Feb 21 2020 Carlos Abalde <carlos.abalde@gmail.com> - 3.17-1.20200221
+- Added support for Redis Sentinel authentication.
+- Added Linux Alpine fixes.
 * Thu May 23 2019 Carlos Abalde <carlos.abalde@gmail.com> - 3.16-1.20190523
 - Stopped depending on redis-trib.rb.
 - Added REPLICAOF command (i.e. new SLAVEOF name) support.

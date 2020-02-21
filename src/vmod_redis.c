@@ -1,3 +1,5 @@
+#include "config.h"
+
 #include <ctype.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -333,7 +335,7 @@ vmod_subnets(VRT_CTX, struct vmod_priv *vcl_priv, VCL_STRING masks)
 VCL_VOID
 vmod_sentinels(
     VRT_CTX, struct vmod_priv *vcl_priv, VCL_STRING locations, VCL_INT period,
-    VCL_INT connection_timeout, VCL_INT command_timeout)
+    VCL_INT connection_timeout, VCL_INT command_timeout, VCL_STRING password)
 {
     // Initializations.
     vcl_state_t *config = vcl_priv->priv;
@@ -364,6 +366,10 @@ vmod_sentinels(
                     command_timeout / 1000;
                 config->sentinels.command_timeout.tv_usec =
                     (command_timeout % 1000) * 1000;
+                if ((password != NULL) && (strlen(password) > 0)) {
+                    config->sentinels.password = strdup(password);
+                    AN(config->sentinels.password);
+                }
             }
 
             // If required, startup of the Sentinel thread and execution of
