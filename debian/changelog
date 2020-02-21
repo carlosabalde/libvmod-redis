@@ -1,3 +1,10 @@
+libvmod-redis (3.17-1) stable; urgency=low
+
+  * Added support for Redis Sentinel authentication
+  * Added Linux Alpine fixes
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Fri, 21 Feb 2020 16:00:00 +0100
+
 libvmod-redis (3.16-1) stable; urgency=low
 
   * Stopped depending on redis-trib.rb
