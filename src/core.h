@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <hiredis/hiredis.h>
 #include <netinet/in.h>
+#include <inttypes.h>
 
 #include "vqueue.h"
 
@@ -145,65 +146,65 @@ struct vmod_redis_db {
     struct stats {
         struct {
             // Number of successfully created servers.
-            unsigned total;
+            uint64_t total;
             // Number of failures while trying to create new servers.
-            unsigned failed;
+            uint64_t failed;
         } servers;
 
         struct {
             // Number of successfully created connections.
-            unsigned total;
+            uint64_t total;
             // Number of failures while trying to create new connections.
-            unsigned failed;
+            uint64_t failed;
             // Number of (established and probably healthy) connections dropped.
             struct {
-                unsigned error;
-                unsigned hung_up;
-                unsigned overflow;
-                unsigned ttl;
-                unsigned version;
-                unsigned sick;
+                uint64_t error;
+                uint64_t hung_up;
+                uint64_t overflow;
+                uint64_t ttl;
+                uint64_t version;
+                uint64_t sick;
             } dropped;
         } connections;
 
         struct {
             // Number of times some worker thread have been blocked waiting for
             // a free connection.
-            unsigned blocked;
+            uint64_t blocked;
         } workers;
 
         struct {
             // Number of successfully executed commands (this includes Redis
             // error replies).
-            unsigned total;
+            uint64_t total;
             // Number of failed command executions (this does not include Redis
             // error replies). If retries have been requested, each failed try
             // is considered as a separate command.
-            unsigned failed;
+            uint64_t failed;
             // Number of retried command executions (this includes both
             // successful and failed executions).
-            unsigned retried;
+            uint64_t retried;
             // Number of successfully executed commands returning a Redis error
             // reply.
-            unsigned error;
+            uint64_t error;
             // Number of NOSCRIPT error replies while executing EVALSHA
             // commands.
-            unsigned noscript;
+            uint64_t noscript;
         } commands;
 
         struct {
             struct {
                 // Number of successfully executed discoveries.
-                unsigned total;
+                uint64_t total;
                 // Number of failed discoveries (this includes connection
                 // failures, unexpected responses, etc.).
-                unsigned failed;
+                uint64_t failed;
             } discoveries;
             struct {
                 // Number of MOVED replies.
-                unsigned moved;
+                uint64_t moved;
                 // Number of ASK replies.
-                unsigned ask;
+                uint64_t ask;
             } replies;
         } cluster;
     } stats;
