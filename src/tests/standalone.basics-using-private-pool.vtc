@@ -145,6 +145,19 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
             set resp.http.Reply-11 = db.get_string_reply();
         }
 
+        # EVAL (large integer).
+        set req.http.Script = {"
+            return tonumber(ARGV[1])
+        "};
+        db.command("EVAL");
+        db.push(req.http.Script);
+        db.push("0");
+        db.push("1125899906842624");  # 2^50
+        db.execute(true);
+        if (db.reply_is_integer()) {
+            set resp.http.Reply-12 = db.get_integer_reply();
+        }
+
         # Stats.
         set resp.http.db-stats = db.stats();
         set resp.http.db-servers-total = db.counter("servers.total");
@@ -183,11 +196,13 @@ client c1 {
 
     expect resp.http.Reply-11 == "Atomic x 2!"
 
+    expect resp.http.Reply-12 == "1125899906842624"
+
     expect resp.http.db-servers-total == "1"
     expect resp.http.db-connections-total == "1"
-    expect resp.http.db-commands-total == "11"
+    expect resp.http.db-commands-total == "12"
     expect resp.http.db-commands-error == "1"
-    expect resp.http.db-commands-noscript == "1"
+    expect resp.http.db-commands-noscript == "2"
 } -run
 
 varnish v1 -expect client_req == 1
