@@ -7,7 +7,7 @@ $script = <<SCRIPT
   apt-get install -qq unzip apt-transport-https \
     autotools-dev automake libtool python-docutils pkg-config libpcre3-dev \
     libeditline-dev libedit-dev make dpkg-dev git libjemalloc-dev \
-    libev-dev libncurses-dev python-sphinx graphviz
+    libev-dev libncurses-dev python-sphinx graphviz libssl-dev
 
   # Varnish Cache.
   sudo -u vagrant bash -c '\
@@ -37,8 +37,8 @@ $script = <<SCRIPT
     tar zxvf redis-*.tar.gz; \
     rm -f redis-*.tar.gz; \
     cd redis-*; \
-    make; \
-    sudo make PREFIX="/usr/local" install; \
+    make BUILD_TLS=yes; \
+    sudo make BUILD_TLS=yes PREFIX="/usr/local" install; \
     sudo ldconfig'
 
   # VMOD.
