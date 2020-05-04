@@ -23,6 +23,7 @@ addons:
     packages:
     - lcov
     - libev-dev
+    - libssl-dev
     - python-docutils
     - python-sphinx
 
@@ -46,8 +47,8 @@ before_install:
   - wget http://download.redis.io/releases/redis-6.0.1.tar.gz
   - tar zxvf redis-*.tar.gz
   - pushd redis-*
-  - make
-  - sudo make PREFIX="/usr/local" install
+  - make BUILD_TLS=yes
+  - sudo make BUILD_TLS=yes PREFIX="/usr/local" install
   - sudo ldconfig
   - popd
 
