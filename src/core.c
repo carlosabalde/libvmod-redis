@@ -206,9 +206,9 @@ struct vmod_redis_db *
 new_vmod_redis_db(
     vcl_state_t *config, const char *name, struct timeval connection_timeout,
     unsigned connection_ttl, struct timeval command_timeout, unsigned max_command_retries,
-    unsigned shared_connections, unsigned max_connections, const char *password,
-    unsigned sickness_ttl, unsigned ignore_slaves, unsigned clustered,
-    unsigned max_cluster_hops)
+    unsigned shared_connections, unsigned max_connections, const char *user,
+    const char *password, unsigned sickness_ttl, unsigned ignore_slaves,
+    unsigned clustered, unsigned max_cluster_hops)
 {
     struct vmod_redis_db *result;
     ALLOC_OBJ(result, VMOD_REDIS_DATABASE_MAGIC);
@@ -232,6 +232,12 @@ new_vmod_redis_db(
     result->max_command_retries = max_command_retries;
     result->shared_connections = shared_connections;
     result->max_connections = max_connections;
+    if (strlen(user) > 0) {
+        result->user = strdup(user);
+        AN(result->user);
+    } else {
+        result->user = NULL;
+    }
     if (strlen(password) > 0) {
         result->password = strdup(password);
         AN(result->password);
@@ -295,6 +301,10 @@ free_vmod_redis_db(struct vmod_redis_db *db)
     db->max_command_retries = 0;
     db->shared_connections = 0;
     db->max_connections = 0;
+    if (db->user != NULL) {
+        free((void *) db->user);
+        db->user = NULL;
+    }
     if (db->password != NULL) {
         free((void *) db->password);
         db->password = NULL;
@@ -818,7 +828,7 @@ new_rcontext(
     // Submit AUTH command.
     if ((result != NULL) && (server->db->password != NULL)) {
         REDIS_AUTH(
-            ctx, result, server->db->password,
+            ctx, result, server->db->user, server->db->password,
             "Failed to authenticate connection",
             "db=%s, server=%s",
             server->db->name, server->location.raw);

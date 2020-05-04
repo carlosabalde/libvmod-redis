@@ -76,6 +76,7 @@ import redis;
         INT max_command_retries=0,
         BOOL shared_connections=true,
         INT max_connections=128,
+        STRING user="",
         STRING password="",
         INT sickness_ttl=60,
         BOOL ignore_slaves=false,
