@@ -63,7 +63,7 @@ trap "cleanup $TMP" EXIT
 ## Get Redis version.
 ##
 if [ -x "$(command -v redis-cli)" ]; then
-    VERSION=$(redis-cli --version | sed 's/.* //g' | awk -F. '{ printf("%d%03d%03d\n", $1, $2, $3) }')
+    VERSION=$(redis-cli --version | sed 's/^redis-cli \([^ ]*\).*$/\1/' | awk -F. '{ printf("%d%03d%03d\n", $1, $2, $3) }')
     CONTEXT="\
         $CONTEXT \
         -Dredis_version=$VERSION"
