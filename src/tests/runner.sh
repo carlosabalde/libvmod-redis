@@ -60,6 +60,16 @@ CONTEXT=""
 trap "cleanup $TMP" EXIT
 
 ##
+## Get Redis version.
+##
+if [ -x "$(command -v redis-cli)" ]; then
+    VERSION=$(redis-cli --version | sed 's/^redis-cli \([^ ]*\).*$/\1/' | awk -F. '{ printf("%d%03d%03d\n", $1, $2, $3) }')
+    CONTEXT="\
+        $CONTEXT \
+        -Dredis_version=$VERSION"
+fi
+
+##
 ## Launch standalone Redis servers?
 ##
 if [[ ${@: -1} =~ ^.*standalone\.[^\.]*\.vtc(\.disabled)?$ ]]; then
@@ -162,7 +172,7 @@ EOF
             SERVERS="$SERVERS 127.0.0.$INDEX:$((REDIS_CLUSTER_START_PORT+INDEX))"
         done
 
-        if [ "$(redis-cli --version | cut -c 11)" -ge "5" ]; then
+        if [ "$VERSION" -ge "5000000" ]; then
             yes yes | redis-cli --cluster create $SERVERS --cluster-replicas $REDIS_CLUSTER_REPLICAS > /dev/null
         else
             yes yes | redis-trib.rb create --replicas $REDIS_CLUSTER_REPLICAS $SERVERS > /dev/null

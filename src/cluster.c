@@ -227,7 +227,7 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
         // Submit AUTH command.
         if (server->db->password != NULL) {
             REDIS_AUTH(
-                ctx, rcontext, server->db->password,
+                ctx, rcontext, server->db->user, server->db->password,
                 "Failed to authenticate cluster discovery connection",
                 "db=%s, server=%s",
                 server->db->name, server->location.raw);

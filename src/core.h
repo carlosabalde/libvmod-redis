@@ -128,6 +128,7 @@ struct vmod_redis_db {
     unsigned max_command_retries;
     unsigned shared_connections;
     unsigned max_connections;
+    const char *user;
     const char *password;
     time_t sickness_ttl;
     unsigned ignore_slaves;
@@ -356,9 +357,14 @@ extern vmod_state_t vmod_state;
 #define REDIS_LOG_INFO(ctx, message, ...) \
     REDIS_LOG(ctx, LOG_INFO, message, ##__VA_ARGS__)
 
-#define REDIS_AUTH(ctx, rcontext, password, message1, message2, ...) \
+#define REDIS_AUTH(ctx, rcontext, user, password, message1, message2, ...) \
     do { \
-        redisReply *reply = redisCommand(rcontext, "AUTH %s", password); \
+        redisReply *reply; \
+        if (user != NULL) { \
+            reply = redisCommand(rcontext, "AUTH %s %s", user, password); \
+        } else { \
+            reply = redisCommand(rcontext, "AUTH %s", password); \
+        } \
         \
         if ((rcontext->err) || \
             (reply == NULL) || \
@@ -400,9 +406,9 @@ void free_redis_context(redis_context_t *context);
 struct vmod_redis_db *new_vmod_redis_db(
     vcl_state_t *config, const char *name, struct timeval connection_timeout,
     unsigned connection_ttl, struct timeval command_timeout, unsigned max_command_retries,
-    unsigned shared_connections, unsigned max_connections, const char *password,
-    unsigned sickness_ttl, unsigned ignore_slaves, unsigned clustered,
-    unsigned max_cluster_hops);
+    unsigned shared_connections, unsigned max_connections, const char *user,
+    const char *password, unsigned sickness_ttl, unsigned ignore_slaves,
+    unsigned clustered, unsigned max_cluster_hops);
 void free_vmod_redis_db(struct vmod_redis_db *db);
 
 task_state_t *new_task_state();

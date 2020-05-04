@@ -397,7 +397,7 @@ vmod_db__init(
     VRT_CTX, struct vmod_redis_db **db, const char *vcl_name, struct vmod_priv *vcl_priv,
     VCL_STRING location, VCL_ENUM type, VCL_INT connection_timeout, VCL_INT connection_ttl,
     VCL_INT command_timeout, VCL_INT max_command_retries, VCL_BOOL shared_connections,
-    VCL_INT max_connections, VCL_STRING password, VCL_INT sickness_ttl,
+    VCL_INT max_connections, VCL_STRING user, VCL_STRING password, VCL_INT sickness_ttl,
     VCL_BOOL ignore_slaves, VCL_INT max_cluster_hops)
 {
     // Assert input.
@@ -411,6 +411,7 @@ vmod_db__init(
         (command_timeout >= 0) &&
         (max_command_retries >= 0) &&
         (max_connections >= 0) &&
+        (user != NULL) &&
         (password != NULL) &&
         (sickness_ttl >= 0) &&
         (max_cluster_hops >= 0)) {
@@ -431,7 +432,7 @@ vmod_db__init(
         struct vmod_redis_db *instance = new_vmod_redis_db(
             config, vcl_name, connection_timeout_tv, connection_ttl,
             command_timeout_tv, max_command_retries, shared_connections, max_connections,
-            password, sickness_ttl, ignore_slaves, clustered, max_cluster_hops);
+            user, password, sickness_ttl, ignore_slaves, clustered, max_cluster_hops);
 
         // Add initial server if provided.
         if ((location != NULL) && (strlen(location) > 0)) {

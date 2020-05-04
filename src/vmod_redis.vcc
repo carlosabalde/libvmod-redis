@@ -233,6 +233,7 @@ $Object db(PRIV_VCL,
     INT max_command_retries=0,
     BOOL shared_connections=1,
     INT max_connections=128,
+    STRING user="",
     STRING password="",
     INT sickness_ttl=60,
     BOOL ignore_slaves=0,
@@ -293,6 +294,11 @@ Arguments
         WARNING: when creating multiple database instances, always use the same
         value in all instances using private connections. Otherwise you may
         experience inconsistent behavior.
+
+    user: if not empty and a ``password`` is provided, requests for
+    authentication using the ``AUTH`` command will include both the user name
+    and its password. That enables usage of the Redis ACL system, available
+    since Redis 6.0.
 
     password: if not empty, requests for authentication using the ``AUTH``
     command will be submitted when creating new Redis connections. This
