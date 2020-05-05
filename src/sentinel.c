@@ -195,7 +195,9 @@ authorizeCallback(redisAsyncContext *context, void *r, void *s)
     struct sentinel *sentinel;
     CAST_OBJ_NOTNULL(sentinel, s, SENTINEL_MAGIC);
 
-    if (reply == NULL || reply->type != REDIS_REPLY_STRING || strcmp(reply->str, "OK") == 0) {
+    if (reply == NULL ||
+        reply->type != REDIS_REPLY_STATUS ||
+        strcmp(reply->str, "OK") != 0) {
         REDIS_LOG_ERROR(NULL,
             "Failed to authenticate Sentinel connection (sentinel=%s:%d)",
             sentinel->host, sentinel->port);
