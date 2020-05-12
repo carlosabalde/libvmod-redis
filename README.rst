@@ -1,7 +1,7 @@
 
-.. image:: https://travis-ci.org/carlosabalde/libvmod-redis.svg?branch=4.1
-   :alt: Travis CI badge
-   :target: https://travis-ci.org/carlosabalde/libvmod-redis/
+.. image:: https://github.com/carlosabalde/libvmod-redis/workflows/CI/badge.svg?branch=4.1
+   :alt: GitHub Actions CI badge
+   :target: https://github.com/carlosabalde/libvmod-redis/actions
 
 VMOD using the `synchronous hiredis library API <https://github.com/redis/hiredis>`_ to access Redis servers from VCL.
 
