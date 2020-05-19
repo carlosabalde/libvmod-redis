@@ -802,9 +802,44 @@ discover_servers(struct state *state)
                 isentinel->host,
                 isentinel->port);
         }
+        if (rcontext == NULL) {
+            REDIS_LOG_ERROR(NULL,
+                "Failed to establish Sentinel connection (sentinel=%s:%d)",
+                isentinel->host, isentinel->port);
+        } else if (rcontext->err) {
+            REDIS_LOG_ERROR(NULL,
+                "Failed to establish Sentinel connection (error=%d, sentinel=%s:%d): %s",
+                rcontext->err, isentinel->host,
+                isentinel->port, rcontext->errstr);
+            redisFree(rcontext);
+            rcontext = NULL;
+        }
+
+        // Send 'AUTH' command.
+        if ((rcontext != NULL) &&
+            (state->password != NULL)) {
+            redisReply *reply = redisCommand(rcontext, "AUTH %s", state->password);
+            if ((rcontext->err) ||
+                (reply == NULL) ||
+                (reply->type != REDIS_REPLY_STATUS) ||
+                (strcmp(reply->str, "OK") != 0)) {
+                if (rcontext->err) {
+                    REDIS_LOG_ERROR(NULL,
+                        "Failed to execute Sentinel AUTH command (error=%d, sentinel=%s:%d): %s",
+                        rcontext->err, isentinel->host,
+                        isentinel->port, rcontext->errstr);
+                } else {
+                    REDIS_LOG_ERROR(NULL,
+                        "Failed to execute Sentinel AUTH command (sentinel=%s:%d)",
+                        isentinel->host, isentinel->port);
+                }
+                redisFree(rcontext);
+                rcontext = NULL;
+            }
+        }
 
         // Check context.
-        if ((rcontext != NULL) && (!rcontext->err)) {
+        if (rcontext != NULL) {
             // Set command execution timeout.
             int tr = redisSetTimeout(rcontext, state->command_timeout);
             if (tr != REDIS_OK) {
@@ -852,21 +887,8 @@ discover_servers(struct state *state)
                     "Failed to execute Sentinel masters command (sentinel=%s:%d)",
                     isentinel->host, isentinel->port);
             }
-        } else {
-            if (rcontext != NULL) {
-                REDIS_LOG_ERROR(NULL,
-                    "Failed to establish Sentinel connection (error=%d, sentinel=%s:%d): %s",
-                    rcontext->err, isentinel->host,
-                    isentinel->port, rcontext->errstr);
-            } else {
-                REDIS_LOG_ERROR(NULL,
-                    "Failed to establish Sentinel connection (sentinel=%s:%d)",
-                    isentinel->host, isentinel->port);
-            }
-        }
 
-        // Release context.
-        if (rcontext != NULL) {
+            // Release context.
             redisFree(rcontext);
         }
     }
