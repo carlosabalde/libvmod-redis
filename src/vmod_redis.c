@@ -352,7 +352,7 @@ vmod_sentinels(
 
 #ifndef RESP3_ENABLED
     // Abort if RESP3 is not available.
-    if (protocol == enum_vmod_redis_RESP3) {
+    if (protocol == vmod_enum_RESP3) {
         REDIS_LOG_ERROR(ctx,
             "%s is not supported",
             "RESP3");
@@ -464,7 +464,7 @@ vmod_db__init(
 
 #ifndef RESP3_ENABLED
     // Abort if RESP3 is not available.
-    if (protocol == enum_vmod_redis_RESP3) {
+    if (protocol == vmod_enum_RESP3) {
         REDIS_LOG_ERROR(ctx,
             "%s is not supported",
             "RESP3");
@@ -1442,11 +1442,11 @@ static enum REDIS_PROTOCOL
 parse_protocol(VCL_ENUM protocol)
 {
     enum REDIS_PROTOCOL result;
-    if (protocol == enum_vmod_redis_default) {
+    if (protocol == vmod_enum_default) {
         result = REDIS_PROTOCOL_DEFAULT;
-    } else if (protocol == enum_vmod_redis_RESP2) {
+    } else if (protocol == vmod_enum_RESP2) {
         result = REDIS_PROTOCOL_RESP2;
-    } else if (protocol == enum_vmod_redis_RESP3) {
+    } else if (protocol == vmod_enum_RESP3) {
         result = REDIS_PROTOCOL_RESP3;
     } else {
         WRONG("Invalid protocol value.");
