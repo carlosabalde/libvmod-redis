@@ -76,20 +76,18 @@ if test "x$enable_tls" = xyes; then
 
 	AC_CHECK_LIB(
 		crypto, CRYPTO_new_ex_data, [],
-		[AC_MSG_ERROR([libvmod-redis requires crypto. Try --disable-tls.])])
+		[AC_MSG_ERROR([libvmod-redis requires libcrypto. Try --disable-tls.])])
 
 	AC_CHECK_LIB(
 		ssl, SSL_CTX_new, [],
-		[AC_MSG_ERROR([libvmod-redis requires ssl. Try --disable-tls.])])
+		[AC_MSG_ERROR([libvmod-redis requires libssl. Try --disable-tls.])])
 
 	AC_CHECK_LIB(
 		hiredis_ssl, redisInitiateSSL, [],
 		[AC_MSG_ERROR([libvmod-redis requires libhiredis_ssl. Try --disable-tls.])])
 
-	save_CFLAGS="${CFLAGS}"
-	CFLAGS="${CFLAGS} ${VARNISHAPI_CFLAGS}"
-	AC_CHECK_DECLS([VSSLH_status], [], [], [[#include <vsslh.h>]])
-	CFLAGS="${save_CFLAGS}"
+    AC_CHECK_LIB(
+        varnish-sslhelper, VSSLH_status, [], [])
 else
     AC_MSG_RESULT([disabled])
 fi
