@@ -13,7 +13,7 @@
 
 #ifdef TLS_ENABLED
 #include <openssl/ssl.h>
-#if HAVE_DECL_VSSLH_STATUS == 1
+#ifdef HAVE_LIBVARNISH_SSLHELPER
 #include <vsslh.h>
 #endif
 #endif
@@ -55,7 +55,7 @@ handle_vcl_load_event(VRT_CTX, struct vmod_priv *vcl_priv)
 
 #ifdef TLS_ENABLED
     // Ensure OpenSSL global state is initialized only once.
-#if HAVE_DECL_VSSLH_STATUS == 1
+#ifdef HAVE_LIBVARNISH_SSLHELPER
     AN(VSSLH_status());
 #else
     static int openssl_initialized = 0;
