@@ -1,0 +1,87 @@
+varnishtest "Tests TLS support"
+
+server s1 {
+   rxreq
+   txresp
+} -repeat 1 -start
+
+varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
+    import ${vmod_redis};
+
+    sub vcl_init {
+        redis.subnets(
+            masks={""});
+
+        redis.sentinels(
+            locations={""},
+            period=0,
+            connection_timeout=500,
+            command_timeout=0);
+
+        new db = redis.db(
+            location="${redis_master1_ip}:${redis_master1_tls_port}",
+            type=master,
+            connection_timeout=500,
+            connection_ttl=0,
+            command_timeout=0,
+            max_command_retries=0,
+            shared_connections=false,
+            max_connections=1,
+            tls=true,
+            tls_cafile="${redis_tls_cafile}",
+            tls_certfile="${redis_tls_certfile}",
+            tls_keyfile="${redis_tls_keyfile}",
+            password="",
+            sickness_ttl=0,
+            ignore_slaves=false,
+            max_cluster_hops=0);
+    }
+
+    sub vcl_deliver {
+        # SET.
+        db.command("SET");
+        db.push("foo");
+        db.push("Hello world!");
+        db.execute(true);
+        if (db.reply_is_status()) {
+            set resp.http.Reply-1 = db.get_status_reply();
+        }
+
+        # GET.
+        db.command("GET");
+        db.push("foo");
+        db.execute(true);
+        if (db.reply_is_string()) {
+            set resp.http.Reply-2 = db.get_string_reply();
+        }
+
+        # Stats.
+        set resp.http.db-stats = db.stats();
+        set resp.http.db-servers-total = db.counter("servers.total");
+        set resp.http.db-connections-total = db.counter("connections.total");
+        set resp.http.db-connections-dropped-error = db.counter("connections.dropped.error");
+        set resp.http.db-commands-total = db.counter("commands.total");
+        set resp.http.db-commands-error = db.counter("commands.error");
+        set resp.http.db-commands-failed = db.counter("commands.failed");
+        set resp.http.db-commands-noscript = db.counter("commands.noscript");
+    }
+} -start
+
+client c1 {
+    txreq
+    rxresp
+
+    expect resp.http.Reply-1 == "OK"
+
+    expect resp.http.Reply-2 == "Hello world!"
+
+    expect resp.http.db-servers-total == "1"
+    expect resp.http.db-connections-total == "1"
+    expect resp.http.db-connections-dropped-error == "0"
+    expect resp.http.db-commands-total == "2"
+    expect resp.http.db-commands-failed == "0"
+    expect resp.http.db-commands-error == "0"
+    expect resp.http.db-commands-noscript == "0"
+} -run
+
+varnish v1 -expect client_req == 1
