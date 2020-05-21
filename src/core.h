@@ -7,11 +7,21 @@
 #include <netinet/in.h>
 #include <inttypes.h>
 
+#ifdef TLS_ENABLED
+#include <openssl/ssl.h>
+#endif
+
 #include "vqueue.h"
 
 #define NREDIS_SERVER_ROLES 3
 #define NREDIS_SERVER_WEIGHTS 4
 #define NREDIS_CLUSTER_SLOTS 16384
+
+enum REDIS_PROTOCOL {
+    REDIS_PROTOCOL_DEFAULT = 0,
+    REDIS_PROTOCOL_RESP2 = 2,
+    REDIS_PROTOCOL_RESP3 = 3
+};
 
 // Required lock ordering to avoid deadlocks:
 //   1. vcl_state->mutex.
@@ -128,6 +138,11 @@ struct vmod_redis_db {
     unsigned max_command_retries;
     unsigned shared_connections;
     unsigned max_connections;
+    enum REDIS_PROTOCOL protocol;
+#ifdef TLS_ENABLED
+    SSL_CTX *tls_ssl_ctx;
+    const char *tls_sni;
+#endif
     const char *user;
     const char *password;
     time_t sickness_ttl;
@@ -289,6 +304,15 @@ struct vcl_state {
         unsigned period;
         struct timeval connection_timeout;
         struct timeval command_timeout;
+        enum REDIS_PROTOCOL protocol;
+#ifdef TLS_ENABLED
+        unsigned tls;
+        const char *tls_cafile;
+        const char *tls_capath;
+        const char *tls_certfile;
+        const char *tls_keyfile;
+        const char *tls_sni;
+#endif
         const char *password;
 
         // Thread reference + shared state.
@@ -318,25 +342,48 @@ typedef struct vmod_state {
 
 extern vmod_state_t vmod_state;
 
-#define REDIS_LOG(ctx, level, message, ...) \
+// See: https://stackoverflow.com/a/8814003/1806102.
+#define HIREDIS_ERRSTR_1(rcontext) \
+    (rcontext->err ? rcontext->errstr : "-")
+#define HIREDIS_ERRSTR_2(rcontext, reply) \
+    (rcontext->err ? \
+     rcontext->errstr : \
+     ((reply != NULL && \
+       (reply->type == REDIS_REPLY_ERROR || \
+        reply->type == REDIS_REPLY_STATUS || \
+        reply->type == REDIS_REPLY_STRING)) ? reply->str : "-"))
+#define HIREDIS_ERRSTR_X(x, rcontext, reply, FUNC, ...)  FUNC
+#define HIREDIS_ERRSTR(...) \
+    HIREDIS_ERRSTR_X(,##__VA_ARGS__, \
+        HIREDIS_ERRSTR_2(__VA_ARGS__), \
+        HIREDIS_ERRSTR_1(__VA_ARGS__))
+
+#if HIREDIS_MAJOR >= 1 && HIREDIS_MINOR >= 0
+#define RESP3_ENABLED 1
+#define RESP3_SWITCH(a, b) a
+#else
+#define RESP3_SWITCH(a, b) b
+#endif
+
+#define REDIS_LOG(ctx, priority, fmt, ...) \
     do { \
         const struct vrt_ctx *_ctx = ctx; \
         \
         char *_buffer; \
-        if (level == LOG_ERR) { \
+        if (priority == LOG_ERR) { \
             assert(asprintf( \
                 &_buffer, \
-                "[REDIS][%s] %s", __func__, message) > 0); \
+                "[REDIS][%s] %s", __func__, fmt) > 0); \
         } else { \
             assert(asprintf( \
                 &_buffer, \
-                "[REDIS] %s", message) > 0); \
+                "[REDIS] %s", fmt) > 0); \
         } \
         \
-        syslog(level, _buffer, ##__VA_ARGS__); \
+        syslog(priority, _buffer, ##__VA_ARGS__); \
         \
         unsigned _tag; \
-        if (level == LOG_ERR) { \
+        if (priority == LOG_ERR) { \
             _tag = SLT_VCL_Error; \
         } else { \
             _tag = SLT_VCL_Log; \
@@ -350,48 +397,79 @@ extern vmod_state_t vmod_state;
         free(_buffer); \
     } while (0)
 
-#define REDIS_LOG_ERROR(ctx, message, ...) \
-    REDIS_LOG(ctx, LOG_ERR, message, ##__VA_ARGS__)
-#define REDIS_LOG_WARNING(ctx, message, ...) \
-    REDIS_LOG(ctx, LOG_WARNING, message, ##__VA_ARGS__)
-#define REDIS_LOG_INFO(ctx, message, ...) \
-    REDIS_LOG(ctx, LOG_INFO, message, ##__VA_ARGS__)
+#define REDIS_LOG_ERROR(ctx, fmt, ...) \
+    REDIS_LOG(ctx, LOG_ERR, fmt, ##__VA_ARGS__)
+#define REDIS_LOG_WARNING(ctx, fmt, ...) \
+    REDIS_LOG(ctx, LOG_WARNING, fmt, ##__VA_ARGS__)
+#define REDIS_LOG_INFO(ctx, fmt, ...) \
+    REDIS_LOG(ctx, LOG_INFO, fmt, ##__VA_ARGS__)
 
-#define REDIS_AUTH(ctx, rcontext, user, password, message1, message2, ...) \
+#ifdef TLS_ENABLED
+#define REDIS_TLS(ctx, rcontext, db, message1, message2, ...) \
     do { \
-        redisReply *reply; \
-        if (user != NULL) { \
-            reply = redisCommand(rcontext, "AUTH %s %s", user, password); \
-        } else { \
-            reply = redisCommand(rcontext, "AUTH %s", password); \
-        } \
-        \
-        if ((rcontext->err) || \
-            (reply == NULL) || \
-            (reply->type != REDIS_REPLY_STATUS) || \
-            (strcmp(reply->str, "OK") != 0)) { \
-            if (rcontext->err) { \
-                REDIS_LOG_ERROR(ctx, \
-                    message1 " (error=%d, " message2 "): %s", \
-                    rcontext->err, ##__VA_ARGS__, rcontext->errstr); \
-            } else if ((reply != NULL) && \
-                       ((reply->type == REDIS_REPLY_ERROR) || \
-                        (reply->type == REDIS_REPLY_STATUS) || \
-                        (reply->type == REDIS_REPLY_STRING))) { \
-                REDIS_LOG_ERROR(ctx, \
-                    message1 " (error=%d, " message2 "): %s", \
-                    reply->type, ##__VA_ARGS__, reply->str); \
-            } else { \
-                REDIS_LOG_ERROR(ctx, \
-                    message1 " (" message2 ")", \
-                    ##__VA_ARGS__); \
-            } \
+        if (db->tls_ssl_ctx != NULL && \
+            !secure_rcontext(ctx, rcontext, db->tls_ssl_ctx, db->tls_sni)) { \
+            REDIS_LOG_ERROR(ctx, \
+                message1 " (error=%d, " message2 "): %s", \
+                rcontext->err, ##__VA_ARGS__, HIREDIS_ERRSTR(rcontext)); \
             redisFree(rcontext); \
             rcontext = NULL; \
         } \
-         \
-        if (reply != NULL) {  \
-            freeReplyObject(reply);  \
+    } while (0)
+#else
+#define REDIS_TLS(ctx, rcontext, db, message1, message2, ...)
+#endif
+
+#define REDIS_BLESS_CONTEXT(ctx, rcontext, db, message1, message2, ...) \
+    do { \
+        REDIS_TLS(ctx, rcontext, db, message1, message2, ##__VA_ARGS__); \
+        \
+        if (rcontext != NULL) { \
+            redisReply *reply = NULL; \
+            \
+            if (db->protocol == REDIS_PROTOCOL_DEFAULT) { \
+                if (db->password != NULL) { \
+                    if (db->user != NULL) { \
+                        reply = redisCommand(rcontext, "AUTH %s %s", db->user, db->password); \
+                    } else { \
+                        reply = redisCommand(rcontext, "AUTH %s", db->password); \
+                    } \
+                    \
+                    if ((rcontext->err) || \
+                        (reply == NULL) || \
+                        (reply->type != REDIS_REPLY_STATUS) || \
+                        (strcmp(reply->str, "OK") != 0)) { \
+                        REDIS_LOG_ERROR(ctx, \
+                            message1 " (error=%d, " message2 "): %s", \
+                            rcontext->err, ##__VA_ARGS__, HIREDIS_ERRSTR(rcontext, reply)); \
+                        redisFree(rcontext); \
+                        rcontext = NULL; \
+                    } \
+                } \
+            } else { \
+                if (db->password != NULL) { \
+                    reply = redisCommand(rcontext, "HELLO %d AUTH %s %s", \
+                        db->protocol, (db->user != NULL) ? db->user : "default", db->password); \
+                } else { \
+                    reply = redisCommand(rcontext, "HELLO %d", db->protocol); \
+                } \
+                \
+                if ((rcontext->err) || \
+                    (reply == NULL) || \
+                    (reply->type != REDIS_REPLY_ARRAY && \
+                     RESP3_SWITCH(reply->type != REDIS_REPLY_MAP, 1)) \
+                   ) { \
+                    REDIS_LOG_ERROR(ctx, \
+                        message1 " (error=%d, " message2 "): %s", \
+                        rcontext->err, ##__VA_ARGS__, HIREDIS_ERRSTR(rcontext, reply)); \
+                    redisFree(rcontext); \
+                    rcontext = NULL; \
+                } \
+            } \
+            \
+            if (reply != NULL) {  \
+                freeReplyObject(reply);  \
+            } \
         } \
     } while (0)
 
@@ -406,9 +484,12 @@ void free_redis_context(redis_context_t *context);
 struct vmod_redis_db *new_vmod_redis_db(
     vcl_state_t *config, const char *name, struct timeval connection_timeout,
     unsigned connection_ttl, struct timeval command_timeout, unsigned max_command_retries,
-    unsigned shared_connections, unsigned max_connections, const char *user,
-    const char *password, unsigned sickness_ttl, unsigned ignore_slaves,
-    unsigned clustered, unsigned max_cluster_hops);
+    unsigned shared_connections, unsigned max_connections, enum REDIS_PROTOCOL protocol,
+#ifdef TLS_ENABLED
+    SSL_CTX *tls_ssl_ctx, const char *tls_sni,
+#endif
+    const char *user, const char *password, unsigned sickness_ttl,
+    unsigned ignore_slaves, unsigned clustered, unsigned max_cluster_hops);
 void free_vmod_redis_db(struct vmod_redis_db *db);
 
 task_state_t *new_task_state();
@@ -430,5 +511,13 @@ redisReply *redis_execute(
 
 redis_server_t * unsafe_add_redis_server(
     VRT_CTX, struct vmod_redis_db *db, const char *location, enum REDIS_SERVER_ROLE role);
+
+#ifdef TLS_ENABLED
+SSL_CTX *new_SSL_CTX(
+    VRT_CTX, const char *cafile, const char *capath, const char *certfile,
+    const char *keyfile);
+unsigned secure_rcontext(
+    VRT_CTX, redisContext *rcontext, SSL_CTX *ssl_ctx, const char *sni);
+#endif
 
 #endif

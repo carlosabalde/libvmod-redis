@@ -41,6 +41,13 @@ import redis;
         INT period=60,
         INT connection_timeout=500,
         INT command_timeout=0,
+        ENUM { RESP2, RESP3, default } protocol="default",
+        BOOL tls=false,
+        STRING tls_cafile="",
+        STRING tls_capath="",
+        STRING tls_certfile="",
+        STRING tls_keyfile="",
+        STRING tls_sni="",
         STRING password="")
 
     ##
@@ -73,6 +80,13 @@ import redis;
         INT max_command_retries=0,
         BOOL shared_connections=true,
         INT max_connections=128,
+        ENUM { RESP2, RESP3, default } protocol="default",
+        BOOL tls=false,
+        STRING tls_cafile="",
+        STRING tls_capath="",
+        STRING tls_certfile="",
+        STRING tls_keyfile="",
+        STRING tls_sni="",
         STRING user="",
         STRING password="",
         INT sickness_ttl=60,
@@ -96,6 +110,8 @@ import redis;
     Method BOOL .reply_is_nil()
     Method BOOL .reply_is_status()
     Method BOOL .reply_is_integer()
+    Method BOOL .reply_is_boolean()
+    Method BOOL .reply_is_double()
     Method BOOL .reply_is_string()
     Method BOOL .reply_is_array()
 
@@ -104,6 +120,8 @@ import redis;
     Method STRING .get_error_reply()
     Method STRING .get_status_reply()
     Method INT .get_integer_reply()
+    Method BOOL .get_boolean_reply()
+    Method REAL .get_double_reply()
     Method STRING .get_string_reply()
 
     Method INT .get_array_reply_length()
@@ -111,6 +129,8 @@ import redis;
     Method BOOL .array_reply_is_nil(INT index)
     Method BOOL .array_reply_is_status(INT index)
     Method BOOL .array_reply_is_integer(INT index)
+    Method BOOL .array_reply_is_boolean(INT index)
+    Method BOOL .array_reply_is_double(INT index)
     Method BOOL .array_reply_is_string(INT index)
     Method BOOL .array_reply_is_array(INT index)
     Method STRING .get_array_reply_value(INT index)

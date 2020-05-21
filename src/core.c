@@ -9,6 +9,11 @@
 #include <hiredis/hiredis.h>
 #include <arpa/inet.h>
 
+#ifdef TLS_ENABLED
+#include <hiredis/hiredis_ssl.h>
+#include <openssl/ssl.h>
+#endif
+
 #include "vrt.h"
 #include "cache/cache.h"
 
@@ -206,9 +211,12 @@ struct vmod_redis_db *
 new_vmod_redis_db(
     vcl_state_t *config, const char *name, struct timeval connection_timeout,
     unsigned connection_ttl, struct timeval command_timeout, unsigned max_command_retries,
-    unsigned shared_connections, unsigned max_connections, const char *user,
-    const char *password, unsigned sickness_ttl, unsigned ignore_slaves,
-    unsigned clustered, unsigned max_cluster_hops)
+    unsigned shared_connections, unsigned max_connections, enum REDIS_PROTOCOL protocol,
+#ifdef TLS_ENABLED
+    SSL_CTX *tls_ssl_ctx, const char *tls_sni,
+#endif
+    const char *user, const char *password, unsigned sickness_ttl,
+    unsigned ignore_slaves, unsigned clustered, unsigned max_cluster_hops)
 {
     struct vmod_redis_db *result;
     ALLOC_OBJ(result, VMOD_REDIS_DATABASE_MAGIC);
@@ -232,6 +240,16 @@ new_vmod_redis_db(
     result->max_command_retries = max_command_retries;
     result->shared_connections = shared_connections;
     result->max_connections = max_connections;
+    result->protocol = protocol;
+#ifdef TLS_ENABLED
+    result->tls_ssl_ctx = tls_ssl_ctx;
+    if (strlen(tls_sni) > 0) {
+        result->tls_sni = strdup(tls_sni);
+        AN(result->tls_sni);
+    } else {
+        result->tls_sni = NULL;
+    }
+#endif
     if (strlen(user) > 0) {
         result->user = strdup(user);
         AN(result->user);
@@ -301,6 +319,17 @@ free_vmod_redis_db(struct vmod_redis_db *db)
     db->max_command_retries = 0;
     db->shared_connections = 0;
     db->max_connections = 0;
+    db->protocol = REDIS_PROTOCOL_DEFAULT;
+#ifdef TLS_ENABLED
+    if (db->tls_ssl_ctx != NULL) {
+        SSL_CTX_free(db->tls_ssl_ctx);
+        db->tls_ssl_ctx = NULL;
+    }
+    if (db->tls_sni != NULL) {
+        free((void *) db->tls_sni);
+        db->tls_sni = NULL;
+    }
+#endif
     if (db->user != NULL) {
         free((void *) db->user);
         db->user = NULL;
@@ -402,6 +431,15 @@ new_vcl_state()
     result->sentinels.period = 0;
     result->sentinels.connection_timeout = (struct timeval){ 0 };
     result->sentinels.command_timeout = (struct timeval){ 0 };
+    result->sentinels.protocol = REDIS_PROTOCOL_DEFAULT;
+#ifdef TLS_ENABLED
+    result->sentinels.tls = 0;
+    result->sentinels.tls_cafile = NULL;
+    result->sentinels.tls_capath = NULL;
+    result->sentinels.tls_certfile = NULL;
+    result->sentinels.tls_keyfile = NULL;
+    result->sentinels.tls_sni = NULL;
+#endif
     result->sentinels.password = NULL;
     result->sentinels.thread = 0;
     result->sentinels.active = 0;
@@ -438,6 +476,30 @@ free_vcl_state(vcl_state_t *priv)
     priv->sentinels.period = 0;
     priv->sentinels.connection_timeout = (struct timeval){ 0 };
     priv->sentinels.command_timeout = (struct timeval){ 0 };
+    priv->sentinels.protocol = REDIS_PROTOCOL_DEFAULT;
+#ifdef TLS_ENABLED
+    priv->sentinels.tls = 0;
+    if (priv->sentinels.tls_cafile != NULL) {
+        free((void *) priv->sentinels.tls_cafile);
+        priv->sentinels.tls_cafile = NULL;
+    }
+    if (priv->sentinels.tls_capath != NULL) {
+        free((void *) priv->sentinels.tls_capath);
+        priv->sentinels.tls_capath = NULL;
+    }
+    if (priv->sentinels.tls_certfile != NULL) {
+        free((void *) priv->sentinels.tls_certfile);
+        priv->sentinels.tls_certfile = NULL;
+    }
+    if (priv->sentinels.tls_keyfile != NULL) {
+        free((void *) priv->sentinels.tls_keyfile);
+        priv->sentinels.tls_keyfile = NULL;
+    }
+    if (priv->sentinels.tls_sni != NULL) {
+        free((void *) priv->sentinels.tls_sni);
+        priv->sentinels.tls_sni = NULL;
+    }
+#endif
     if (priv->sentinels.password != NULL) {
         free((void *) priv->sentinels.password);
         priv->sentinels.password = NULL;
@@ -586,15 +648,12 @@ redis_execute(
                 }
 
                 // Log failed executions.
-                if (context->rcontext->err) {
+                if (result == NULL) {
                     REDIS_LOG_ERROR(ctx,
-                        "Failed to execute command (command=%s, error=%d, db=%s, server=%s): %s",
-                        argv[0], context->rcontext->err, db->name,
-                        context->server->location.raw, context->rcontext->errstr);
-                } else if (result == NULL) {
-                    REDIS_LOG_ERROR(ctx,
-                        "Failed to execute command (command=%s, db=%s, server=%s)",
-                        argv[0], db->name, context->server->location.raw);
+                        "Failed to execute command (error=%d, command=%s, db=%s, server=%s): %s",
+                        context->rcontext->err, argv[0], db->name,
+                        context->server->location.raw,
+                        HIREDIS_ERRSTR(context->rcontext, result));
                 }
     unlock:
                 // Release context.
@@ -759,6 +818,97 @@ unsafe_add_redis_server(
     return result;
 }
 
+#ifdef TLS_ENABLED
+SSL_CTX *
+new_SSL_CTX(
+    VRT_CTX, const char *cafile, const char *capath, const char *certfile,
+    const char *keyfile)
+{
+    SSL_CTX *result = SSL_CTX_new(SSLv23_client_method());
+    if (result == NULL) {
+        REDIS_LOG_ERROR(ctx,
+            "Failed to secure connection: %s",
+            "failed to create SSL context");
+        return NULL;
+    }
+
+    SSL_CTX_set_options(result, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
+
+    SSL_CTX_set_verify(result, SSL_VERIFY_PEER, NULL);
+
+    if (cafile != NULL || capath != NULL) {
+        if (!SSL_CTX_load_verify_locations(result, cafile, capath)) {
+            REDIS_LOG_ERROR(ctx,
+                "Failed to secure connection: %s",
+                "invalid CA certificates");
+            SSL_CTX_free(result);
+            return NULL;
+        }
+    }
+
+    if (certfile != NULL && keyfile != NULL) {
+        if (!SSL_CTX_use_certificate_chain_file(result, certfile)) {
+            REDIS_LOG_ERROR(ctx,
+                "Failed to secure connection: %s",
+                "invalid client certificate");
+            SSL_CTX_free(result);
+            return NULL;
+        }
+        if (!SSL_CTX_use_PrivateKey_file(result, keyfile, SSL_FILETYPE_PEM)) {
+            REDIS_LOG_ERROR(ctx,
+                "Failed to secure connection: %s",
+                "invalid client key");
+            SSL_CTX_free(result);
+            return NULL;
+        }
+    } else if (certfile != NULL || keyfile != NULL) {
+        REDIS_LOG_ERROR(ctx,
+            "Failed to secure connection: %s",
+            "client certificate and key must be specified together");
+        SSL_CTX_free(result);
+        return NULL;
+    }
+
+    return result;
+}
+
+unsigned
+secure_rcontext(
+    VRT_CTX, redisContext *rcontext, SSL_CTX *ssl_ctx, const char *sni)
+{
+    AN(ssl_ctx);
+
+    SSL *ssl = SSL_new(ssl_ctx);
+    if (ssl == NULL) {
+        REDIS_LOG_ERROR(ctx,
+            "Failed to secure connection: %s",
+            "failed to create SSL instance");
+        return 0;
+    }
+
+    if (sni != NULL) {
+        if (!SSL_set_tlsext_host_name(ssl, sni)) {
+            REDIS_LOG_ERROR(ctx,
+                "Failed to secure connection: %s",
+                "failed to set SNI");
+            SSL_free(ssl);
+            return 0;
+        }
+    }
+
+    if (redisInitiateSSL(rcontext, ssl) != REDIS_OK) {
+        REDIS_LOG_ERROR(ctx,
+            "Failed to secure connection (error=%d): %s",
+            rcontext->err, HIREDIS_ERRSTR(rcontext));
+        // Dot not 'SSL_free(ssl)'! This will be handled by hiredis when
+        // releasing the connection.
+        return 0;
+    }
+
+    return 1;
+}
+#endif
+
 /******************************************************************************
  * UTILITIES.
  *****************************************************************************/
@@ -815,16 +965,17 @@ new_rcontext(
     if (result->err) {
         REDIS_LOG_ERROR(ctx,
             "Failed to establish connection (error=%d, db=%s, server=%s): %s",
-            result->err, server->db->name, server->location.raw, result->errstr);
+            result->err, server->db->name, server->location.raw,
+            HIREDIS_ERRSTR(result));
         redisFree(result);
         result = NULL;
     }
 
-    // Submit AUTH command.
-    if ((result != NULL) && (server->db->password != NULL)) {
-        REDIS_AUTH(
-            ctx, result, server->db->user, server->db->password,
-            "Failed to authenticate connection",
+    // Optionally setup TLS & submit AUTH / HELLO command.
+    if (result != NULL) {
+        REDIS_BLESS_CONTEXT(
+            ctx, result, server->db,
+            "Failed to initialize connection",
             "db=%s, server=%s",
             server->db->name, server->location.raw);
     }
@@ -908,8 +1059,9 @@ unsafe_discover_redis_server_role(VRT_CTX, redis_server_t *server)
             }
         } else {
             REDIS_LOG_ERROR(ctx,
-                "Failed to execute role discovery command (db=%s, server=%s)",
-                server->db->name, server->location.raw);
+                "Failed to execute role discovery command (error=%d, db=%s, server=%s): %s",
+                rcontext, server->db->name, server->location.raw,
+                HIREDIS_ERRSTR(rcontext, reply));
         }
 
         // Release reply.
@@ -920,7 +1072,8 @@ unsafe_discover_redis_server_role(VRT_CTX, redis_server_t *server)
         if (rcontext != NULL) {
             REDIS_LOG_ERROR(ctx,
                 "Failed to establish role discovery connection (error=%d, db=%s, server=%s): %s",
-                rcontext->err, server->db->name, server->location.raw, rcontext->errstr);
+                rcontext->err, server->db->name, server->location.raw,
+                HIREDIS_ERRSTR(rcontext));
         } else {
             REDIS_LOG_ERROR(ctx,
                 "Failed to establish role discovery connection (db=%s, server=%s)",

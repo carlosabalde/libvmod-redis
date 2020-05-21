@@ -13,6 +13,13 @@
 #include "cache/cache.h"
 #include "vcc_if.h"
 
+#ifdef TLS_ENABLED
+#include <openssl/ssl.h>
+#if HAVE_DECL_VSSLH_STATUS == 1
+#include <vsslh.h>
+#endif
+#endif
+
 #include "cluster.h"
 #include "core.h"
 #include "sentinel.h"
@@ -24,6 +31,8 @@ static task_state_t *get_task_state(VRT_CTX, unsigned flush);
 static void flush_task_state(task_state_t *state);
 
 static enum REDIS_SERVER_ROLE type2role(const char *type);
+
+static enum REDIS_PROTOCOL parse_protocol(VCL_ENUM protocol);
 
 static const char *get_reply(VRT_CTX, redisReply *reply);
 
@@ -56,6 +65,19 @@ handle_vcl_load_event(VRT_CTX, struct vmod_priv *vcl_priv)
     // Initialize configuration in the local VCL data structure.
     vcl_priv->priv = new_vcl_state();
     vcl_priv->free = (vmod_priv_free_f *)free_vcl_state;
+
+#ifdef TLS_ENABLED
+    // Ensure OpenSSL global state is initialized only once.
+#if HAVE_DECL_VSSLH_STATUS == 1
+    AN(VSSLH_status());
+#else
+    static int openssl_initialized = 0;
+    if (!openssl_initialized) {
+        openssl_initialized = 1;
+        SSL_library_init();
+    }
+#endif
+#endif
 
     // Done!
     return 0;
@@ -335,10 +357,33 @@ vmod_subnets(VRT_CTX, struct vmod_priv *vcl_priv, VCL_STRING masks)
 VCL_VOID
 vmod_sentinels(
     VRT_CTX, struct vmod_priv *vcl_priv, VCL_STRING locations, VCL_INT period,
-    VCL_INT connection_timeout, VCL_INT command_timeout, VCL_STRING password)
+    VCL_INT connection_timeout, VCL_INT command_timeout, VCL_ENUM protocol,
+    VCL_BOOL tls, VCL_STRING tls_cafile, VCL_STRING tls_capath,
+    VCL_STRING tls_certfile, VCL_STRING tls_keyfile, VCL_STRING tls_sni,
+    VCL_STRING password)
 {
     // Initializations.
     vcl_state_t *config = vcl_priv->priv;
+
+#ifndef RESP3_ENABLED
+    // Abort if RESP3 is not available.
+    if (strcmp(protocol, "RESP3") == 0) {
+        REDIS_LOG_ERROR(ctx,
+            "%s is not supported",
+            "RESP3");
+        return;
+    }
+#endif
+
+#ifndef TLS_ENABLED
+    // Abort if TLS is not enabled.
+    if (tls) {
+        REDIS_LOG_ERROR(ctx,
+            "%s is not supported",
+            "TLS");
+        return;
+    }
+#endif
 
     // Get configuration lock.
     Lck_Lock(&config->mutex);
@@ -366,6 +411,30 @@ vmod_sentinels(
                     command_timeout / 1000;
                 config->sentinels.command_timeout.tv_usec =
                     (command_timeout % 1000) * 1000;
+                config->sentinels.protocol = parse_protocol(protocol);
+#ifdef TLS_ENABLED
+                config->sentinels.tls = tls;
+                if ((tls_cafile != NULL) && (strlen(tls_cafile) > 0)) {
+                    config->sentinels.tls_cafile = strdup(tls_cafile);
+                    AN(config->sentinels.tls_cafile);
+                }
+                if ((tls_capath != NULL) && (strlen(tls_capath) > 0)) {
+                    config->sentinels.tls_capath = strdup(tls_capath);
+                    AN(config->sentinels.tls_capath);
+                }
+                if ((tls_certfile != NULL) && (strlen(tls_certfile) > 0)) {
+                    config->sentinels.tls_certfile = strdup(tls_certfile);
+                    AN(config->sentinels.tls_certfile);
+                }
+                if ((tls_keyfile != NULL) && (strlen(tls_keyfile) > 0)) {
+                    config->sentinels.tls_keyfile = strdup(tls_keyfile);
+                    AN(config->sentinels.tls_keyfile);
+                }
+                if ((tls_sni != NULL) && (strlen(tls_sni) > 0)) {
+                    config->sentinels.tls_sni = strdup(tls_sni);
+                    AN(config->sentinels.tls_sni);
+                }
+#endif
                 if ((password != NULL) && (strlen(password) > 0)) {
                     config->sentinels.password = strdup(password);
                     AN(config->sentinels.password);
@@ -395,9 +464,12 @@ vmod_sentinels(
 VCL_VOID
 vmod_db__init(
     VRT_CTX, struct vmod_redis_db **db, const char *vcl_name, struct vmod_priv *vcl_priv,
-    VCL_STRING location, VCL_ENUM type, VCL_INT connection_timeout, VCL_INT connection_ttl,
-    VCL_INT command_timeout, VCL_INT max_command_retries, VCL_BOOL shared_connections,
-    VCL_INT max_connections, VCL_STRING user, VCL_STRING password, VCL_INT sickness_ttl,
+    VCL_STRING location, VCL_ENUM type, VCL_INT connection_timeout,
+    VCL_INT connection_ttl, VCL_INT command_timeout, VCL_INT max_command_retries,
+    VCL_BOOL shared_connections, VCL_INT max_connections, VCL_ENUM protocol,
+    VCL_BOOL tls, VCL_STRING tls_cafile, VCL_STRING tls_capath,
+    VCL_STRING tls_certfile, VCL_STRING tls_keyfile, VCL_STRING tls_sni,
+    VCL_STRING user, VCL_STRING password, VCL_INT sickness_ttl,
     VCL_BOOL ignore_slaves, VCL_INT max_cluster_hops)
 {
     // Assert input.
@@ -405,12 +477,39 @@ vmod_db__init(
     AN(db);
     AZ(*db);
 
+#ifndef RESP3_ENABLED
+    // Abort if RESP3 is not available.
+    if (strcmp(protocol, "RESP3") == 0) {
+        REDIS_LOG_ERROR(ctx,
+            "%s is not supported",
+            "RESP3");
+        return;
+    }
+#endif
+
+#ifndef TLS_ENABLED
+    // Abort if TLS is not enabled.
+    if (tls) {
+        REDIS_LOG_ERROR(ctx,
+            "%s is not supported",
+            "TLS");
+        return;
+    }
+#endif
+
     // Check input.
     if ((connection_timeout >= 0) &&
         (connection_ttl >= 0) &&
         (command_timeout >= 0) &&
         (max_command_retries >= 0) &&
         (max_connections >= 0) &&
+#ifdef TLS_ENABLED
+        (tls_cafile != NULL) &&
+        (tls_capath != NULL) &&
+        (tls_certfile != NULL) &&
+        (tls_keyfile != NULL) &&
+        (tls_sni != NULL) &&
+#endif
         (user != NULL) &&
         (password != NULL) &&
         (sickness_ttl >= 0) &&
@@ -428,10 +527,30 @@ vmod_db__init(
         enum REDIS_SERVER_ROLE role = type2role(type);
         unsigned clustered = strcmp(type, "cluster") == 0;
 
+#ifdef TLS_ENABLED
+        // Create OpenSSL context.
+        SSL_CTX *tls_ssl_ctx = NULL;
+        if (tls) {
+            tls_ssl_ctx = new_SSL_CTX(
+                ctx,
+                strlen(tls_cafile) > 0 ? tls_cafile : NULL,
+                strlen(tls_capath) > 0 ? tls_capath : NULL,
+                strlen(tls_certfile) > 0 ? tls_certfile : NULL,
+                strlen(tls_keyfile) > 0 ? tls_keyfile : NULL);
+            if (tls_ssl_ctx == NULL) {
+                return;
+            }
+        }
+#endif
+
         // Create new database instance.
         struct vmod_redis_db *instance = new_vmod_redis_db(
             config, vcl_name, connection_timeout_tv, connection_ttl,
             command_timeout_tv, max_command_retries, shared_connections, max_connections,
+            parse_protocol(protocol),
+#ifdef TLS_ENABLED
+            tls_ssl_ctx, tls_sni,
+#endif
             user, password, sickness_ttl, ignore_slaves, clustered, max_cluster_hops);
 
         // Add initial server if provided.
@@ -700,27 +819,50 @@ vmod_db_replied(VRT_CTX, struct vmod_redis_db *db)
  * .reply_is_nil();
  * .reply_is_status();
  * .reply_is_integer();
+ * .reply_is_boolean();
+ * .reply_is_double();
  * .reply_is_string();
  * .reply_is_array();
  *****************************************************************************/
 
-#define VMOD_DB_REPLY_IS_FOO(lower, upper) \
+#define VMOD_DB_REPLY_IS_FOO(foo, condition) \
 VCL_BOOL \
-vmod_db_reply_is_ ## lower(VRT_CTX, struct vmod_redis_db *db) \
+vmod_db_reply_is_ ## foo(VRT_CTX, struct vmod_redis_db *db) \
 { \
     task_state_t *state = get_task_state(ctx, 0); \
     return \
         (state->command.db == db) && \
         (state->command.reply != NULL) && \
-        (state->command.reply->type == REDIS_REPLY_ ## upper); \
+        (condition); \
 }
 
-VMOD_DB_REPLY_IS_FOO(error, ERROR)
-VMOD_DB_REPLY_IS_FOO(nil, NIL)
-VMOD_DB_REPLY_IS_FOO(status, STATUS)
-VMOD_DB_REPLY_IS_FOO(integer, INTEGER)
-VMOD_DB_REPLY_IS_FOO(string, STRING)
-VMOD_DB_REPLY_IS_FOO(array, ARRAY)
+VMOD_DB_REPLY_IS_FOO(
+    error,
+    state->command.reply->type == REDIS_REPLY_ERROR)
+VMOD_DB_REPLY_IS_FOO(
+    nil,
+    state->command.reply->type == REDIS_REPLY_NIL)
+VMOD_DB_REPLY_IS_FOO(
+    status,
+    state->command.reply->type == REDIS_REPLY_STATUS)
+VMOD_DB_REPLY_IS_FOO(
+    integer,
+    state->command.reply->type == REDIS_REPLY_INTEGER)
+VMOD_DB_REPLY_IS_FOO(
+    boolean,
+    RESP3_SWITCH(state->command.reply->type == REDIS_REPLY_BOOL, 0))
+VMOD_DB_REPLY_IS_FOO(
+    double,
+    RESP3_SWITCH(state->command.reply->type == REDIS_REPLY_DOUBLE, 0))
+VMOD_DB_REPLY_IS_FOO(
+    string,
+    state->command.reply->type == REDIS_REPLY_STRING ||
+    RESP3_SWITCH(state->command.reply->type == REDIS_REPLY_VERB, 0))
+VMOD_DB_REPLY_IS_FOO(
+    array,
+    state->command.reply->type == REDIS_REPLY_ARRAY ||
+    RESP3_SWITCH(state->command.reply->type == REDIS_REPLY_MAP, 0) ||
+    RESP3_SWITCH(state->command.reply->type == REDIS_REPLY_SET, 0))
 
 /******************************************************************************
  * .get_reply();
@@ -742,30 +884,52 @@ vmod_db_get_reply(VRT_CTX, struct vmod_redis_db *db)
  * .get_error_reply();
  * .get_status_reply();
  * .get_integer_reply();
+ * .get_boolean_reply();
+ * .get_double_reply();
  * .get_string_reply();
  *****************************************************************************/
 
-VCL_INT
-vmod_db_get_integer_reply(VRT_CTX, struct vmod_redis_db *db)
-{
-    task_state_t *state = get_task_state(ctx, 0);
-    if ((state->command.db == db) &&
-        (state->command.reply != NULL) &&
-        (state->command.reply->type == REDIS_REPLY_INTEGER)) {
-        return state->command.reply->integer;
-    } else {
-        return 0;
-    }
+#define VMOD_DB_GET_FOO_REPLY(type, foo, condition, field, fallback) \
+VCL_ ## type \
+vmod_db_get_ ## foo ## _reply(VRT_CTX, struct vmod_redis_db *db) \
+{ \
+    task_state_t *state = get_task_state(ctx,  0); \
+    if ((state->command.db == db) && \
+        (state->command.reply != NULL) && \
+        (condition)) { \
+        return state->command.reply->field; \
+    } else { \
+        return fallback; \
+    } \
 }
 
-#define VMOD_DB_GET_FOO_REPLY(lower, upper) \
+VMOD_DB_GET_FOO_REPLY(
+    INT,
+    integer,
+    state->command.reply->type == REDIS_REPLY_INTEGER,
+    integer,
+    0)
+VMOD_DB_GET_FOO_REPLY(
+    BOOL,
+    boolean,
+    RESP3_SWITCH(state->command.reply->type == REDIS_REPLY_BOOL, 0),
+    integer,
+    0)
+VMOD_DB_GET_FOO_REPLY(
+    REAL,
+    double,
+    RESP3_SWITCH(state->command.reply->type == REDIS_REPLY_DOUBLE, 0),
+    RESP3_SWITCH(dval, integer),
+    0.0)
+
+#define VMOD_DB_GET_FOO_STRING_REPLY(foo, condition) \
 VCL_STRING \
-vmod_db_get_ ## lower ## _reply(VRT_CTX, struct vmod_redis_db *db) \
+vmod_db_get_ ## foo ## _reply(VRT_CTX, struct vmod_redis_db *db) \
 { \
     task_state_t *state = get_task_state(ctx, 0); \
     if ((state->command.db == db) && \
         (state->command.reply != NULL) && \
-        (state->command.reply->type == REDIS_REPLY_ ## upper)) { \
+        (condition)) { \
         char *result = WS_Copy(ctx->ws, state->command.reply->str, state->command.reply->len + 1); \
         if (result == NULL) { \
             REDIS_LOG_ERROR(ctx, \
@@ -778,9 +942,16 @@ vmod_db_get_ ## lower ## _reply(VRT_CTX, struct vmod_redis_db *db) \
     } \
 }
 
-VMOD_DB_GET_FOO_REPLY(error, ERROR)
-VMOD_DB_GET_FOO_REPLY(status, STATUS)
-VMOD_DB_GET_FOO_REPLY(string, STRING)
+VMOD_DB_GET_FOO_STRING_REPLY(
+    error,
+    state->command.reply->type == REDIS_REPLY_ERROR)
+VMOD_DB_GET_FOO_STRING_REPLY(
+    status,
+    state->command.reply->type == REDIS_REPLY_STATUS)
+VMOD_DB_GET_FOO_STRING_REPLY(
+    string,
+    state->command.reply->type == REDIS_REPLY_STRING ||
+    RESP3_SWITCH(state->command.reply->type == REDIS_REPLY_VERB, 0))
 
 /******************************************************************************
  * .get_array_reply_length();
@@ -792,7 +963,9 @@ vmod_db_get_array_reply_length(VRT_CTX, struct vmod_redis_db *db)
     task_state_t *state = get_task_state(ctx, 0);
     if ((state->command.db == db) &&
         (state->command.reply != NULL) &&
-        (state->command.reply->type == REDIS_REPLY_ARRAY)) {
+        (state->command.reply->type == REDIS_REPLY_ARRAY ||
+         RESP3_SWITCH(state->command.reply->type != REDIS_REPLY_MAP, 0) ||
+         RESP3_SWITCH(state->command.reply->type != REDIS_REPLY_SET, 0))) {
         return state->command.reply->elements;
     } else {
         return 0;
@@ -804,13 +977,15 @@ vmod_db_get_array_reply_length(VRT_CTX, struct vmod_redis_db *db)
  * .array_reply_is_nil();
  * .array_reply_is_status();
  * .array_reply_is_integer();
+ * .array_reply_is_boolean();
+ * .array_reply_is_double();
  * .array_reply_is_string();
  * .array_reply_is_array();
  *****************************************************************************/
 
-#define VMOD_DB_ARRAY_REPLY_IS_FOO(lower, upper) \
+#define VMOD_DB_ARRAY_REPLY_IS_FOO(foo, condition) \
 VCL_BOOL \
-vmod_db_array_reply_is_ ## lower(VRT_CTX, struct vmod_redis_db *db, VCL_INT index) \
+vmod_db_array_reply_is_ ## foo(VRT_CTX, struct vmod_redis_db *db, VCL_INT index) \
 { \
     task_state_t *state = get_task_state(ctx, 0); \
     return \
@@ -818,15 +993,36 @@ vmod_db_array_reply_is_ ## lower(VRT_CTX, struct vmod_redis_db *db, VCL_INT inde
         (state->command.reply != NULL) && \
         (state->command.reply->type == REDIS_REPLY_ARRAY) && \
         (index < state->command.reply->elements) && \
-        (state->command.reply->element[index]->type == REDIS_REPLY_ ## upper); \
+        (condition); \
 }
 
-VMOD_DB_ARRAY_REPLY_IS_FOO(error, ERROR)
-VMOD_DB_ARRAY_REPLY_IS_FOO(nil, NIL)
-VMOD_DB_ARRAY_REPLY_IS_FOO(status, STATUS)
-VMOD_DB_ARRAY_REPLY_IS_FOO(integer, INTEGER)
-VMOD_DB_ARRAY_REPLY_IS_FOO(string, STRING)
-VMOD_DB_ARRAY_REPLY_IS_FOO(array, ARRAY)
+VMOD_DB_ARRAY_REPLY_IS_FOO(
+    error,
+    state->command.reply->element[index]->type == REDIS_REPLY_ERROR)
+VMOD_DB_ARRAY_REPLY_IS_FOO(
+    nil,
+    state->command.reply->element[index]->type == REDIS_REPLY_NIL)
+VMOD_DB_ARRAY_REPLY_IS_FOO(
+    status,
+    state->command.reply->element[index]->type == REDIS_REPLY_STATUS)
+VMOD_DB_ARRAY_REPLY_IS_FOO(
+    integer,
+    state->command.reply->element[index]->type == REDIS_REPLY_INTEGER)
+VMOD_DB_ARRAY_REPLY_IS_FOO(
+    boolean,
+    RESP3_SWITCH(state->command.reply->element[index]->type == REDIS_REPLY_BOOL, 0))
+VMOD_DB_ARRAY_REPLY_IS_FOO(
+    double,
+    RESP3_SWITCH(state->command.reply->element[index]->type == REDIS_REPLY_DOUBLE, 0))
+VMOD_DB_ARRAY_REPLY_IS_FOO(
+    string,
+    state->command.reply->element[index]->type == REDIS_REPLY_STRING ||
+    RESP3_SWITCH(state->command.reply->element[index]->type == REDIS_REPLY_VERB, 0))
+VMOD_DB_ARRAY_REPLY_IS_FOO(
+    array,
+    state->command.reply->element[index]->type == REDIS_REPLY_ARRAY ||
+    RESP3_SWITCH(state->command.reply->element[index]->type == REDIS_REPLY_MAP, 0) ||
+    RESP3_SWITCH(state->command.reply->element[index]->type == REDIS_REPLY_SET, 0))
 
 /******************************************************************************
  * .get_array_reply_value();
@@ -838,7 +1034,9 @@ vmod_db_get_array_reply_value(VRT_CTX, struct vmod_redis_db *db, VCL_INT index)
     task_state_t *state = get_task_state(ctx, 0);
     if ((state->command.db == db) &&
         (state->command.reply != NULL) &&
-        (state->command.reply->type == REDIS_REPLY_ARRAY) &&
+        (state->command.reply->type == REDIS_REPLY_ARRAY ||
+         RESP3_SWITCH(state->command.reply->type == REDIS_REPLY_MAP, 0) ||
+         RESP3_SWITCH(state->command.reply->type == REDIS_REPLY_SET, 0)) &&
         (index < state->command.reply->elements)) {
         return get_reply(ctx, state->command.reply->element[index]);
     } else {
@@ -1095,6 +1293,12 @@ VMOD_PROXIED_METHOD(
     BOOL, 0, reply_is_integer,
     )
 VMOD_PROXIED_METHOD(
+    BOOL, 0, reply_is_boolean,
+    )
+VMOD_PROXIED_METHOD(
+    BOOL, 0, reply_is_double,
+    )
+VMOD_PROXIED_METHOD(
     BOOL, 0, reply_is_string,
     )
 VMOD_PROXIED_METHOD(
@@ -1111,6 +1315,12 @@ VMOD_PROXIED_METHOD(
     )
 VMOD_PROXIED_METHOD(
     INT, 0, get_integer_reply,
+    )
+VMOD_PROXIED_METHOD(
+    BOOL, 0, get_boolean_reply,
+    )
+VMOD_PROXIED_METHOD(
+    REAL, 0, get_double_reply,
     )
 VMOD_PROXIED_METHOD(
     STRING, NULL, get_string_reply,
@@ -1132,6 +1342,14 @@ VMOD_PROXIED_METHOD(
     VCL_INT index)
 VMOD_PROXIED_METHOD(
     BOOL, 0, array_reply_is_integer,
+    _COMMA_ index,
+    VCL_INT index)
+VMOD_PROXIED_METHOD(
+    BOOL, 0, array_reply_is_boolean,
+    _COMMA_ index,
+    VCL_INT index)
+VMOD_PROXIED_METHOD(
+    BOOL, 0, array_reply_is_double,
     _COMMA_ index,
     VCL_INT index)
 VMOD_PROXIED_METHOD(
@@ -1217,6 +1435,22 @@ type2role(const char *type)
     return result;
 }
 
+static enum REDIS_PROTOCOL
+parse_protocol(VCL_ENUM protocol)
+{
+    enum REDIS_PROTOCOL result;
+    if (strcmp(protocol, "default") == 0) {
+        result = REDIS_PROTOCOL_DEFAULT;
+    } else if (strcmp(protocol, "RESP2") == 0) {
+        result = REDIS_PROTOCOL_RESP2;
+    } else if (strcmp(protocol, "RESP3") == 0) {
+        result = REDIS_PROTOCOL_RESP3;
+    } else {
+        WRONG("Invalid protocol value.");
+    }
+    return result;
+}
+
 static const char *
 get_reply(VRT_CTX, redisReply *reply)
 {
@@ -1228,6 +1462,10 @@ get_reply(VRT_CTX, redisReply *reply)
         case REDIS_REPLY_ERROR:
         case REDIS_REPLY_STATUS:
         case REDIS_REPLY_STRING:
+#ifdef RESP3_ENABLED
+        case REDIS_REPLY_VERB:
+        case REDIS_REPLY_DOUBLE:
+#endif
             result = WS_Copy(ctx->ws, reply->str, reply->len + 1);
             if (result == NULL) {
                 REDIS_LOG_ERROR(ctx,
@@ -1237,6 +1475,9 @@ get_reply(VRT_CTX, redisReply *reply)
             break;
 
         case REDIS_REPLY_INTEGER:
+#ifdef RESP3_ENABLED
+        case REDIS_REPLY_BOOL:
+#endif
             result = WS_Printf(ctx->ws, "%lld", reply->integer);
             if (result == NULL) {
                 REDIS_LOG_ERROR(ctx,
@@ -1246,7 +1487,11 @@ get_reply(VRT_CTX, redisReply *reply)
             break;
 
         case REDIS_REPLY_ARRAY:
-            // XXX: array replies are *not* supported.
+#ifdef RESP3_ENABLED
+        case REDIS_REPLY_MAP:
+        case REDIS_REPLY_SET:
+#endif
+            // XXX: array, map & set replies are *not* supported.
             result = NULL;
             break;
 

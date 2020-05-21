@@ -87,6 +87,44 @@ AC_CHECK_LIB(
         ev, ev_run, [],
         [AC_MSG_ERROR([libvmod-redis requires libev.])])])
 
+# Check for TLS support: --enable-tls / --disable-tls
+AC_ARG_ENABLE(
+    tls,
+    [
+        AS_HELP_STRING(
+            [--enable-tls],
+            [enable TLS support (default is NO)])
+    ],
+    [],
+    [enable_tls=no])
+AC_MSG_CHECKING([for TLS support])
+if test "x$enable_tls" = xyes; then
+    AC_MSG_RESULT([enabled])
+    AC_DEFINE(
+        [TLS_ENABLED],
+        [1],
+        [TLS enabled])
+
+	AC_CHECK_LIB(
+		crypto, CRYPTO_new_ex_data, [],
+		[AC_MSG_ERROR([libvmod-redis requires crypto. Try --disable-tls.])])
+
+	AC_CHECK_LIB(
+		ssl, SSL_CTX_new, [],
+		[AC_MSG_ERROR([libvmod-redis requires ssl. Try --disable-tls.])])
+
+	AC_CHECK_LIB(
+		hiredis_ssl, redisInitiateSSL, [],
+		[AC_MSG_ERROR([libvmod-redis requires libhiredis_ssl. Try --disable-tls.])])
+
+#	save_CFLAGS="${CFLAGS}"
+#	CFLAGS="${CFLAGS} ${VARNISHAPI_CFLAGS}"
+#	AC_CHECK_DECLS([VSSLH_status], [], [], [[#include <vsslh.h>]])
+#	CFLAGS="${save_CFLAGS}"
+else
+    AC_MSG_RESULT([disabled])
+fi
+
 AC_CONFIG_FILES([
 	Makefile
 	src/Makefile

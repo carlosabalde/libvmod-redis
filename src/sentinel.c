@@ -10,6 +10,11 @@
 #include <hiredis/adapters/libev.h>
 #include <arpa/inet.h>
 
+#ifdef TLS_ENABLED
+#include <hiredis/hiredis_ssl.h>
+#include <openssl/ssl.h>
+#endif
+
 #include "vrt.h"
 #include "cache/cache.h"
 
@@ -70,6 +75,11 @@ struct state {
     unsigned period;
     struct timeval connection_timeout;
     struct timeval command_timeout;
+    enum REDIS_PROTOCOL protocol;
+#ifdef TLS_ENABLED
+    SSL_CTX *tls_ssl_ctx;
+    const char *tls_sni;
+#endif
     const char *password;
 
     // Timestamps.
@@ -84,7 +94,11 @@ static void *sentinel_loop(void *object);
 
 static struct state *new_state(
     vcl_state_t *config, unsigned period, struct timeval connection_timeout,
-    struct timeval command_timeout, const char *password);
+    struct timeval command_timeout, enum REDIS_PROTOCOL protocol,
+#ifdef TLS_ENABLED
+    SSL_CTX *tls_ssl_ctx, const char *tls_sni,
+#endif
+    const char *password);
 static void free_state(struct state *state);
 
 static void unsafe_set_locations(struct state *state, const char *locations);
@@ -104,12 +118,33 @@ unsafe_sentinel_start(vcl_state_t *config)
     AZ(config->sentinels.thread);
     AZ(config->sentinels.active);
 
+#ifdef TLS_ENABLED
+    // Create OpenSSL context.
+    SSL_CTX *tls_ssl_ctx = NULL;
+    if (config->sentinels.tls) {
+        tls_ssl_ctx = new_SSL_CTX(
+            NULL,
+            config->sentinels.tls_cafile,
+            config->sentinels.tls_capath,
+            config->sentinels.tls_certfile,
+            config->sentinels.tls_keyfile);
+        if (tls_ssl_ctx == NULL) {
+            return;
+        }
+    }
+#endif
+
     // Try to start new thread and launch initial proactive discovery.
     struct state *state = new_state(
         config,
         config->sentinels.period,
         config->sentinels.connection_timeout,
         config->sentinels.command_timeout,
+        config->sentinels.protocol,
+#ifdef TLS_ENABLED
+        tls_ssl_ctx,
+        config->sentinels.tls_sni,
+#endif
         config->sentinels.password);
     unsafe_set_locations(state, config->sentinels.locations);
     if (!VTAILQ_EMPTY(&state->sentinels)) {
@@ -167,8 +202,9 @@ connectCallback(const redisAsyncContext *context, int status)
         sentinel->context = NULL;
 
         REDIS_LOG_ERROR(NULL,
-            "Failed to establish Sentinel connection (status=%d, sentinel=%s:%d)",
-            status, sentinel->host, sentinel->port);
+            "Failed to establish Sentinel connection (error=%d, status=%d, sentinel=%s:%d): %s",
+            context->err, status, sentinel->host, sentinel->port,
+            HIREDIS_ERRSTR(context));
     }
 }
 
@@ -182,8 +218,9 @@ disconnectCallback(const redisAsyncContext *context, int status)
 
     if (status != REDIS_OK) {
         REDIS_LOG_ERROR(NULL,
-            "Sentinel connection lost (status=%d, sentinel=%s:%d)",
-            status, sentinel->host, sentinel->port);
+            "Sentinel connection lost (error=%d, status=%d, sentinel=%s:%d): %s",
+            context->err, status, sentinel->host, sentinel->port,
+            HIREDIS_ERRSTR(context));
     }
 }
 
@@ -199,8 +236,27 @@ authorizeCallback(redisAsyncContext *context, void *r, void *s)
         reply->type != REDIS_REPLY_STATUS ||
         strcmp(reply->str, "OK") != 0) {
         REDIS_LOG_ERROR(NULL,
-            "Failed to authenticate Sentinel connection (sentinel=%s:%d)",
-            sentinel->host, sentinel->port);
+            "Failed to authenticate Sentinel connection (error=%d, sentinel=%s:%d): %s",
+            context->err, sentinel->host, sentinel->port,
+            HIREDIS_ERRSTR(context, reply));
+    }
+}
+
+static void
+helloCallback(redisAsyncContext *context, void *r, void *s)
+{
+    redisReply *reply = r;
+
+    struct sentinel *sentinel;
+    CAST_OBJ_NOTNULL(sentinel, s, SENTINEL_MAGIC);
+
+    if (reply == NULL ||
+        (reply->type != REDIS_REPLY_ARRAY &&
+         RESP3_SWITCH(reply->type != REDIS_REPLY_MAP, 1))) {
+        REDIS_LOG_ERROR(NULL,
+            "Failed to negotiate protocol in Sentinel connection (error=%d, sentinel=%s:%d): %s",
+            context->err, sentinel->host, sentinel->port,
+            HIREDIS_ERRSTR(context, reply));
     }
 }
 
@@ -213,7 +269,7 @@ subscribeCallback(redisAsyncContext *context, void *reply, void *s)
     parse_sentinel_notification(sentinel, reply);
 }
 
-static void*
+static void *
 sentinel_loop(void *object)
 {
     // Assertions.
@@ -272,40 +328,69 @@ sentinel_loop(void *object)
             if (isentinel->context == NULL) {
                 isentinel->context = redisAsyncConnect(isentinel->host, isentinel->port);
                 if ((isentinel->context != NULL) && (!isentinel->context->err)) {
-                    isentinel->context->data = isentinel;
-                    redisLibevAttach(loop, isentinel->context);
-                    redisAsyncSetConnectCallback(isentinel->context, connectCallback);
-                    redisAsyncSetDisconnectCallback(isentinel->context, disconnectCallback);
-                    if (state->config->sentinels.password != NULL) {
-                        if (redisAsyncCommand(
-                                isentinel->context, authorizeCallback, isentinel,
-                                "AUTH %s", state->config->sentinels.password) != REDIS_OK) {
-                            redisAsyncFree(isentinel->context);
-                            isentinel->context = NULL;
-                            REDIS_LOG_ERROR(NULL,
-                                "Failed to enqueue asynchronous Sentinel command (sentinel=%s:%d)",
-                                isentinel->host, isentinel->port);
+#ifdef TLS_ENABLED
+                    if (state->tls_ssl_ctx != NULL &&
+                        !secure_rcontext(NULL, &isentinel->context->c, state->tls_ssl_ctx, state->tls_sni)) {
+                        REDIS_LOG_ERROR(NULL,
+                            "Failed to secure asynchronous Sentinel connection (error=%d, sentinel=%s:%d): %s",
+                            isentinel->context->err, isentinel->host, isentinel->port,
+                            HIREDIS_ERRSTR(isentinel->context));
+                        redisAsyncFree(isentinel->context);
+                        isentinel->context = NULL;
+                    }
+#endif
+                    if (isentinel->context != NULL) {
+                        isentinel->context->data = isentinel;
+                        redisLibevAttach(loop, isentinel->context);
+                        redisAsyncSetConnectCallback(isentinel->context, connectCallback);
+                        redisAsyncSetDisconnectCallback(isentinel->context, disconnectCallback);
+                        if (state->password != NULL) {
+                            if (redisAsyncCommand(
+                                    isentinel->context, authorizeCallback, isentinel,
+                                    "AUTH %s", state->password) != REDIS_OK) {
+                                REDIS_LOG_ERROR(NULL,
+                                    "Failed to enqueue asynchronous Sentinel AUTH command (error=%d, sentinel=%s:%d): %s",
+                                    isentinel->host, isentinel->port,
+                                    HIREDIS_ERRSTR(isentinel->context));
+                                redisAsyncFree(isentinel->context);
+                                isentinel->context = NULL;
+                            }
+                        }
+                    }
+                    if (isentinel->context != NULL) {
+                        if (state->protocol != REDIS_PROTOCOL_DEFAULT) {
+                            if (redisAsyncCommand(
+                                    isentinel->context, helloCallback, isentinel,
+                                    "HELLO %d", state->protocol) != REDIS_OK) {
+                                REDIS_LOG_ERROR(NULL,
+                                    "Failed to enqueue asynchronous Sentinel HELLO command (error=%d, sentinel=%s:%d): %s",
+                                    isentinel->host, isentinel->port,
+                                    HIREDIS_ERRSTR(isentinel->context));
+                                redisAsyncFree(isentinel->context);
+                                isentinel->context = NULL;
+                            }
                         }
                     }
                     if (isentinel->context != NULL) {
                         if (redisAsyncCommand(
                                 isentinel->context, subscribeCallback, isentinel,
                                 SUBSCRIPTION_COMMAND) != REDIS_OK) {
+                            REDIS_LOG_ERROR(NULL,
+                                "Failed to enqueue asynchronous Sentinel subscription command (error=%d, sentinel=%s:%d): %s",
+                                isentinel->host, isentinel->port,
+                                HIREDIS_ERRSTR(isentinel->context));
                             redisAsyncFree(isentinel->context);
                             isentinel->context = NULL;
-                            REDIS_LOG_ERROR(NULL,
-                                "Failed to enqueue asynchronous Sentinel command (sentinel=%s:%d)",
-                                isentinel->host, isentinel->port);
                         }
                     }
                 } else {
                     if (isentinel->context != NULL) {
-                        redisAsyncFree(isentinel->context);
-                        isentinel->context = NULL;
                         REDIS_LOG_ERROR(NULL,
                             "Failed to establish Sentinel connection (error=%d, sentinel=%s:%d): %s",
                             isentinel->context->err, isentinel->host,
-                            isentinel->port, isentinel->context->errstr);
+                            isentinel->port, HIREDIS_ERRSTR(isentinel->context));
+                        redisAsyncFree(isentinel->context);
+                        isentinel->context = NULL;
                     } else {
                         REDIS_LOG_ERROR(NULL,
                             "Failed to establish Sentinel connection (sentinel=%s:%d)",
@@ -425,7 +510,11 @@ free_sentinel(struct sentinel *sentinel)
 static struct state *
 new_state(
     vcl_state_t *config, unsigned period, struct timeval connection_timeout,
-    struct timeval command_timeout, const char *password)
+    struct timeval command_timeout, enum REDIS_PROTOCOL protocol,
+#ifdef TLS_ENABLED
+    SSL_CTX *tls_ssl_ctx, const char *tls_sni,
+#endif
+    const char *password)
 {
     struct state *result;
     ALLOC_OBJ(result, STATE_MAGIC);
@@ -437,9 +526,21 @@ new_state(
     result->period = period;
     result->connection_timeout = connection_timeout;
     result->command_timeout = command_timeout;
+    result->protocol = protocol;
+#ifdef TLS_ENABLED
+    result->tls_ssl_ctx = tls_ssl_ctx;
+    if (tls_sni != NULL) {
+        result->tls_sni = strdup(tls_sni);
+        AN(result->tls_sni);
+    } else {
+        result->tls_sni = NULL;
+    }
+#endif
     if (password != NULL) {
         result->password = strdup(password);
         AN(result->password);
+    } else {
+        result->password = NULL;
     }
 
     result->last_change = 0;
@@ -465,6 +566,17 @@ free_state(struct state *state)
     state->period = 0;
     state->connection_timeout = (struct timeval){ 0 };
     state->command_timeout = (struct timeval){ 0 };
+    state->protocol = REDIS_PROTOCOL_DEFAULT;
+#ifdef TLS_ENABLED
+    if (state->tls_ssl_ctx != NULL) {
+        SSL_CTX_free(state->tls_ssl_ctx);
+        state->tls_ssl_ctx = NULL;
+    }
+    if (state->tls_sni != NULL) {
+        free((void *) state->tls_sni);
+        state->tls_sni = NULL;
+    }
+#endif
     if (state->password != NULL) {
         free((void *) state->password);
         state->password = NULL;
@@ -583,7 +695,8 @@ parse_sentinel_notification(struct sentinel *sentinel, redisReply *reply)
 {
     // Check reply format.
     if ((reply != NULL) &&
-        (reply->type == REDIS_REPLY_ARRAY) &&
+        ((reply->type == REDIS_REPLY_ARRAY ||
+          RESP3_SWITCH(reply->type == REDIS_REPLY_PUSH, 0))) &&
         (reply->elements == 4) &&
         (reply->element[0]->type == REDIS_REPLY_STRING) &&
         (strcmp(reply->element[0]->str, "pmessage") == 0) &&
@@ -727,7 +840,8 @@ parse_sentinel_discovery(
         // Check reply contents.
         const char *name, *value;
         for (int i = 0; i < reply->elements; i++) {
-            if (reply->element[i]->type == REDIS_REPLY_ARRAY) {
+            if (reply->element[i]->type == REDIS_REPLY_ARRAY ||
+                RESP3_SWITCH(reply->element[i]->type == REDIS_REPLY_MAP, 0)) {
                 // Initializations.
                 const char *master_name = NULL;
                 const char *host = NULL;
@@ -777,6 +891,10 @@ parse_sentinel_discovery(
                 }
             }
         }
+    } else {
+        REDIS_LOG_ERROR(NULL,
+            "Unexpected Sentinel discovery command reply (type=%d, sentinel=%s:%d)",
+            reply->type, sentinel->host, sentinel->port);
     }
 }
 
@@ -810,10 +928,24 @@ discover_servers(struct state *state)
             REDIS_LOG_ERROR(NULL,
                 "Failed to establish Sentinel connection (error=%d, sentinel=%s:%d): %s",
                 rcontext->err, isentinel->host,
-                isentinel->port, rcontext->errstr);
+                isentinel->port, HIREDIS_ERRSTR(rcontext));
             redisFree(rcontext);
             rcontext = NULL;
         }
+
+#ifdef TLS_ENABLED
+        // Setup TLS.
+        if ((rcontext != NULL) &&
+            (state->tls_ssl_ctx != NULL) &&
+            (!secure_rcontext(NULL, rcontext, state->tls_ssl_ctx, state->tls_sni))) {
+            REDIS_LOG_ERROR(NULL,
+                "Failed to secure Sentinel connection (error=%d, sentinel=%s:%d): %s",
+                rcontext->err, isentinel->host, isentinel->port,
+                HIREDIS_ERRSTR(rcontext));
+            redisFree(rcontext);
+            rcontext = NULL;
+        }
+#endif
 
         // Send 'AUTH' command.
         if ((rcontext != NULL) &&
@@ -823,16 +955,28 @@ discover_servers(struct state *state)
                 (reply == NULL) ||
                 (reply->type != REDIS_REPLY_STATUS) ||
                 (strcmp(reply->str, "OK") != 0)) {
-                if (rcontext->err) {
-                    REDIS_LOG_ERROR(NULL,
-                        "Failed to execute Sentinel AUTH command (error=%d, sentinel=%s:%d): %s",
-                        rcontext->err, isentinel->host,
-                        isentinel->port, rcontext->errstr);
-                } else {
-                    REDIS_LOG_ERROR(NULL,
-                        "Failed to execute Sentinel AUTH command (sentinel=%s:%d)",
-                        isentinel->host, isentinel->port);
-                }
+                REDIS_LOG_ERROR(NULL,
+                    "Failed to execute Sentinel AUTH command (error=%d, sentinel=%s:%d): %s",
+                    rcontext->err, isentinel->host, isentinel->port,
+                    HIREDIS_ERRSTR(rcontext, reply));
+                redisFree(rcontext);
+                rcontext = NULL;
+            }
+        }
+
+        // Send 'HELLO' command.
+        if ((rcontext != NULL) &&
+            (state->protocol != REDIS_PROTOCOL_DEFAULT)) {
+            redisReply *reply = redisCommand(rcontext, "HELLO %d", state->protocol);
+            if ((rcontext->err) ||
+                (reply == NULL) ||
+                (reply->type != REDIS_REPLY_ARRAY &&
+                 RESP3_SWITCH(reply->type != REDIS_REPLY_MAP, 1))
+               ) {
+                REDIS_LOG_ERROR(NULL,
+                    "Failed to execute Sentinel HELLO command (error=%d, sentinel=%s:%d): %s",
+                    rcontext->err, isentinel->host, isentinel->port,
+                    HIREDIS_ERRSTR(rcontext, reply));
                 redisFree(rcontext);
                 rcontext = NULL;
             }
@@ -867,14 +1011,15 @@ discover_servers(struct state *state)
                                 freeReplyObject(reply2);
                             } else {
                                 REDIS_LOG_ERROR(NULL,
-                                    "Failed to execute Sentinel slaves command (master_name=%s, sentinel=%s:%d)",
-                                    master_names[i], isentinel->host, isentinel->port);
+                                    "Failed to execute Sentinel slaves command (error=%s, master_name=%s, sentinel=%s:%d): %s",
+                                    rcontext->err, master_names[i], isentinel->host, isentinel->port,
+                                    HIREDIS_ERRSTR(rcontext));
                             }
                         } else {
                             REDIS_LOG_ERROR(NULL,
                                 "Failed to reuse Sentinel connection (error=%d, sentinel=%s:%d): %s",
                                 rcontext->err, isentinel->host,
-                                isentinel->port, rcontext->errstr);
+                                isentinel->port, HIREDIS_ERRSTR(rcontext));
                             break;
                         }
                     }
@@ -884,8 +1029,9 @@ discover_servers(struct state *state)
                 freeReplyObject(reply1);
             } else {
                 REDIS_LOG_ERROR(NULL,
-                    "Failed to execute Sentinel masters command (sentinel=%s:%d)",
-                    isentinel->host, isentinel->port);
+                    "Failed to execute Sentinel masters command (error=%d, sentinel=%s:%d): %s",
+                    rcontext->err, isentinel->host, isentinel->port,
+                    HIREDIS_ERRSTR(rcontext));
             }
 
             // Release context.
