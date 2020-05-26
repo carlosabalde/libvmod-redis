@@ -281,12 +281,13 @@ COPYRIGHT
 
 See LICENSE for details.
 
-Implementation of the SHA-1 and CRC-16 cryptographic hash functions embedded in this VMOD (required to the optimistic execution of ``EVALSHA`` commands, and to the Redis Cluster slot calculation, respectively) are borrowed from the Redis implementation:
+Public domain implementation of the SHA-1 cryptographic hash function by Steve Reid and embedded in this VMOD (required for the optimistic execution of ``EVALSHA`` commands) has been borrowed from `this project <https://github.com/clibs/sha1/>`_:
 
-* http://download.redis.io/redis-stable/src/sha1.c
-* http://download.redis.io/redis-stable/src/sha1.h
+* https://github.com/clibs/sha1/blob/master/sha1.c
+* https://github.com/clibs/sha1/blob/master/sha1.h
+
+BSD's implementation of the CRC-16 cryptographic hash function by Georges Menie & Salvatore Sanfilippo and embedded in this VMOD (required for the Redis Cluster slot calculation) has been borrowed from the `Redis project <https://redis.io>`_:
+
 * http://download.redis.io/redis-stable/src/crc16.c
-* http://download.redis.io/redis-stable/src/config.h
-* http://download.redis.io/redis-stable/src/solarisfixes.h
 
 Copyright (c) 2014-2020 Carlos Abalde <carlos.abalde@gmail.com>
