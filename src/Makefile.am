@@ -5,11 +5,10 @@ vmod_LTLIBRARIES = libvmod_redis.la
 
 libvmod_redis_la_SOURCES = \
 	crc16.c crc16.h \
-	sha1.c sha1.h sha1_config.h \
+	sha1.c sha1.h \
 	cluster.c cluster.h \
 	core.c core.h \
 	sentinel.c sentinel.h \
-	solarisfixes.h \
 	vmod_redis.c
 
 nodist_libvmod_redis_la_SOURCES = \
