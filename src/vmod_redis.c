@@ -6,13 +6,15 @@
 #include <string.h>
 #include <pthread.h>
 #include <hiredis/hiredis.h>
+#ifdef TLS_ENABLED
+#include <hiredis/hiredis_ssl.h>
+#endif
 #include <arpa/inet.h>
 
 #include "cache/cache.h"
 #include "vcc_redis_if.h"
 
 #ifdef TLS_ENABLED
-#include <openssl/ssl.h>
 #ifdef HAVE_LIBVARNISH_SSLHELPER
 #include <vsslh.h>
 #endif
@@ -61,7 +63,7 @@ handle_vcl_load_event(VRT_CTX, struct vmod_priv *vcl_priv)
     static int openssl_initialized = 0;
     if (!openssl_initialized) {
         openssl_initialized = 1;
-        SSL_library_init();
+        redisInitOpenSSL();
     }
 #endif
 #endif
@@ -513,16 +515,21 @@ vmod_db__init(
         unsigned clustered = type == enum_vmod_redis_cluster;
 
 #ifdef TLS_ENABLED
-        // Create OpenSSL context.
-        SSL_CTX *tls_ssl_ctx = NULL;
+        // Create Redis SSL context.
+        redisSSLContext *tls_ssl_ctx = NULL;
         if (tls) {
-            tls_ssl_ctx = new_SSL_CTX(
-                ctx,
+            redisSSLContextError ssl_error;
+            tls_ssl_ctx = redisCreateSSLContext(
                 strlen(tls_cafile) > 0 ? tls_cafile : NULL,
                 strlen(tls_capath) > 0 ? tls_capath : NULL,
                 strlen(tls_certfile) > 0 ? tls_certfile : NULL,
-                strlen(tls_keyfile) > 0 ? tls_keyfile : NULL);
+                strlen(tls_keyfile) > 0 ? tls_keyfile : NULL,
+                strlen(tls_sni) > 0 ? tls_sni : NULL,
+                &ssl_error);
             if (tls_ssl_ctx == NULL) {
+                REDIS_LOG_ERROR(ctx,
+                    "Failed to create SSL context: %s",
+                    redisSSLContextGetError(ssl_error));
                 return;
             }
         }
@@ -534,7 +541,7 @@ vmod_db__init(
             command_timeout_tv, max_command_retries, shared_connections, max_connections,
             parse_protocol(protocol),
 #ifdef TLS_ENABLED
-            tls_ssl_ctx, tls_sni,
+            tls_ssl_ctx,
 #endif
             user, password, sickness_ttl, ignore_slaves, clustered, max_cluster_hops);
 
