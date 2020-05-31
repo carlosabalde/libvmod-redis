@@ -4,12 +4,11 @@
 #include <syslog.h>
 #include <pthread.h>
 #include <hiredis/hiredis.h>
+#ifdef TLS_ENABLED
+#include <hiredis/hiredis_ssl.h>
+#endif
 #include <netinet/in.h>
 #include <inttypes.h>
-
-#ifdef TLS_ENABLED
-#include <openssl/ssl.h>
-#endif
 
 #include "vqueue.h"
 
@@ -140,8 +139,7 @@ struct vmod_redis_db {
     unsigned max_connections;
     enum REDIS_PROTOCOL protocol;
 #ifdef TLS_ENABLED
-    SSL_CTX *tls_ssl_ctx;
-    const char *tls_sni;
+    redisSSLContext *tls_ssl_ctx;
 #endif
     const char *user;
     const char *password;
@@ -359,7 +357,7 @@ extern vmod_state_t vmod_state;
         HIREDIS_ERRSTR_2(__VA_ARGS__), \
         HIREDIS_ERRSTR_1(__VA_ARGS__))
 
-#if HIREDIS_MAJOR >= 1 && HIREDIS_MINOR >= 0
+#if HIREDIS_MAJOR >= 0 && HIREDIS_MINOR >= 15
 #define RESP3_ENABLED 1
 #define RESP3_SWITCH(a, b) a
 #else
@@ -419,7 +417,7 @@ extern vmod_state_t vmod_state;
 #define REDIS_TLS(ctx, rcontext, db, message1, message2, ...) \
     do { \
         if (db->tls_ssl_ctx != NULL && \
-            !secure_rcontext(ctx, rcontext, db->tls_ssl_ctx, db->tls_sni)) { \
+            redisInitiateSSLWithContext(rcontext, db->tls_ssl_ctx) != REDIS_OK) { \
             REDIS_LOG_ERROR(ctx, \
                 message1 " (error=%d, " message2 "): %s", \
                 rcontext->err, ##__VA_ARGS__, HIREDIS_ERRSTR(rcontext)); \
@@ -497,7 +495,7 @@ struct vmod_redis_db *new_vmod_redis_db(
     unsigned connection_ttl, struct timeval command_timeout, unsigned max_command_retries,
     unsigned shared_connections, unsigned max_connections, enum REDIS_PROTOCOL protocol,
 #ifdef TLS_ENABLED
-    SSL_CTX *tls_ssl_ctx, const char *tls_sni,
+    redisSSLContext *tls_ssl_ctx,
 #endif
     const char *user, const char *password, unsigned sickness_ttl,
     unsigned ignore_slaves, unsigned clustered, unsigned max_cluster_hops);
@@ -523,13 +521,5 @@ redisReply *redis_execute(
 redis_server_t * unsafe_add_redis_server(
     VRT_CTX, struct vmod_redis_db *db, vcl_state_t *config,
     const char *location, enum REDIS_SERVER_ROLE role);
-
-#ifdef TLS_ENABLED
-SSL_CTX *new_SSL_CTX(
-    VRT_CTX, const char *cafile, const char *capath, const char *certfile,
-    const char *keyfile);
-unsigned secure_rcontext(
-    VRT_CTX, redisContext *rcontext, SSL_CTX *ssl_ctx, const char *sni);
-#endif
 
 #endif

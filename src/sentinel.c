@@ -8,14 +8,12 @@
 #include <string.h>
 #include <pthread.h>
 #include <hiredis/hiredis.h>
+#ifdef TLS_ENABLED
+#include <hiredis/hiredis_ssl.h>
+#endif
 #include <hiredis/async.h>
 #include <hiredis/adapters/libev.h>
 #include <arpa/inet.h>
-
-#ifdef TLS_ENABLED
-#include <hiredis/hiredis_ssl.h>
-#include <openssl/ssl.h>
-#endif
 
 #include "cache/cache.h"
 
@@ -78,8 +76,7 @@ struct state {
     struct timeval command_timeout;
     enum REDIS_PROTOCOL protocol;
 #ifdef TLS_ENABLED
-    SSL_CTX *tls_ssl_ctx;
-    const char *tls_sni;
+    redisSSLContext *tls_ssl_ctx;
 #endif
     const char *password;
 
@@ -97,7 +94,7 @@ static struct state *new_state(
     vcl_state_t *config, unsigned period, struct timeval connection_timeout,
     struct timeval command_timeout, enum REDIS_PROTOCOL protocol,
 #ifdef TLS_ENABLED
-    SSL_CTX *tls_ssl_ctx, const char *tls_sni,
+    redisSSLContext *tls_ssl_ctx,
 #endif
     const char *password);
 static void free_state(struct state *state);
@@ -120,16 +117,21 @@ unsafe_sentinel_start(vcl_state_t *config)
     AZ(config->sentinels.active);
 
 #ifdef TLS_ENABLED
-    // Create OpenSSL context.
-    SSL_CTX *tls_ssl_ctx = NULL;
+    // Create Redis SSL context.
+    redisSSLContext *tls_ssl_ctx = NULL;
     if (config->sentinels.tls) {
-        tls_ssl_ctx = new_SSL_CTX(
-            NULL,
+        redisSSLContextError ssl_error;
+        tls_ssl_ctx = redisCreateSSLContext(
             config->sentinels.tls_cafile,
             config->sentinels.tls_capath,
             config->sentinels.tls_certfile,
-            config->sentinels.tls_keyfile);
+            config->sentinels.tls_keyfile,
+            config->sentinels.tls_sni,
+            &ssl_error);
         if (tls_ssl_ctx == NULL) {
+            REDIS_LOG_ERROR(NULL,
+                "Failed to create SSL context: %s",
+                redisSSLContextGetError(ssl_error));
             return;
         }
     }
@@ -144,7 +146,6 @@ unsafe_sentinel_start(vcl_state_t *config)
         config->sentinels.protocol,
 #ifdef TLS_ENABLED
         tls_ssl_ctx,
-        config->sentinels.tls_sni,
 #endif
         config->sentinels.password);
     unsafe_set_locations(state, config->sentinels.locations);
@@ -331,11 +332,11 @@ sentinel_loop(void *object)
                 if ((isentinel->context != NULL) && (!isentinel->context->err)) {
 #ifdef TLS_ENABLED
                     if (state->tls_ssl_ctx != NULL &&
-                        !secure_rcontext(NULL, &isentinel->context->c, state->tls_ssl_ctx, state->tls_sni)) {
+                        redisInitiateSSLWithContext(&isentinel->context->c, state->tls_ssl_ctx) != REDIS_OK) {
                         REDIS_LOG_ERROR(NULL,
                             "Failed to secure asynchronous Sentinel connection (error=%d, sentinel=%s:%d): %s",
-                            isentinel->context->err, isentinel->host, isentinel->port,
-                            HIREDIS_ERRSTR(isentinel->context));
+                            isentinel->context->c.err, isentinel->host, isentinel->port,
+                            HIREDIS_ERRSTR((&isentinel->context->c)));
                         redisAsyncFree(isentinel->context);
                         isentinel->context = NULL;
                     }
@@ -513,7 +514,7 @@ new_state(
     vcl_state_t *config, unsigned period, struct timeval connection_timeout,
     struct timeval command_timeout, enum REDIS_PROTOCOL protocol,
 #ifdef TLS_ENABLED
-    SSL_CTX *tls_ssl_ctx, const char *tls_sni,
+    redisSSLContext *tls_ssl_ctx,
 #endif
     const char *password)
 {
@@ -530,12 +531,6 @@ new_state(
     result->protocol = protocol;
 #ifdef TLS_ENABLED
     result->tls_ssl_ctx = tls_ssl_ctx;
-    if (tls_sni != NULL) {
-        result->tls_sni = strdup(tls_sni);
-        AN(result->tls_sni);
-    } else {
-        result->tls_sni = NULL;
-    }
 #endif
     if (password != NULL) {
         result->password = strdup(password);
@@ -570,12 +565,8 @@ free_state(struct state *state)
     state->protocol = REDIS_PROTOCOL_DEFAULT;
 #ifdef TLS_ENABLED
     if (state->tls_ssl_ctx != NULL) {
-        SSL_CTX_free(state->tls_ssl_ctx);
+        redisFreeSSLContext(state->tls_ssl_ctx);
         state->tls_ssl_ctx = NULL;
-    }
-    if (state->tls_sni != NULL) {
-        free((void *) state->tls_sni);
-        state->tls_sni = NULL;
     }
 #endif
     if (state->password != NULL) {
@@ -938,7 +929,7 @@ discover_servers(struct state *state)
         // Setup TLS.
         if ((rcontext != NULL) &&
             (state->tls_ssl_ctx != NULL) &&
-            (!secure_rcontext(NULL, rcontext, state->tls_ssl_ctx, state->tls_sni))) {
+            (redisInitiateSSLWithContext(rcontext, state->tls_ssl_ctx) != REDIS_OK)) {
             REDIS_LOG_ERROR(NULL,
                 "Failed to secure Sentinel connection (error=%d, sentinel=%s:%d): %s",
                 rcontext->err, isentinel->host, isentinel->port,
