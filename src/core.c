@@ -7,12 +7,10 @@
 #include <pthread.h>
 #include <poll.h>
 #include <hiredis/hiredis.h>
-#include <arpa/inet.h>
-
 #ifdef TLS_ENABLED
 #include <hiredis/hiredis_ssl.h>
-#include <openssl/ssl.h>
 #endif
+#include <arpa/inet.h>
 
 #include "vrt.h"
 #include "cache/cache.h"
@@ -213,7 +211,7 @@ new_vmod_redis_db(
     unsigned connection_ttl, struct timeval command_timeout, unsigned max_command_retries,
     unsigned shared_connections, unsigned max_connections, enum REDIS_PROTOCOL protocol,
 #ifdef TLS_ENABLED
-    SSL_CTX *tls_ssl_ctx, const char *tls_sni,
+    redisSSLContext *tls_ssl_ctx,
 #endif
     const char *user, const char *password, unsigned sickness_ttl,
     unsigned ignore_slaves, unsigned clustered, unsigned max_cluster_hops)
@@ -243,12 +241,6 @@ new_vmod_redis_db(
     result->protocol = protocol;
 #ifdef TLS_ENABLED
     result->tls_ssl_ctx = tls_ssl_ctx;
-    if (strlen(tls_sni) > 0) {
-        result->tls_sni = strdup(tls_sni);
-        AN(result->tls_sni);
-    } else {
-        result->tls_sni = NULL;
-    }
 #endif
     if (strlen(user) > 0) {
         result->user = strdup(user);
@@ -322,12 +314,8 @@ free_vmod_redis_db(struct vmod_redis_db *db)
     db->protocol = REDIS_PROTOCOL_DEFAULT;
 #ifdef TLS_ENABLED
     if (db->tls_ssl_ctx != NULL) {
-        SSL_CTX_free(db->tls_ssl_ctx);
+        redisFreeSSLContext(db->tls_ssl_ctx);
         db->tls_ssl_ctx = NULL;
-    }
-    if (db->tls_sni != NULL) {
-        free((void *) db->tls_sni);
-        db->tls_sni = NULL;
     }
 #endif
     if (db->user != NULL) {
@@ -817,97 +805,6 @@ unsafe_add_redis_server(
     // Done!
     return result;
 }
-
-#ifdef TLS_ENABLED
-SSL_CTX *
-new_SSL_CTX(
-    VRT_CTX, const char *cafile, const char *capath, const char *certfile,
-    const char *keyfile)
-{
-    SSL_CTX *result = SSL_CTX_new(SSLv23_client_method());
-    if (result == NULL) {
-        REDIS_LOG_ERROR(ctx,
-            "Failed to secure connection: %s",
-            "failed to create SSL context");
-        return NULL;
-    }
-
-    SSL_CTX_set_options(result, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
-
-    SSL_CTX_set_verify(result, SSL_VERIFY_PEER, NULL);
-
-    if (cafile != NULL || capath != NULL) {
-        if (!SSL_CTX_load_verify_locations(result, cafile, capath)) {
-            REDIS_LOG_ERROR(ctx,
-                "Failed to secure connection: %s",
-                "invalid CA certificates");
-            SSL_CTX_free(result);
-            return NULL;
-        }
-    }
-
-    if (certfile != NULL && keyfile != NULL) {
-        if (!SSL_CTX_use_certificate_chain_file(result, certfile)) {
-            REDIS_LOG_ERROR(ctx,
-                "Failed to secure connection: %s",
-                "invalid client certificate");
-            SSL_CTX_free(result);
-            return NULL;
-        }
-        if (!SSL_CTX_use_PrivateKey_file(result, keyfile, SSL_FILETYPE_PEM)) {
-            REDIS_LOG_ERROR(ctx,
-                "Failed to secure connection: %s",
-                "invalid client key");
-            SSL_CTX_free(result);
-            return NULL;
-        }
-    } else if (certfile != NULL || keyfile != NULL) {
-        REDIS_LOG_ERROR(ctx,
-            "Failed to secure connection: %s",
-            "client certificate and key must be specified together");
-        SSL_CTX_free(result);
-        return NULL;
-    }
-
-    return result;
-}
-
-unsigned
-secure_rcontext(
-    VRT_CTX, redisContext *rcontext, SSL_CTX *ssl_ctx, const char *sni)
-{
-    AN(ssl_ctx);
-
-    SSL *ssl = SSL_new(ssl_ctx);
-    if (ssl == NULL) {
-        REDIS_LOG_ERROR(ctx,
-            "Failed to secure connection: %s",
-            "failed to create SSL instance");
-        return 0;
-    }
-
-    if (sni != NULL) {
-        if (!SSL_set_tlsext_host_name(ssl, sni)) {
-            REDIS_LOG_ERROR(ctx,
-                "Failed to secure connection: %s",
-                "failed to set SNI");
-            SSL_free(ssl);
-            return 0;
-        }
-    }
-
-    if (redisInitiateSSL(rcontext, ssl) != REDIS_OK) {
-        REDIS_LOG_ERROR(ctx,
-            "Failed to secure connection (error=%d): %s",
-            rcontext->err, HIREDIS_ERRSTR(rcontext));
-        // Dot not 'SSL_free(ssl)'! This will be handled by hiredis when
-        // releasing the connection.
-        return 0;
-    }
-
-    return 1;
-}
-#endif
 
 /******************************************************************************
  * UTILITIES.
