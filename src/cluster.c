@@ -224,16 +224,14 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
 
     // Check context.
     if ((rcontext != NULL) && (!rcontext->err)) {
-        // Submit AUTH command.
-        if (server->db->password != NULL) {
-            REDIS_AUTH(
-                ctx, rcontext, server->db->password,
-                "Failed to authenticate cluster discovery connection",
-                "db=%s, server=%s",
-                server->db->name, server->location.raw);
-        }
+        // Optionally setup TLS & submit AUTH / HELLO command.
+        REDIS_BLESS_CONTEXT(
+            ctx, rcontext, server->db,
+            "Failed to initialize cluster discovery connection",
+            "db=%s, server=%s",
+            server->db->name, server->location.raw);
 
-        // Do not continue if failed to authenticate the connection.
+        // Do not continue if failed to initialize the connection.
         if (rcontext != NULL) {
             // Set command execution timeout.
             int tr = redisSetTimeout(rcontext, db->command_timeout);
@@ -307,8 +305,9 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
                 db->stats.cluster.discoveries.total++;
             } else {
                 REDIS_LOG_ERROR(ctx,
-                    "Failed to execute cluster discovery command (db=%s, server=%s)",
-                    db->name, server->location.raw);
+                    "Failed to execute cluster discovery command (error=%d, db=%s, server=%s): %s",
+                    rcontext->err, db->name, server->location.raw,
+                    HIREDIS_ERRSTR(rcontext, reply));
                 db->stats.cluster.discoveries.failed++;
             }
 
@@ -323,7 +322,7 @@ unsafe_discover_slots_aux(VRT_CTX, struct vmod_redis_db *db, redis_server_t *ser
         if (rcontext != NULL) {
             REDIS_LOG_ERROR(ctx,
                 "Failed to establish cluster discovery connection (error=%d, db=%s, server=%s): %s",
-                rcontext->err, db->name, server->location.raw, rcontext->errstr);
+                rcontext->err, db->name, server->location.raw, HIREDIS_ERRSTR(rcontext));
         } else {
             REDIS_LOG_ERROR(ctx,
                 "Failed to establish cluster discovery connection (db=%s, server=%s)",

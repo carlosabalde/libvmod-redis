@@ -1,7 +1,7 @@
 
-.. image:: https://travis-ci.org/carlosabalde/libvmod-redis.svg?branch=4.1
-   :alt: Travis CI badge
-   :target: https://travis-ci.org/carlosabalde/libvmod-redis/
+.. image:: https://github.com/carlosabalde/libvmod-redis/workflows/CI/badge.svg?branch=4.1
+   :alt: GitHub Actions CI badge
+   :target: https://github.com/carlosabalde/libvmod-redis/actions
 
 VMOD using the `synchronous hiredis library API <https://github.com/redis/hiredis>`_ to access Redis servers from VCL.
 
@@ -41,6 +41,13 @@ import redis;
         INT period=60,
         INT connection_timeout=500,
         INT command_timeout=0,
+        ENUM { RESP2, RESP3, default } protocol="default",
+        BOOL tls=false,
+        STRING tls_cafile="",
+        STRING tls_capath="",
+        STRING tls_certfile="",
+        STRING tls_keyfile="",
+        STRING tls_sni="",
         STRING password="")
 
     ##
@@ -73,6 +80,14 @@ import redis;
         INT max_command_retries=0,
         BOOL shared_connections=true,
         INT max_connections=128,
+        ENUM { RESP2, RESP3, default } protocol="default",
+        BOOL tls=false,
+        STRING tls_cafile="",
+        STRING tls_capath="",
+        STRING tls_certfile="",
+        STRING tls_keyfile="",
+        STRING tls_sni="",
+        STRING user="",
         STRING password="",
         INT sickness_ttl=60,
         BOOL ignore_slaves=false,
@@ -95,6 +110,8 @@ import redis;
     Method BOOL .reply_is_nil()
     Method BOOL .reply_is_status()
     Method BOOL .reply_is_integer()
+    Method BOOL .reply_is_boolean()
+    Method BOOL .reply_is_double()
     Method BOOL .reply_is_string()
     Method BOOL .reply_is_array()
 
@@ -103,6 +120,8 @@ import redis;
     Method STRING .get_error_reply()
     Method STRING .get_status_reply()
     Method INT .get_integer_reply()
+    Method BOOL .get_boolean_reply()
+    Method REAL .get_double_reply()
     Method STRING .get_string_reply()
 
     Method INT .get_array_reply_length()
@@ -110,6 +129,8 @@ import redis;
     Method BOOL .array_reply_is_nil(INT index)
     Method BOOL .array_reply_is_status(INT index)
     Method BOOL .array_reply_is_integer(INT index)
+    Method BOOL .array_reply_is_boolean(INT index)
+    Method BOOL .array_reply_is_double(INT index)
     Method BOOL .array_reply_is_string(INT index)
     Method BOOL .array_reply_is_array(INT index)
     Method STRING .get_array_reply_value(INT index)
@@ -260,12 +281,13 @@ COPYRIGHT
 
 See LICENSE for details.
 
-Implementation of the SHA-1 and CRC-16 cryptographic hash functions embedded in this VMOD (required to the optimistic execution of ``EVALSHA`` commands, and to the Redis Cluster slot calculation, respectively) are borrowed from the Redis implementation:
+Public domain implementation of the SHA-1 cryptographic hash function by Steve Reid and embedded in this VMOD (required for the optimistic execution of ``EVALSHA`` commands) has been borrowed from `this project <https://github.com/clibs/sha1/>`_:
 
-* http://download.redis.io/redis-stable/src/sha1.c
-* http://download.redis.io/redis-stable/src/sha1.h
+* https://github.com/clibs/sha1/blob/master/sha1.c
+* https://github.com/clibs/sha1/blob/master/sha1.h
+
+BSD's implementation of the CRC-16 cryptographic hash function by Georges Menie & Salvatore Sanfilippo and embedded in this VMOD (required for the Redis Cluster slot calculation) has been borrowed from the `Redis project <https://redis.io>`_:
+
 * http://download.redis.io/redis-stable/src/crc16.c
-* http://download.redis.io/redis-stable/src/config.h
-* http://download.redis.io/redis-stable/src/solarisfixes.h
 
 Copyright (c) 2014-2020 Carlos Abalde <carlos.abalde@gmail.com>

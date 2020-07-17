@@ -7,7 +7,7 @@ $script = <<SCRIPT
   apt-get install -qq unzip apt-transport-https \
     autotools-dev automake libtool python-docutils pkg-config libpcre3-dev \
     libeditline-dev libedit-dev make dpkg-dev git libjemalloc-dev \
-    libev-dev libncurses-dev python-sphinx graphviz
+    libev-dev libncurses-dev python-sphinx graphviz libssl-dev
 
   # Varnish Cache.
   sudo -u vagrant bash -c '\
@@ -24,9 +24,9 @@ $script = <<SCRIPT
   # hiredis.
   sudo -u vagrant bash -c '\
     cd /home/vagrant; \
-    wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.14.0.zip -O hiredis-0.14.0.zip; \
-    unzip hiredis-0.14.0.zip; \
-    rm -f hiredis-0.14.0.zip; \
+    wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.14.1.zip -O hiredis-0.14.1.zip; \
+    unzip hiredis-*.zip; \
+    rm -f hiredis-*.zip; \
     cd hiredis*; \
     make; \
     sudo make PREFIX="/usr/local" install; \
@@ -35,12 +35,12 @@ $script = <<SCRIPT
   # Redis.
   sudo -u vagrant bash -c '\
     cd /home/vagrant; \
-    wget http://download.redis.io/releases/redis-5.0.5.tar.gz; \
+    wget http://download.redis.io/releases/redis-6.0.3.tar.gz; \
     tar zxvf redis-*.tar.gz; \
     rm -f redis-*.tar.gz; \
     cd redis-*; \
-    make; \
-    sudo make PREFIX="/usr/local" install; \
+    make BUILD_TLS=yes; \
+    sudo make BUILD_TLS=yes PREFIX="/usr/local" install; \
     sudo ldconfig'
 
   # VMOD.
@@ -70,8 +70,8 @@ Vagrant.configure('2') do |config|
   end
 
   config.vm.define :v41 do |machine|
-    machine.vm.box = 'ubuntu/trusty64'
-    machine.vm.box_version = '=14.04'
+    machine.vm.box = 'ubuntu/xenial64'
+    machine.vm.box_version = '=20180315.0.0'
     machine.vm.box_check_update = true
     machine.vm.provision :shell, :privileged => true, :keep_color => false, :inline => $script
     machine.vm.provider :virtualbox do |vb|
