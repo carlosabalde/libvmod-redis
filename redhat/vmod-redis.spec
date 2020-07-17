@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 7.4
+Version: 7.5
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,6 +36,14 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Fri Jul 17 2020 Carlos Abalde <carlos.abalde@gmail.com> - 7.5-1.20200717
+- Added support for larger integers.
+- Added support for Redis ACLs.
+- Fixed wrong error message when successfully authenticating Sentinel connections.
+- Fixed 'SENTINEL masters' execution: send AUTH if password is available.
+- Improved logging.
+- Added RESP3 support (depends on future hiredis >= 1.0).
+- Added TLS support (depends on future hiredis >= 1.0).
 * Fri Feb 21 2020 Carlos Abalde <carlos.abalde@gmail.com> - 7.4-1.20200221
 - Added support for Redis Sentinel authentication.
 - Added Linux Alpine fixes.
