@@ -37,6 +37,13 @@ $Function VOID sentinels(PRIV_VCL,
     INT period=60,
     INT connection_timeout=500,
     INT command_timeout=0,
+    ENUM { RESP2, RESP3, default } protocol="default",
+    BOOL tls=0,
+    STRING tls_cafile="",
+    STRING tls_capath="",
+    STRING tls_certfile="",
+    STRING tls_keyfile="",
+    STRING tls_sni="",
     STRING password="")
 
 Arguments
@@ -61,6 +68,31 @@ Arguments
 
     command_timeout: command timeout (milliseconds; 0 means no timeout) when
     executing Redis Sentinel commands.
+
+    protocol: protocol to be used when talking to Redis Sentinel servers. Beware
+    switching from ``RESP2`` to ``RESP3`` is only possible since Redis 6.0 and
+    it uses an additional ``HELLO`` command when creating new Redis Sentinel
+    connections. Be careful ``RESP3`` support is only available since
+    ``hiredis`` 0.15.0.
+
+    tsl: if enabled, TLS will be used when establishing connections.
+
+    tls_cafile: if not empty, this CA certificate file will be used to verify
+    TLS connections.
+
+    tls_capath: if not empty, this will be the directory storing trusted CA
+    certificates used to verify TLS connections. If neither ``tls_cafile`` nor
+    ``tls_capath`` are specified, the default system-wide trusted root certs
+    configuration will apply.
+
+    tls_certfile: if not empty, this certificate file will be used to
+    authenticate TLS connections.
+
+    tls_keyfile: if not empty, this private key file will be used to
+    authenticate TLS connections.
+
+    tls_sni: if not empty, this server name indication (i.e. SNI) will be used
+    when establishing TLS connections.
 
     password: if not empty, requests for authentication using the ``AUTH``
     command will be submitted when creating new Redis Sentinel connections.
@@ -136,6 +168,16 @@ $Function BOOL reply_is_integer(PRIV_VCL, PRIV_TASK, STRING db="")
 Description
     Proxied version of ``.reply_is_integer()``.
 
+$Function BOOL reply_is_boolean(PRIV_VCL, PRIV_TASK, STRING db="")
+
+Description
+    Proxied version of ``.reply_is_boolean()``.
+
+$Function BOOL reply_is_double(PRIV_VCL, PRIV_TASK, STRING db="")
+
+Description
+    Proxied version of ``.reply_is_double()``.
+
 $Function BOOL reply_is_string(PRIV_VCL, PRIV_TASK, STRING db="")
 
 Description
@@ -166,6 +208,16 @@ $Function INT get_integer_reply(PRIV_VCL, PRIV_TASK, STRING db="")
 Description
     Proxied version of ``.get_integer_reply()``.
 
+$Function BOOL get_boolean_reply(PRIV_VCL, PRIV_TASK, STRING db="")
+
+Description
+    Proxied version of ``.get_boolean_reply()``.
+
+$Function REAL get_double_reply(PRIV_VCL, PRIV_TASK, STRING db="")
+
+Description
+    Proxied version of ``.get_double_reply()``.
+
 $Function STRING get_string_reply(PRIV_VCL, PRIV_TASK, STRING db="")
 
 Description
@@ -195,6 +247,16 @@ $Function BOOL array_reply_is_integer(PRIV_VCL, PRIV_TASK, INT index, STRING db=
 
 Description
     Proxied version of ``.array_reply_is_integer()``.
+
+$Function BOOL array_reply_is_boolean(PRIV_VCL, PRIV_TASK, INT index, STRING db="")
+
+Description
+    Proxied version of ``.array_reply_is_boolean()``.
+
+$Function BOOL array_reply_is_double(PRIV_VCL, PRIV_TASK, INT index, STRING db="")
+
+Description
+    Proxied version of ``.array_reply_is_double()``.
 
 $Function BOOL array_reply_is_string(PRIV_VCL, PRIV_TASK, INT index, STRING db="")
 
@@ -235,6 +297,14 @@ $Object db(PRIV_VCL,
     INT max_command_retries=0,
     BOOL shared_connections=1,
     INT max_connections=128,
+    ENUM { RESP2, RESP3, default } protocol="default",
+    BOOL tls=0,
+    STRING tls_cafile="",
+    STRING tls_capath="",
+    STRING tls_certfile="",
+    STRING tls_keyfile="",
+    STRING tls_sni="",
+    STRING user="",
     STRING password="",
     INT sickness_ttl=60,
     BOOL ignore_slaves=0,
@@ -296,10 +366,39 @@ Arguments
         value in all instances using private connections. Otherwise you may
         experience inconsistent behavior.
 
-    password: if not empty, requests for authentication using the ``AUTH``
-    command will be submitted when creating new Redis connections. This
-    password will be used for all Redis servers, including discovered servers
-    when Redis Cluster support is enabled.
+    protocol: protocol to be used when talking to Redis Server servers. Beware
+    switching from ``RESP2`` to ``RESP3`` is only possible since Redis 6.0 and
+    it affects to type conversion rules. Be careful ``RESP3`` support is only
+    available since ``hiredis`` 0.15.0.
+
+    tsl: if enabled, TLS will be used when establishing connections.
+
+    tls_cafile: if not empty, this CA certificate file will be used to verify
+    TLS connections.
+
+    tls_capath: if not empty, this will be the directory storing trusted CA
+    certificates used to verify TLS connections. If neither ``tls_cafile`` nor
+    ``tls_capath`` are specified, the default system-wide trusted root certs
+    configuration will apply.
+
+    tls_certfile: if not empty, this certificate file will be used to
+    authenticate TLS connections.
+
+    tls_keyfile: if not empty, this private key file will be used to
+    authenticate TLS connections.
+
+    tls_sni: if not empty, this server name indication (i.e. SNI) will be used
+    when establishing TLS connections.
+
+    user: if not empty and a ``password`` is provided, requests for
+    authentication using the ``AUTH`` or ``HELLO`` command will include both the
+    user name and its password. That enables usage of the Redis ACL system,
+    available since Redis 6.0.
+
+    password: if not empty, requests for authentication using the ``AUTH`` or
+    ``HELLO`` command will be submitted when creating new Redis connections.
+    This password will be used for all Redis servers, including discovered
+    servers when Redis Cluster support is enabled.
 
     sickness_ttl: TTL (seconds) of the sickness flag (0 means no sickness flags)
     associated to a Redis server. Once a server is flagged as sick and while the
@@ -453,17 +552,29 @@ Return value
     TRUE if a previously executed Redis command ``.execute()`` returned an
     integer reply.
 
+$Method BOOL .reply_is_boolean(PRIV_TASK)
+
+Return value
+    TRUE if a previously executed Redis command ``.execute()`` returned an
+    boolean reply.
+
+$Method BOOL .reply_is_double(PRIV_TASK)
+
+Return value
+    TRUE if a previously executed Redis command ``.execute()`` returned an
+    double reply.
+
 $Method BOOL .reply_is_string(PRIV_TASK)
 
 Return value
     TRUE if a previously executed Redis command ``.execute()`` returned a
-    string reply.
+    string or verbatim reply.
 
 $Method BOOL .reply_is_array(PRIV_TASK)
 
 Return value
     TRUE if a previously executed Redis command using ``.execute()`` returned
-    an array reply.
+    an array, map or set reply.
 
 $Method STRING .get_reply(PRIV_TASK)
 
@@ -471,7 +582,7 @@ Return value
     A string representation of the reply of a previously executed Redis command
     using ``.execute()``.
 Description
-    Do not use this function to access to array replies.
+    Do not use this function to access to array, map or set replies.
 
 $Method STRING .get_error_reply(PRIV_TASK)
 
@@ -492,17 +603,33 @@ Return value
     an integer reply, this function returns an integer representation of that
     reply.
 
+$Method BOOL .get_boolean_reply(PRIV_TASK)
+
+Return value
+    If a previously executed Redis command using ``.execute()`` returned
+    an boolean reply, this function returns an boolean representation of that
+    reply.
+
+$Method REAL .get_double_reply(PRIV_TASK)
+
+Return value
+    If a previously executed Redis command using ``.execute()`` returned
+    an double reply, this function returns an double representation of that
+    reply.
+
 $Method STRING .get_string_reply(PRIV_TASK)
 
 Return value
     If a previously executed Redis command using ``.execute()`` returned a
-    string reply, this function returns a string representation of that reply.
+    string or verbatim reply, this function returns a string representation of
+    that reply.
 
 $Method INT .get_array_reply_length(PRIV_TASK)
 
 Return value
     If a previously executed Redis command using ``.execute()`` returned
-    an array reply, this function returns the number of elements in that reply.
+    an array, map or set reply, this function returns the number of elements in
+    that reply.
 
 $Method BOOL .array_reply_is_error(PRIV_TASK, INT index)
 
@@ -510,8 +637,8 @@ Arguments
     index: index in the array reply.
 Return value
     If a previously executed Redis command using ``.execute()`` returned
-    an array reply, this function returns TRUE if the nth element in that reply
-    is an error reply (nested arrays are not supported).
+    an array, map or set reply, this function returns TRUE if the nth element in
+    that reply is an error reply (nested responses are not supported).
 
 $Method BOOL .array_reply_is_nil(PRIV_TASK, INT index)
 
@@ -519,8 +646,8 @@ Arguments
     index: index in the array reply.
 Return value
     If a previously executed Redis command using ``.execute()`` returned an
-    array reply, this function returns TRUE if the nth element in that reply is
-    a nil reply (nested arrays are not supported).
+    array, map or set reply, this function returns TRUE if the nth element in
+    that reply is a nil reply (nested responses are not supported).
 
 $Method BOOL .array_reply_is_status(PRIV_TASK, INT index)
 
@@ -528,8 +655,8 @@ Arguments
     index: index in the array reply.
 Return value
     If a previously executed Redis command using ``.execute()`` returned an
-    array reply, this function returns TRUE if the nth element in that reply is
-    a nil reply (nested arrays are not supported).
+    array, map or set reply, this function returns TRUE if the nth element in
+    that reply is a status reply (nested responses are not supported).
 
 $Method BOOL .array_reply_is_integer(PRIV_TASK, INT index)
 
@@ -537,8 +664,26 @@ Arguments
     index: index in the array reply.
 Return value
     If a previously executed Redis command using ``.execute()`` returned an
-    array reply, this function returns TRUE if the nth element in that reply is
-    an integer reply (nested arrays are not supported).
+    array, map or set reply, this function returns TRUE if the nth element in
+    that reply is an integer reply (nested responses are not supported).
+
+$Method BOOL .array_reply_is_boolean(PRIV_TASK, INT index)
+
+Arguments
+    index: index in the array reply.
+Return value
+    If a previously executed Redis command using ``.execute()`` returned an
+    array, map or set reply, this function returns TRUE if the nth element in
+    that reply is an boolean reply (nested responses are not supported).
+
+$Method BOOL .array_reply_is_double(PRIV_TASK, INT index)
+
+Arguments
+    index: index in the array reply.
+Return value
+    If a previously executed Redis command using ``.execute()`` returned an
+    array, map or set reply, this function returns TRUE if the nth element in
+    that reply is an double reply (nested responses are not supported).
 
 $Method BOOL .array_reply_is_string(PRIV_TASK, INT index)
 
@@ -546,8 +691,9 @@ Arguments
     index: index in the array reply.
 Return value
     If a previously executed Redis command using ``.execute()`` returned an
-    array reply, this function returns TRUE if the nth element in that reply is
-    a string reply (nested arrays are not supported).
+    array, map or set reply, this function returns TRUE if the nth element in
+    that reply is a string or verbatim reply (nested responses are not
+    supported).
 
 $Method BOOL .array_reply_is_array(PRIV_TASK, INT index)
 
@@ -555,8 +701,9 @@ Arguments
     index: index in the array reply.
 Return value
     If a previously executed Redis command using ``.execute()`` returned an
-    array reply, this function returns TRUE if the nth element in that reply is
-    an array reply (nested arrays are not supported).
+    array, map or set reply, this function returns TRUE if the nth element in
+    that reply is an array, map or set reply (nested responses are not
+    supported).
 
 $Method STRING .get_array_reply_value(PRIV_TASK, INT index)
 
@@ -564,8 +711,8 @@ Arguments
     index: index in the array reply.
 Return value
     If a previously executed Redis command using ``.execute()`` returned an
-    array reply, this function returns a string representation of the nth element
-    in that reply (nested arrays are not supported).
+    array, map or set reply, this function returns a string representation of
+    the nth element in that reply (nested responses are not supported).
 
 $Method VOID .free(PRIV_TASK)
 
