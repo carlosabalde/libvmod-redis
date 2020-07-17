@@ -1,5 +1,5 @@
 AC_PREREQ([2.68])
-AC_INIT([libvmod-redis], [7.4], [], [vmod-redis])
+AC_INIT([libvmod-redis], [7.5], [], [vmod-redis])
 AC_COPYRIGHT([Copyright (c) 2014-2020 Carlos Abalde <carlos.abalde@gmail.com>])
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_AUX_DIR([build-aux])
@@ -55,6 +55,42 @@ AC_CHECK_LIB(
 	[AC_CHECK_LIB(
 		ev, ev_run, [],
 		[AC_MSG_ERROR([libvmod-redis requires libev.])])])
+
+# Check for TLS support: --enable-tls / --disable-tls
+AC_ARG_ENABLE(
+    tls,
+    [
+        AS_HELP_STRING(
+            [--enable-tls],
+            [enable TLS support (default is NO)])
+    ],
+    [],
+    [enable_tls=no])
+AC_MSG_CHECKING([for TLS support])
+if test "x$enable_tls" = xyes; then
+    AC_MSG_RESULT([enabled])
+    AC_DEFINE(
+        [TLS_ENABLED],
+        [1],
+        [TLS enabled])
+
+	AC_CHECK_LIB(
+		crypto, CRYPTO_new_ex_data, [],
+		[AC_MSG_ERROR([libvmod-redis requires libcrypto. Try --disable-tls.])])
+
+	AC_CHECK_LIB(
+		ssl, SSL_CTX_new, [],
+		[AC_MSG_ERROR([libvmod-redis requires libssl. Try --disable-tls.])])
+
+	AC_CHECK_LIB(
+		hiredis_ssl, redisInitiateSSL, [],
+		[AC_MSG_ERROR([libvmod-redis requires libhiredis_ssl. Try --disable-tls.])])
+
+    AC_CHECK_LIB(
+        varnish-sslhelper, VSSLH_status, [], [])
+else
+    AC_MSG_RESULT([disabled])
+fi
 
 AC_CONFIG_FILES([
 	Makefile

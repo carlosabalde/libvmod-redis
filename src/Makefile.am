@@ -5,11 +5,10 @@ vmod_LTLIBRARIES = libvmod_redis.la
 
 libvmod_redis_la_SOURCES = \
 	crc16.c crc16.h \
-	sha1.c sha1.h sha1_config.h \
+	sha1.c sha1.h \
 	cluster.c cluster.h \
 	core.c core.h \
 	sentinel.c sentinel.h \
-	solarisfixes.h \
 	vmod_redis.c
 
 nodist_libvmod_redis_la_SOURCES = \
@@ -30,7 +29,11 @@ AM_VTC_LOG_FLAGS = -v -Dvmod_redis="$(VMOD_REDIS)"
 TESTS = @VMOD_TESTS@
 
 EXTRA_DIST = \
-	tests/hashslot-keys.txt \
+	tests/assets/hashslot-keys.txt \
+	tests/assets/tls-ca-certificate.crt \
+	tests/assets/tls-ca-certificate.key \
+	tests/assets/tls-certificate.crt \
+	tests/assets/tls-certificate.key \
 	tests/runner.sh \
 	vmod_redis.vcc \
 	$(VMOD_TESTS)

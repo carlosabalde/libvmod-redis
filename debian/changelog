@@ -1,3 +1,15 @@
+libvmod-redis (7.5-1) stable; urgency=low
+
+  * Added support for larger integers
+  * Added support for Redis ACLs
+  * Fixed wrong error message when successfully authenticating Sentinel connections
+  * Fixed 'SENTINEL masters' execution: send AUTH if password is available
+  * Improved logging
+  * Added RESP3 support (depends on future hiredis >= 1.0)
+  * Added TLS support (depends on future hiredis >= 1.0)
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Fri, 17 Jul 2020 16:00:00 +0200
+
 libvmod-redis (7.4-1) stable; urgency=low
 
   * Added support for Redis Sentinel authentication
