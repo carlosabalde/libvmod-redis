@@ -93,10 +93,10 @@ AC_ARG_ENABLE(
     [
         AS_HELP_STRING(
             [--enable-tls],
-            [enable TLS support (default is NO)])
+            [enable TLS support (default is YES)])
     ],
     [],
-    [enable_tls=no])
+    [enable_tls=yes])
 AC_MSG_CHECKING([for TLS support])
 if test "x$enable_tls" = xyes; then
     AC_MSG_RESULT([enabled])
