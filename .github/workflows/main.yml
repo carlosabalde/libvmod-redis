@@ -47,11 +47,11 @@ jobs:
 
       - name: Install hiredis
         run: |
-          wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.14.1.zip -O hiredis-0.14.1.zip
+          wget --no-check-certificate https://github.com/redis/hiredis/archive/v1.0.0.zip -O hiredis-1.0.0.zip
           unzip hiredis-*.zip
           pushd hiredis-*/
-          make
-          sudo make PREFIX='/usr/local' install
+          make USE_SSL=1
+          sudo make USE_SSL=1 PREFIX='/usr/local' install
           sudo ldconfig
           popd
 

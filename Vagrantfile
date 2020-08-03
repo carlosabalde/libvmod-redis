@@ -24,12 +24,12 @@ $script = <<SCRIPT
   # hiredis.
   sudo -u vagrant bash -c '\
     cd /home/vagrant; \
-    wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.14.1.zip -O hiredis-0.14.1.zip; \
+    wget --no-check-certificate https://github.com/redis/hiredis/archive/v1.0.0.zip -O hiredis-1.0.0.zip; \
     unzip hiredis-*.zip; \
     rm -f hiredis-*.zip; \
     cd hiredis*; \
-    make; \
-    sudo make PREFIX="/usr/local" install; \
+    make USE_SSL=1; \
+    sudo make USE_SSL=1 PREFIX="/usr/local" install; \
     sudo ldconfig'
 
   # Redis.
