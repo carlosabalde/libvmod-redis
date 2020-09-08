@@ -1083,7 +1083,7 @@ populate_simple_execution_plan(
         time_t now = time(NULL);
         unsigned free_ws = WS_ReserveAll(ctx->ws);
         unsigned used_ws = 0;
-        plan->contexts.list = (redis_context_t **) WS_Front(ctx->ws);
+        plan->contexts.list = (redis_context_t **) WS_Reservation(ctx->ws);
         plan->contexts.n = 0;
 
         // Search for contexts matching the requested conditions.
@@ -1118,7 +1118,7 @@ populate_simple_execution_plan(
     // Build list of servers.
     unsigned free_ws = WS_ReserveAll(ctx->ws);
     if (free_ws >= sizeof(redis_server_t *)) {
-        plan->servers.list = (redis_server_t **) WS_Front(ctx->ws);
+        plan->servers.list = (redis_server_t **) WS_Reservation(ctx->ws);
         plan->servers.n = 1;
         plan->servers.list[0] = server;
         WS_Release(ctx->ws, sizeof(redis_server_t *));
@@ -1141,7 +1141,7 @@ populate_execution_plan(
         // Initializations.
         unsigned free_ws = WS_ReserveAll(ctx->ws);
         unsigned used_ws = 0;
-        plan->contexts.list = (redis_context_t **) WS_Front(ctx->ws);
+        plan->contexts.list = (redis_context_t **) WS_Reservation(ctx->ws);
         plan->contexts.n = 0;
 
         // Search for contexts matching the requested conditions.
@@ -1190,7 +1190,7 @@ populate_execution_plan(
         unsigned remaining = max_size - plan->contexts.n;
         unsigned free_ws = WS_ReserveAll(ctx->ws);
         unsigned used_ws = 0;
-        plan->servers.list = (redis_server_t **) WS_Front(ctx->ws);
+        plan->servers.list = (redis_server_t **) WS_Reservation(ctx->ws);
         plan->servers.n = 0;
 
         // Get database lock.

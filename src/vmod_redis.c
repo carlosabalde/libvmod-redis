@@ -1064,7 +1064,7 @@ VCL_STRING
 vmod_db_stats(VRT_CTX, struct vmod_redis_db *db)
 {
     Lck_Lock(&db->mutex);
-    char *result = WS_Printf(ctx->ws,
+    const char *result = WS_Printf(ctx->ws,
         "{"
           "\"servers\": {"
             "\"total\": %" PRIu64 ","
