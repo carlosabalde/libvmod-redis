@@ -37,6 +37,12 @@ static const char *get_reply(VRT_CTX, redisReply *reply);
  * VMOD EVENTS.
  *****************************************************************************/
 
+static const struct vmod_priv_methods vcl_state_priv_methods[1] = {{
+    .magic = VMOD_PRIV_METHODS_MAGIC,
+    .type = "vcl_state",
+    .fini = (vmod_priv_fini_f *)free_vcl_state
+}};
+
 static int
 handle_vcl_load_event(VRT_CTX, struct vmod_priv *vcl_priv)
 {
@@ -53,7 +59,7 @@ handle_vcl_load_event(VRT_CTX, struct vmod_priv *vcl_priv)
 
     // Initialize configuration in the local VCL data structure.
     vcl_priv->priv = new_vcl_state();
-    vcl_priv->free = (vmod_priv_free_f *)free_vcl_state;
+    vcl_priv->methods = vcl_state_priv_methods;
 
 #ifdef TLS_ENABLED
     // Ensure OpenSSL global state is initialized only once.
@@ -1389,6 +1395,12 @@ VMOD_PROXIED_METHOD(
  * UTILITIES.
  *****************************************************************************/
 
+static const struct vmod_priv_methods task_state_priv_methods[1] = {{
+    .magic = VMOD_PRIV_METHODS_MAGIC,
+    .type = "task_state",
+    .fini = (vmod_priv_fini_f *)free_task_state
+}};
+
 static task_state_t *
 get_task_state(VRT_CTX, struct vmod_priv *task_priv, unsigned flush)
 {
@@ -1398,7 +1410,7 @@ get_task_state(VRT_CTX, struct vmod_priv *task_priv, unsigned flush)
     // Create thread state if not created yet.
     if (task_priv->priv == NULL) {
         task_priv->priv = new_task_state();
-        task_priv->free = (vmod_priv_free_f *)free_task_state;
+        task_priv->methods = task_state_priv_methods;
         result = task_priv->priv;
     } else {
         result = task_priv->priv;
