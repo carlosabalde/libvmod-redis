@@ -127,6 +127,8 @@ new_redis_server(
 void
 free_redis_server(redis_server_t *server)
 {
+    CHECK_OBJ_NOTNULL(server, REDIS_SERVER_MAGIC);
+
     server->db = NULL;
 
     free((void *) server->location.raw);
@@ -194,6 +196,8 @@ new_redis_context(
 void
 free_redis_context(redis_context_t *context)
 {
+    CHECK_OBJ_NOTNULL(context, REDIS_CONTEXT_MAGIC);
+
     context->server = NULL;
     if (context->rcontext != NULL) {
         redisFree(context->rcontext);
@@ -287,6 +291,8 @@ new_vmod_redis_db(
 void
 free_vmod_redis_db(struct vmod_redis_db *db)
 {
+    CHECK_OBJ_NOTNULL(db, VMOD_REDIS_DATABASE_MAGIC);
+
     Lck_Delete(&db->mutex);
 
     db->config = NULL;
@@ -380,6 +386,8 @@ new_task_state()
 void
 free_task_state(task_state_t *state)
 {
+    CHECK_OBJ_NOTNULL(state, TASK_STATE_MAGIC);
+
     state->ncontexts = 0;
     redis_context_t *icontext;
     while (!VTAILQ_EMPTY(&state->contexts)) {
@@ -443,6 +451,8 @@ free_vcl_state(vcl_state_t *priv)
     // been destroyed during handle_vcl_discard_event(). It's too late to call
     // Lck_Delete().
     // Lck_Delete(&priv->mutex);
+
+   CHECK_OBJ_NOTNULL(priv, VCL_STATE_MAGIC);
 
     subnet_t *isubnet;
     while (!VTAILQ_EMPTY(&priv->subnets)) {
@@ -519,6 +529,8 @@ new_subnet(unsigned weight, struct in_addr ia4, unsigned bits)
 void
 free_subnet(subnet_t *subnet)
 {
+    CHECK_OBJ_NOTNULL(subnet, SUBNET_MAGIC);
+
     subnet->weight = 0;
     subnet->mask = (struct in_addr){ 0 };
     subnet->address = (struct in_addr){ 0 };
@@ -541,6 +553,8 @@ new_database(struct vmod_redis_db *db)
 void
 free_database(database_t *db)
 {
+    CHECK_OBJ_NOTNULL(db, DATABASE_MAGIC);
+
     free_vmod_redis_db(db->db);
     db->db = NULL;
 
