@@ -185,6 +185,9 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     }
 } -start
 
+# Needed for testing purposes, to store scripts in HTTP headers.
+varnish v1 -cliok "param.set feature -validate_headers"
+
 client c1 {
     txreq
     rxresp
