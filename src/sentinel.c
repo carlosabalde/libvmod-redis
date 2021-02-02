@@ -462,6 +462,8 @@ new_server(
 static void
 free_server(struct server *server)
 {
+    CHECK_OBJ_NOTNULL(server, SERVER_MAGIC);
+
     free((void *) server->host);
     server->host = NULL;
     server->port = 0;
@@ -495,6 +497,8 @@ new_sentinel(struct state *state, const char *host, unsigned host_len, unsigned 
 static void
 free_sentinel(struct sentinel *sentinel)
 {
+    CHECK_OBJ_NOTNULL(sentinel, SENTINEL_MAGIC);
+
     free((void *) sentinel->host);
     sentinel->host = NULL;
     sentinel->port = 0;
@@ -550,6 +554,8 @@ new_state(
 static void
 free_state(struct state *state)
 {
+    CHECK_OBJ_NOTNULL(state, STATE_MAGIC);
+
     state->config = NULL;
 
     struct sentinel *isentinel;
