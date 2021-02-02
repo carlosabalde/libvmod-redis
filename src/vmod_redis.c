@@ -37,10 +37,16 @@ static const char *get_reply(VRT_CTX, redisReply *reply);
  * VMOD EVENTS.
  *****************************************************************************/
 
+static void
+fini_vcl_state(VRT_CTX, void *ptr)
+{
+    free_vcl_state(ptr);
+}
+
 static const struct vmod_priv_methods vcl_state_priv_methods[1] = {{
     .magic = VMOD_PRIV_METHODS_MAGIC,
     .type = "vcl_state",
-    .fini = (vmod_priv_fini_f *)free_vcl_state
+    .fini = (vmod_priv_fini_f *)fini_vcl_state
 }};
 
 static int
@@ -1395,10 +1401,16 @@ VMOD_PROXIED_METHOD(
  * UTILITIES.
  *****************************************************************************/
 
+static void
+fini_task_state(VRT_CTX, void *ptr)
+{
+    free_task_state(ptr);
+}
+
 static const struct vmod_priv_methods task_state_priv_methods[1] = {{
     .magic = VMOD_PRIV_METHODS_MAGIC,
     .type = "task_state",
-    .fini = (vmod_priv_fini_f *)free_task_state
+    .fini = (vmod_priv_fini_f *)fini_task_state
 }};
 
 static task_state_t *
