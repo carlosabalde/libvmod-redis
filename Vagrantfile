@@ -35,7 +35,7 @@ $script = <<SCRIPT
   # Redis.
   sudo -u vagrant bash -c '\
     cd /home/vagrant; \
-    wget http://download.redis.io/releases/redis-6.0.3.tar.gz; \
+    wget http://download.redis.io/releases/redis-6.0.10.tar.gz; \
     tar zxvf redis-*.tar.gz; \
     rm -f redis-*.tar.gz; \
     cd redis-*; \
@@ -58,7 +58,7 @@ Vagrant.configure('2') do |config|
   config.vm.provider :virtualbox do |vb|
     vb.memory = 1024
     vb.cpus = 1
-    vb.linked_clone = Gem::Version.new(Vagrant::VERSION) >= Gem::Version.new('1.8.0')
+    vb.linked_clone = true
     vb.customize [
       'modifyvm', :id,
       '--natdnshostresolver1', 'on',
@@ -70,8 +70,8 @@ Vagrant.configure('2') do |config|
   end
 
   config.vm.define :v41 do |machine|
-    machine.vm.box = 'ubuntu/xenial64'
-    machine.vm.box_version = '=20180315.0.0'
+    machine.vm.box = 'ubuntu/bionic64'
+    machine.vm.box_version = '=20210129.0.0'
     machine.vm.box_check_update = true
     machine.vm.provision :shell, :privileged => true, :keep_color => false, :inline => $script
     machine.vm.provider :virtualbox do |vb|
