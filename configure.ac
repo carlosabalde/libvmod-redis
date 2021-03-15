@@ -1,5 +1,5 @@
 AC_PREREQ([2.68])
-AC_INIT([libvmod-redis], [trunk], [], [vmod-redis])
+AC_INIT([libvmod-redis], [13.0], [], [vmod-redis])
 AC_COPYRIGHT([Copyright (c) 2014-2021 Carlos Abalde <carlos.abalde@gmail.com>])
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_AUX_DIR([build-aux])
@@ -33,7 +33,7 @@ AC_ARG_WITH([rst2man],
 
 m4_ifndef([VARNISH_PREREQ], AC_MSG_ERROR([Need varnish.m4 -- see README.rst]))
 
-#VARNISH_PREREQ([5.0], [5.1])
+VARNISH_PREREQ([6.6], [6.7])
 VARNISH_VMODS([redis])
 
 VMOD_TESTS="$(cd $srcdir/src && echo tests/*.vtc)"
