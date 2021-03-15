@@ -28,6 +28,7 @@ jobs:
 
       - name: Install packages
         run: |
+          sudo apt-get update -q
           sudo apt-get install -qq \
             automake autotools-dev lcov libedit-dev libeditline-dev libev-dev \
             libncurses-dev libpcre3-dev libssl-dev libtool python-docutils \
