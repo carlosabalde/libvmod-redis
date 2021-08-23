@@ -152,7 +152,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         db.command("EVAL");
         db.push(req.http.Script);
         db.push("0");
-        db.push("1125899906842624");  # 2^50
+        db.push("34359738368");  # 2^39 -- See VRT_INTEGER_MAX & VRT_DECIMAL_MAX.
         db.execute(true);
         if (db.reply_is_integer()) {
             set resp.http.Reply-12 = db.get_integer_reply();
@@ -199,7 +199,7 @@ client c1 {
 
     expect resp.http.Reply-11 == "Atomic x 2!"
 
-    expect resp.http.Reply-12 == "1125899906842624"
+    expect resp.http.Reply-12 == "34359738368"
 
     expect resp.http.db-servers-total == "1"
     expect resp.http.db-connections-total == "1"

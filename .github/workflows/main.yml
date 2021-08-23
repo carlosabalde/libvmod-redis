@@ -31,7 +31,7 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -qq \
             automake autotools-dev lcov libedit-dev libeditline-dev libev-dev \
-            libncurses-dev libpcre3-dev libssl-dev libtool python-docutils \
+            libncurses-dev libpcre2-dev libssl-dev libtool python-docutils \
             python-sphinx
 
       - name: Install Varnish Cache
