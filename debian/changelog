@@ -1,0 +1,321 @@
+libvmod-redis (14.0-1) stable; urgency=low
+
+  * Migrated to Varnish Cache 7.0.x
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Wed, 15 Sep 2021 16:00:00 +0200
+
+libvmod-redis (13.0-1) stable; urgency=low
+
+  * Migrated to Varnish Cache 6.6.x
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Mon, 15 Mar 2021 16:00:00 +0100
+
+libvmod-redis (12.0-1) stable; urgency=low
+
+  * Migrated to Varnish Cache 6.5.x
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Tue, 15 Sep 2020 16:00:00 +0200
+
+libvmod-redis (11.1-1) stable; urgency=low
+
+  * Added support for larger integers
+  * Added support for Redis ACLs
+  * Fixed wrong error message when successfully authenticating Sentinel connections
+  * Fixed 'SENTINEL masters' execution: send AUTH if password is available
+  * Improved logging
+  * Added RESP3 support (depends on future hiredis >= 1.0)
+  * Added TLS support (depends on future hiredis >= 1.0)
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Fri, 17 Jul 2020 16:00:00 +0200
+
+libvmod-redis (11.0-1) stable; urgency=low
+
+  * Migrated to Varnish Cache 6.4.x
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Fri, 20 Mar 2020 16:00:00 +0100
+
+libvmod-redis (10.1-1) stable; urgency=low
+
+  * Added support for Redis Sentinel authentication
+  * Added Linux Alpine fixes
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Fri, 21 Feb 2020 16:00:00 +0100
+
+libvmod-redis (10.0-1) stable; urgency=low
+
+  * Migrated to Varnish Cache 6.3.x
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Mon, 30 Sep 2019 16:00:00 +0200
+
+libvmod-redis (9.1-1) stable; urgency=low
+
+  * Stopped depending on redis-trib.rb
+  * Added REPLICAOF command (i.e. new SLAVEOF name) support
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Thu, 23 May 2019 17:00:00 +0200
+
+libvmod-redis (9.0-1) stable; urgency=low
+
+  * Migrated to Varnish Cache 6.2.x
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Mon, 18 Mar 2019 16:00:00 +0100
+
+libvmod-redis (8.0-1) stable; urgency=low
+
+  * Migrated to Varnish Cache 6.1.x
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Tue, 18 Sep 2018 16:00:00 +0200
+
+libvmod-redis (7.2-1) stable; urgency=low
+
+  * Allowed disabling sickness TTL feature
+  * Stopped WS-copying input arg in .command() & .push()
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Tue, 07 Aug 2018 17:00:00 +0200
+
+libvmod-redis (7.1-1) stable; urgency=low
+
+  * Fixed execution plan when clustering enabled
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Thu, 03 May 2018 17:00:00 +0200
+
+libvmod-redis (7.0-1) stable; urgency=low
+
+  * Migrated to Varnish Cache 6.0.x
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Thu, 15 Mar 2018 16:00:00 +0100
+
+libvmod-redis (6.0-1) stable; urgency=low
+
+  * Migrated to Varnish Cache 5.2.x
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Fri, 15 Sep 2017 16:00:00 +0200
+
+libvmod-redis (5.1-1) stable; urgency=low
+
+  * Added proxied methods
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Thu, 01 Jun 2017 17:00:00 +0200
+
+libvmod-redis (5.0-1) stable; urgency=low
+
+  * Migrated to Varnish Cache 5.1.x
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Fri, 17 Mar 2017 16:00:00 +0100
+
+libvmod-redis (4.0-1) stable; urgency=low
+
+  * Migrated to Varnish Cache 5.0.x
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Fri, 17 Mar 2017 16:00:00 +0100
+
+libvmod-redis (3.11-1) stable; urgency=low
+
+  * Added 'ignore_slaves' option to redis.db()
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Wed, 26 Oct 2016 17:00:00 +0200
+
+libvmod-redis (3.10-1) stable; urgency=low
+
+  * Fixed Sentinel-related crash
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Thu, 04 Aug 2016 17:00:00 +0200
+
+libvmod-redis (3.9-1) stable; urgency=low
+
+  * Added full password support when clustering is enabled
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Wed, 03 Aug 2016 17:00:00 +0200
+
+libvmod-redis (3.8-1) stable; urgency=low
+
+  * Fixed crash when destroying ev loops
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Thu, 14 Jul 2016 17:00:00 +0200
+
+libvmod-redis (3.7-1) stable; urgency=low
+
+  * Fixed shared ev loop
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Wed, 13 Jul 2016 17:00:00 +0200
+
+libvmod-redis (3.6-1) stable; urgency=low
+
+  * Allowed server-less database instantiation
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Mon, 11 Jul 2016 17:00:00 +0200
+
+libvmod-redis (3.5-1) stable; urgency=low
+
+  * Avoided deadlocks enforcing lock ordering + simplifying locking model
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Thu, 09 Jun 2016 17:00:00 +0200
+
+libvmod-redis (3.4-1) stable; urgency=low
+
+  * Stop assuming down flag on +switch-master events
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Mon, 02 May 2016 17:00:00 +0200
+
+libvmod-redis (3.3-1) stable; urgency=low
+
+  * Added Redis Sentinel support
+  * Added support for auto-discovery of roles
+  * Replaced plain pthread mutexes by Varnish locks
+  * Dynamic allocation of execution plans
+  * Improved logging
+  * Added redis.subnets() (previosuly redis.init())
+  * Improvements & fixes
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Wed, 20 Apr 2016 17:00:00 +0200
+
+libvmod-redis (3.2-1) stable; urgency=low
+
+  * Improvements & fixes
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Tue, 12 Apr 2016 17:00:00 +0200
+
+libvmod-redis (3.1-1) stable; urgency=low
+
+  * Added support for smart command execution
+  * Added redis.init(), including weights + subnet masks
+  * Added type (master, slave, cluster) and sickness TTL to redis.db()
+  * Added master / slave selection to .execute()
+  * Improvements & fixes
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Mon, 11 Apr 2016 17:00:00 +0200
+
+libvmod-redis (3.0-1) stable; urgency=low
+
+  * New version numbering scheme
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Mon, 04 Apr 2016 17:00:00 +0200
+
+libvmod-redis (0.3.6-1) stable; urgency=low
+
+  * Improved VSL / syslog logging
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Mon, 29 Feb 2016 17:00:00 +0100
+
+libvmod-redis (0.3.5-1) stable; urgency=low
+
+  * Added AUTH support
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Tue, 09 Feb 2016 17:00:00 +0100
+
+libvmod-redis (0.3.4-1) stable; urgency=low
+
+  * Added .counter()
+  * Improved handling of -MOVED errors
+  * Simplified & improved internals
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Tue, 22 Dec 2015 17:00:00 +0100
+
+libvmod-redis (0.3.3-1) stable; urgency=low
+
+  * Improvements & fixes
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Tue, 22 Dec 2015 16:00:00 +0100
+
+libvmod-redis (0.3.2-1) stable; urgency=low
+
+  * Added .stats()
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Mon, 21 Dec 2015 16:00:00 +0100
+
+libvmod-redis (0.3.1-1) stable; urgency=low
+
+  * Removed support for server tags
+  * Removed .add_cserver()
+  * Removed .server()
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Wed, 16 Dec 2015 16:00:00 +0100
+
+libvmod-redis (0.3.0-1) stable; urgency=low
+
+  * Added support for multiple clusters
+  * Added .retries()
+  * Removed redis.fini()
+  * Improved manual page
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Tue, 15 Dec 2015 16:00:00 +0100
+
+libvmod-redis (0.2.7-1) stable; urgency=low
+
+  * Fixed memory leak during redis.fini()
+  * Fixed initialization / reset of command execution timeout
+  * Added Redis Cluster tests
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Mon, 08 Jun 2015 16:00:00 +0200
+
+libvmod-redis (0.2.6-1) stable; urgency=low
+
+  * Fixed bug when processing -MOVED and -ASK errors
+  * Updated files borrowed from the Redis implementation
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Tue, 26 May 2015 16:00:00 +0200
+
+libvmod-redis (0.2.5-1) stable; urgency=low
+
+  * Do not require C99 standard
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Tue, 12 May 2015 16:00:00 +0200
+
+libvmod-redis (0.2.4-1) stable; urgency=low
+
+  * Added support for timeouts when executing commands
+  * Maximum number of Redis Cluster hops is now configurable
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Fri, 17 Apr 2015 16:00:00 +0200
+
+libvmod-redis (0.2.3-1) stable; urgency=low
+
+  * Added support for hiredis 0.12.1 (redisEnableKeepAlive)
+  * Updated Redis Cluster key -> slot calculation
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Wed, 28 Jan 2015 16:00:00 +0200
+
+libvmod-redis (0.2.2-1) stable; urgency=low
+
+  * Added support for command retries
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Fri, 19 Dec 2014 16:00:00 +0200
+
+libvmod-redis (0.2.1-1) stable; urgency=low
+
+  * Added redis.replied()
+  * Minor fixes
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Wed, 17 Dec 2014 16:00:00 +0200
+
+libvmod-redis (0.2.0-1) stable; urgency=low
+
+  * Added Redis Cluster support
+  * Minor improvements & fixes
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Tue, 16 Dec 2014 16:00:00 +0200
+
+libvmod-redis (0.1.3-1) stable; urgency=low
+
+  * Added support for shared pools of Redis connections
+  * Refactor to simplify future support of Redis Cluster
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Sun, 14 Dec 2014 16:00:00 +0200
+
+libvmod-redis (0.1.2-1) stable; urgency=low
+
+  * Discard Redis contexts when connections are hung up by the server
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Thu, 23 Oct 2014 16:00:00 +0200
+
+libvmod-redis (0.1.1-1) stable; urgency=low
+
+  * Added missing WS_Dup()'s / WS_Copy()'s
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Wed, 17 Sep 2014 16:00:00 +0200
+
+libvmod-redis (0.1.0-1) stable; urgency=low
+
+  * Initial version
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Fri, 22 Aug 2014 16:00:00 +0200
