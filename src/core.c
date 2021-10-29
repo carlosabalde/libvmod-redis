@@ -1450,7 +1450,7 @@ retry:
     if (result == NULL) {
         // If an no more contexts can be created, wait for another thread.
         if (server->pool.ncontexts >= db->max_connections) {
-            Lck_CondWait(&server->pool.cond, &server->db->mutex, 0);
+            Lck_CondWait(&server->pool.cond, &server->db->mutex);
             db->stats.workers.blocked++;
             goto retry;
         }
