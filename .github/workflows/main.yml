@@ -31,7 +31,7 @@ jobs:
           tar zxvf varnish-*.tgz
           pushd varnish-*/
           ./autogen.sh
-          CC='${{ matrix.cc }}' ./configure ${{ matrix.configure_flags }}
+          CC='${{ matrix.cc }}' ./configure
           make -sj32
           sudo make PREFIX='/usr/local' install
           sudo ldconfig
@@ -60,6 +60,5 @@ jobs:
       - name: Build & test VMOD
         run: |
           ./autogen.sh
-          ./configure --prefix=/usr
           make -j4
           make check -j1
