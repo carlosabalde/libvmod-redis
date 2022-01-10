@@ -60,5 +60,6 @@ jobs:
       - name: Build & test VMOD
         run: |
           ./autogen.sh
+          CC='${{ matrix.cc }}' ./configure --prefix=/usr
           make -j4
           make check -j1
