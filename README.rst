@@ -140,7 +140,12 @@ import redis;
 
     # Other.
     Method VOID .free()
-    Method STRING .stats()
+    Method STRING .stats(
+        ENUM { json, prometheus } format="json",
+        BOOL stream=0,
+        STRING prometheus_name_prefix="vmod_redis_",
+        BOOL prometheus_default_labels=1,
+        STRING prometheus_extra_labels="")
     Method INT .counter(STRING name)
 
 EXAMPLES
