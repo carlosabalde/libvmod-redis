@@ -1,0 +1,141 @@
+varnishtest "Test Prometheus stats"
+
+server s1 {
+} -repeat 1 -start
+
+varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
+    import redis from "${vmod_topbuild}/src/.libs/libvmod_redis.so";
+
+    sub vcl_init {
+        redis.subnets(
+            masks={""});
+
+        redis.sentinels(
+            locations={""},
+            period=0,
+            connection_timeout=500,
+            command_timeout=0);
+
+        new db = redis.db(
+            location="${redis_master1_ip}:${redis_master1_port}",
+            type=master,
+            connection_timeout=500,
+            connection_ttl=0,
+            command_timeout=0,
+            max_command_retries=0,
+            shared_connections=false,
+            max_connections=1,
+            password="",
+            sickness_ttl=0,
+            ignore_slaves=false,
+            max_cluster_hops=0);
+    }
+
+    sub vcl_recv {
+        return (synth(200, "OK"));
+    }
+
+    sub vcl_synth {
+        if (req.http.stream) {
+            if (db.stats(
+                    format=prometheus,
+                    stream=true,
+                    prometheus_name_prefix=req.http.prefix,
+                    prometheus_default_labels=(req.http.default-labels == "1"),
+                    prometheus_extra_labels=req.http.extra-labels)) {}
+        } else {
+            synthetic(db.stats(
+                format=prometheus,
+                stream=false,
+                prometheus_name_prefix=req.http.prefix,
+                prometheus_default_labels=(req.http.default-labels == "1"),
+                prometheus_extra_labels=req.http.extra-labels));
+        }
+        return (deliver);
+    }
+} -start
+
+client c1 {
+    txreq
+    rxresp
+    expect resp.body == {# TYPE vmod_redis_servers_total counter
+vmod_redis_servers_total{} 1
+# TYPE vmod_redis_servers_failed counter
+vmod_redis_servers_failed{} 0
+# TYPE vmod_redis_connections_total counter
+vmod_redis_connections_total{} 0
+# TYPE vmod_redis_connections_failed counter
+vmod_redis_connections_failed{} 0
+# TYPE vmod_redis_connections_dropped counter
+vmod_redis_connections_dropped{reason="error"} 0
+vmod_redis_connections_dropped{reason="hung_up"} 0
+vmod_redis_connections_dropped{reason="overflow"} 0
+vmod_redis_connections_dropped{reason="ttl"} 0
+vmod_redis_connections_dropped{reason="version"} 0
+vmod_redis_connections_dropped{reason="sick"} 0
+# TYPE vmod_redis_workers_blocked counter
+vmod_redis_workers_blocked{} 0
+# TYPE vmod_redis_commands_total counter
+vmod_redis_commands_total{} 0
+# TYPE vmod_redis_commands_failed counter
+vmod_redis_commands_failed{} 0
+# TYPE vmod_redis_commands_retried counter
+vmod_redis_commands_retried{} 0
+# TYPE vmod_redis_commands_error counter
+vmod_redis_commands_error{} 0
+# TYPE vmod_redis_commands_noscript counter
+vmod_redis_commands_noscript{} 0
+# TYPE vmod_redis_cluster_discoveries_total counter
+vmod_redis_cluster_discoveries_total{} 0
+# TYPE vmod_redis_cluster_discoveries_failed counter
+vmod_redis_cluster_discoveries_failed{} 0
+# TYPE vmod_redis_cluster_replies_moved counter
+vmod_redis_cluster_replies_moved{} 0
+# TYPE vmod_redis_cluster_replies_ask counter
+vmod_redis_cluster_replies_ask{} 0
+}
+
+    txreq -hdr "stream: 1" \
+          -hdr "prefix: foo_" \
+          -hdr "default-labels: 1" \
+          -hdr {extra-labels: this="bar",that="baz"}
+    rxresp
+    expect resp.body == {# TYPE foo_servers_total counter
+foo_servers_total{this="bar",that="baz",name="db"} 1
+# TYPE foo_servers_failed counter
+foo_servers_failed{this="bar",that="baz",name="db"} 0
+# TYPE foo_connections_total counter
+foo_connections_total{this="bar",that="baz",name="db"} 0
+# TYPE foo_connections_failed counter
+foo_connections_failed{this="bar",that="baz",name="db"} 0
+# TYPE foo_connections_dropped counter
+foo_connections_dropped{this="bar",that="baz",name="db",reason="error"} 0
+foo_connections_dropped{this="bar",that="baz",name="db",reason="hung_up"} 0
+foo_connections_dropped{this="bar",that="baz",name="db",reason="overflow"} 0
+foo_connections_dropped{this="bar",that="baz",name="db",reason="ttl"} 0
+foo_connections_dropped{this="bar",that="baz",name="db",reason="version"} 0
+foo_connections_dropped{this="bar",that="baz",name="db",reason="sick"} 0
+# TYPE foo_workers_blocked counter
+foo_workers_blocked{this="bar",that="baz",name="db"} 0
+# TYPE foo_commands_total counter
+foo_commands_total{this="bar",that="baz",name="db"} 0
+# TYPE foo_commands_failed counter
+foo_commands_failed{this="bar",that="baz",name="db"} 0
+# TYPE foo_commands_retried counter
+foo_commands_retried{this="bar",that="baz",name="db"} 0
+# TYPE foo_commands_error counter
+foo_commands_error{this="bar",that="baz",name="db"} 0
+# TYPE foo_commands_noscript counter
+foo_commands_noscript{this="bar",that="baz",name="db"} 0
+# TYPE foo_cluster_discoveries_total counter
+foo_cluster_discoveries_total{this="bar",that="baz",name="db"} 0
+# TYPE foo_cluster_discoveries_failed counter
+foo_cluster_discoveries_failed{this="bar",that="baz",name="db"} 0
+# TYPE foo_cluster_replies_moved counter
+foo_cluster_replies_moved{this="bar",that="baz",name="db"} 0
+# TYPE foo_cluster_replies_ask counter
+foo_cluster_replies_ask{this="bar",that="baz",name="db"} 0
+}
+} -run
+
+varnish v1 -expect client_req == 2

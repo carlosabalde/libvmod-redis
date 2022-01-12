@@ -137,7 +137,12 @@ import redis;
 
     # Other.
     Method VOID .free()
-    Method STRING .stats()
+    Method STRING .stats(
+        ENUM { json, prometheus } format="json",
+        BOOL stream=0,
+        STRING prometheus_name_prefix="vmod_redis_",
+        BOOL prometheus_default_labels=1,
+        STRING prometheus_extra_labels="")
     Method INT .counter(STRING name)
 
 EXAMPLES
@@ -290,4 +295,4 @@ BSD's implementation of the CRC-16 cryptographic hash function by Georges Menie 
 
 * http://download.redis.io/redis-stable/src/crc16.c
 
-Copyright (c) 2014-2020 Carlos Abalde <carlos.abalde@gmail.com>
+Copyright (c) 2014-2022 Carlos Abalde <carlos.abalde@gmail.com>
