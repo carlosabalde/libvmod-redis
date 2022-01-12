@@ -357,7 +357,7 @@ extern vmod_state_t vmod_state;
         HIREDIS_ERRSTR_2(__VA_ARGS__), \
         HIREDIS_ERRSTR_1(__VA_ARGS__))
 
-#if HIREDIS_MAJOR >= 0 && HIREDIS_MINOR >= 15
+#if HIREDIS_MAJOR >= 1 && HIREDIS_MINOR >= 0
 #define RESP3_ENABLED 1
 #define RESP3_SWITCH(a, b) a
 #else

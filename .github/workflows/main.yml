@@ -6,7 +6,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
 
     strategy:
       matrix:
@@ -28,18 +28,19 @@ jobs:
 
       - name: Install packages
         run: |
+          sudo apt-get update -q
           sudo apt-get install -qq \
             automake autotools-dev lcov libedit-dev libeditline-dev libev-dev \
             libncurses-dev libpcre3-dev libssl-dev libtool python-docutils \
-            python-sphinx
+            python3-sphinx
 
       - name: Install Varnish Cache
         run: |
-          wget --no-check-certificate https://varnish-cache.org/_downloads/varnish-6.0.1.tgz
+          wget --no-check-certificate https://varnish-cache.org/_downloads/varnish-6.0.9.tgz
           tar zxvf varnish-*.tgz
           pushd varnish-*/
           ./autogen.sh
-          CC='${{ matrix.cc }}' ./configure ${{ matrix.configure_flags }}
+          CC='${{ matrix.cc }}' ./configure
           make -sj32
           sudo make PREFIX='/usr/local' install
           sudo ldconfig
@@ -47,17 +48,17 @@ jobs:
 
       - name: Install hiredis
         run: |
-          wget --no-check-certificate https://github.com/redis/hiredis/archive/v0.14.1.zip -O hiredis-0.14.1.zip
+          wget --no-check-certificate https://github.com/redis/hiredis/archive/v1.0.0.zip -O hiredis-1.0.0.zip
           unzip hiredis-*.zip
           pushd hiredis-*/
-          make
-          sudo make PREFIX='/usr/local' install
+          make USE_SSL=1
+          sudo make USE_SSL=1 PREFIX='/usr/local' install
           sudo ldconfig
           popd
 
       - name: Install Redis
         run: |
-          wget http://download.redis.io/releases/redis-6.0.3.tar.gz
+          wget http://download.redis.io/releases/redis-6.0.10.tar.gz
           tar zxvf redis-*.tar.gz
           pushd redis-*/
           make BUILD_TLS=yes
@@ -68,7 +69,7 @@ jobs:
       - name: Build & test VMOD
         run: |
           ./autogen.sh
-          ./configure --prefix=/usr ${{ matrix.configure_flags }}
+          CC='${{ matrix.cc }}' ./configure --prefix=/usr ${{ matrix.configure_flags }}
           make -j4
           make ${{ matrix.make_target }} -j1
 

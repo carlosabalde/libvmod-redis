@@ -12,6 +12,8 @@
 #include <arpa/inet.h>
 
 #include "cache/cache.h"
+#include "vsb.h"
+#include "vcl.h"
 #include "vcc_redis_if.h"
 
 #ifdef TLS_ENABLED
@@ -1061,69 +1063,192 @@ vmod_db_free(VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *task_priv)
  *****************************************************************************/
 
 VCL_STRING
-vmod_db_stats(VRT_CTX, struct vmod_redis_db *db)
+vmod_db_stats(
+    VRT_CTX, struct vmod_redis_db *db, VCL_ENUM format, VCL_BOOL stream,
+    VCL_STRING prometheus_name_prefix, VCL_BOOL prometheus_default_labels,
+    VCL_STRING prometheus_extra_labels)
 {
+    struct vsb *vsb = NULL;
+    if (stream && (
+        (ctx->method == VCL_MET_SYNTH) ||
+        (ctx->method == VCL_MET_BACKEND_ERROR))) {
+        CAST_OBJ_NOTNULL(vsb, ctx->specific, VSB_MAGIC);
+    } else {
+        stream = 0;
+        vsb = VSB_new_auto();
+        AN(vsb);
+    }
+
     Lck_Lock(&db->mutex);
-    char *result = WS_Printf(ctx->ws,
-        "{"
-          "\"servers\": {"
-            "\"total\": %" PRIu64 ","
-            "\"failed\": %" PRIu64
-          "},"
-          "\"connections\": {"
-            "\"total\": %" PRIu64 ","
-            "\"failed\": %" PRIu64 ","
-            "\"dropped\": {"
-              "\"error\": %" PRIu64 ","
-              "\"hung_up\": %" PRIu64 ","
-              "\"overflow\": %" PRIu64 ","
-              "\"ttl\": %" PRIu64 ","
-              "\"version\": %" PRIu64 ","
-              "\"sick\": %" PRIu64
-            "}"
-          "},"
-          "\"workers\": {"
-              "\"blocked\": %" PRIu64
-          "},"
-          "\"commands\": {"
-            "\"total\": %" PRIu64 ","
-            "\"failed\": %" PRIu64 ","
-            "\"retried\": %" PRIu64 ","
-            "\"error\": %" PRIu64 ","
-            "\"noscript\": %" PRIu64
-          "},"
-          "\"cluster\": {"
-            "\"discoveries\": {"
-              "\"total\": %" PRIu64 ","
-              "\"failed\": %" PRIu64
-            "},"
-            "\"replies\": {"
-              "\"moved\": %" PRIu64 ","
-              "\"ask\": %" PRIu64
-            "}"
-          "}"
-        "}",
-        db->stats.servers.total,
-        db->stats.servers.failed,
-        db->stats.connections.total,
-        db->stats.connections.failed,
-        db->stats.connections.dropped.error,
-        db->stats.connections.dropped.hung_up,
-        db->stats.connections.dropped.overflow,
-        db->stats.connections.dropped.ttl,
-        db->stats.connections.dropped.version,
-        db->stats.connections.dropped.sick,
-        db->stats.workers.blocked,
-        db->stats.commands.total,
-        db->stats.commands.failed,
-        db->stats.commands.retried,
-        db->stats.commands.error,
-        db->stats.commands.noscript,
-        db->stats.cluster.discoveries.total,
-        db->stats.cluster.discoveries.failed,
-        db->stats.cluster.replies.moved,
-        db->stats.cluster.replies.ask);
+    if (format == vmod_enum_json) {
+        AZ(VSB_printf(vsb,
+            "{"
+                "\"servers\": {"
+                    "\"total\": %" PRIu64 ","
+                    "\"failed\": %" PRIu64
+                "},"
+                "\"connections\": {"
+                    "\"total\": %" PRIu64 ","
+                    "\"failed\": %" PRIu64 ","
+                    "\"dropped\": {"
+                        "\"error\": %" PRIu64 ","
+                        "\"hung_up\": %" PRIu64 ","
+                        "\"overflow\": %" PRIu64 ","
+                        "\"ttl\": %" PRIu64 ","
+                        "\"version\": %" PRIu64 ","
+                        "\"sick\": %" PRIu64
+                    "}"
+                "},"
+                "\"workers\": {"
+                    "\"blocked\": %" PRIu64
+                "},"
+                "\"commands\": {"
+                    "\"total\": %" PRIu64 ","
+                    "\"failed\": %" PRIu64 ","
+                    "\"retried\": %" PRIu64 ","
+                    "\"error\": %" PRIu64 ","
+                    "\"noscript\": %" PRIu64
+                "},"
+                "\"cluster\": {"
+                    "\"discoveries\": {"
+                        "\"total\": %" PRIu64 ","
+                        "\"failed\": %" PRIu64
+                    "},"
+                    "\"replies\": {"
+                        "\"moved\": %" PRIu64 ","
+                        "\"ask\": %" PRIu64
+                    "}"
+                "}"
+            "}",
+            db->stats.servers.total,
+            db->stats.servers.failed,
+            db->stats.connections.total,
+            db->stats.connections.failed,
+            db->stats.connections.dropped.error,
+            db->stats.connections.dropped.hung_up,
+            db->stats.connections.dropped.overflow,
+            db->stats.connections.dropped.ttl,
+            db->stats.connections.dropped.version,
+            db->stats.connections.dropped.sick,
+            db->stats.workers.blocked,
+            db->stats.commands.total,
+            db->stats.commands.failed,
+            db->stats.commands.retried,
+            db->stats.commands.error,
+            db->stats.commands.noscript,
+            db->stats.cluster.discoveries.total,
+            db->stats.cluster.discoveries.failed,
+            db->stats.cluster.replies.moved,
+            db->stats.cluster.replies.ask));
+    } else if (format == vmod_enum_prometheus) {
+        // Beware:
+        //   - Some best practices (e.g. naming of metrics described in
+        //     https://prometheus.io/docs/practices/naming/#metric-names) are
+        //     not followed here for consistency with previously existing JSON
+        //     output.
+        //   - No validations or transformations are applied to metric names,
+        //     label names and label values in order to obey the data model
+        //     described in https://prometheus.io/docs/concepts/data_model/.
+        const char *prefix = "vmod_redis_";
+        if ((prometheus_name_prefix != NULL) && (strlen(prometheus_name_prefix) > 0)) {
+            prefix = prometheus_name_prefix;
+        }
+        const char *labels = WS_Printf(ctx->ws,
+            "%s%s%s%s%s",
+            ((prometheus_extra_labels != NULL) && (strlen(prometheus_extra_labels) > 0)) ? prometheus_extra_labels : "",
+            ((prometheus_extra_labels != NULL) && (strlen(prometheus_extra_labels) > 0) && (prometheus_default_labels)) ? "," : "",
+            (prometheus_default_labels) ? "name=\"" : "",
+            (prometheus_default_labels) ? db->name : "",
+            (prometheus_default_labels) ? "\"" : "");
+        if (labels == NULL) {
+            if (!stream) {
+                VSB_destroy(&vsb);
+            }
+            REDIS_FAIL_WS(ctx, NULL);
+        }
+        const char *separator = (strlen(labels) > 0) ? "," : "";
+        AZ(VSB_printf(vsb,
+            "# TYPE %sservers_total counter\n"
+            "%sservers_total{%s} %" PRIu64 "\n"
+            "# TYPE %sservers_failed counter\n"
+            "%sservers_failed{%s} %" PRIu64 "\n"
+            "# TYPE %sconnections_total counter\n"
+            "%sconnections_total{%s} %" PRIu64 "\n"
+            "# TYPE %sconnections_failed counter\n"
+            "%sconnections_failed{%s} %" PRIu64 "\n"
+            "# TYPE %sconnections_dropped counter\n"
+            "%sconnections_dropped{%s%sreason=\"error\"} %" PRIu64 "\n"
+            "%sconnections_dropped{%s%sreason=\"hung_up\"} %" PRIu64 "\n"
+            "%sconnections_dropped{%s%sreason=\"overflow\"} %" PRIu64 "\n"
+            "%sconnections_dropped{%s%sreason=\"ttl\"} %" PRIu64 "\n"
+            "%sconnections_dropped{%s%sreason=\"version\"} %" PRIu64 "\n"
+            "%sconnections_dropped{%s%sreason=\"sick\"} %" PRIu64 "\n"
+            "# TYPE %sworkers_blocked counter\n"
+            "%sworkers_blocked{%s} %" PRIu64 "\n"
+            "# TYPE %scommands_total counter\n"
+            "%scommands_total{%s} %" PRIu64 "\n"
+            "# TYPE %scommands_failed counter\n"
+            "%scommands_failed{%s} %" PRIu64 "\n"
+            "# TYPE %scommands_retried counter\n"
+            "%scommands_retried{%s} %" PRIu64 "\n"
+            "# TYPE %scommands_error counter\n"
+            "%scommands_error{%s} %" PRIu64 "\n"
+            "# TYPE %scommands_noscript counter\n"
+            "%scommands_noscript{%s} %" PRIu64 "\n"
+            "# TYPE %scluster_discoveries_total counter\n"
+            "%scluster_discoveries_total{%s} %" PRIu64 "\n"
+            "# TYPE %scluster_discoveries_failed counter\n"
+            "%scluster_discoveries_failed{%s} %" PRIu64 "\n"
+            "# TYPE %scluster_replies_moved counter\n"
+            "%scluster_replies_moved{%s} %" PRIu64 "\n"
+            "# TYPE %scluster_replies_ask counter\n"
+            "%scluster_replies_ask{%s} %" PRIu64 "\n",
+            prefix,
+            prefix, labels, db->stats.servers.total,
+            prefix,
+            prefix, labels, db->stats.servers.failed,
+            prefix,
+            prefix, labels, db->stats.connections.total,
+            prefix,
+            prefix, labels, db->stats.connections.failed,
+            prefix,
+            prefix, labels, separator, db->stats.connections.dropped.error,
+            prefix, labels, separator, db->stats.connections.dropped.hung_up,
+            prefix, labels, separator, db->stats.connections.dropped.overflow,
+            prefix, labels, separator, db->stats.connections.dropped.ttl,
+            prefix, labels, separator, db->stats.connections.dropped.version,
+            prefix, labels, separator, db->stats.connections.dropped.sick,
+            prefix,
+            prefix, labels, db->stats.workers.blocked,
+            prefix,
+            prefix, labels, db->stats.commands.total,
+            prefix,
+            prefix, labels, db->stats.commands.failed,
+            prefix,
+            prefix, labels, db->stats.commands.retried,
+            prefix,
+            prefix, labels, db->stats.commands.error,
+            prefix,
+            prefix, labels, db->stats.commands.noscript,
+            prefix,
+            prefix, labels, db->stats.cluster.discoveries.total,
+            prefix,
+            prefix, labels, db->stats.cluster.discoveries.failed,
+            prefix,
+            prefix, labels, db->stats.cluster.replies.moved,
+            prefix,
+            prefix, labels, db->stats.cluster.replies.ask));
+    }
     Lck_Unlock(&db->mutex);
+
+    const char *result = NULL;
+    if (stream) {
+        result = WS_Copy(ctx->ws, "", -1);
+    } else {
+        AZ(VSB_finish(vsb));
+        result = WS_Copy(ctx->ws, VSB_data(vsb), VSB_len(vsb));
+        VSB_destroy(&vsb);
+    }
     if (result == NULL) {
         REDIS_FAIL_WS(ctx, NULL);
     }
@@ -1377,7 +1502,8 @@ VMOD_PROXIED_METHOD(
     _COMMA_ task_priv)
 VMOD_PROXIED_METHOD(
     STRING, NULL, stats,
-    )
+    _COMMA_ format _COMMA_ stream _COMMA_ prometheus_name_prefix _COMMA_ prometheus_default_labels _COMMA_ prometheus_extra_labels,
+    VCL_ENUM format, VCL_BOOL stream, VCL_STRING prometheus_name_prefix, VCL_BOOL prometheus_default_labels, VCL_STRING prometheus_extra_labels)
 VMOD_PROXIED_METHOD(
     INT, 0, counter,
     _COMMA_ name,
