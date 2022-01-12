@@ -7,7 +7,7 @@ $script = <<SCRIPT
   apt-get install -qq unzip apt-transport-https \
     autotools-dev automake libtool python-docutils pkg-config libpcre2-dev \
     libeditline-dev libedit-dev make dpkg-dev git libjemalloc-dev \
-    libev-dev libncurses-dev python-sphinx graphviz libssl-dev
+    libev-dev libncurses-dev python3-sphinx graphviz libssl-dev
 
   # Varnish Cache.
   sudo -u vagrant bash -c '\
@@ -70,8 +70,8 @@ Vagrant.configure('2') do |config|
   end
 
   config.vm.define :v70 do |machine|
-    machine.vm.box = 'ubuntu/bionic64'
-    machine.vm.box_version = '=20210129.0.0'
+    machine.vm.box = 'ubuntu/focal64'
+    machine.vm.box_version = '=20211026.0.0'
     machine.vm.box_check_update = true
     machine.vm.provision :shell, :privileged => true, :keep_color => false, :inline => $script
     machine.vm.provider :virtualbox do |vb|

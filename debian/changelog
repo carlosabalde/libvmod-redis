@@ -1,3 +1,10 @@
+libvmod-redis (14.1-1) stable; urgency=low
+
+  * Added support for streaming & Prometheus format to the .stats() method
+  * Added CHECK_OBJ_NOTNULL() checks in all free_*() functions
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Wed, 12 Jan 2022 16:00:00 +0100
+
 libvmod-redis (14.0-1) stable; urgency=low
 
   * Migrated to Varnish Cache 7.0.x

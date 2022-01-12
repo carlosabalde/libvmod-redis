@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2014-2021 Carlos Abalde <carlos.abalde@gmail.com>
+# Copyright (c) 2014-2022 Carlos Abalde <carlos.abalde@gmail.com>
 #
 # You're free to use and distribute this under terms in the
 # LICENSE file.
@@ -278,7 +278,13 @@ $Function VOID free(PRIV_VCL, PRIV_TASK, STRING db="")
 Description
     Proxied version of ``.free()``.
 
-$Function STRING stats(PRIV_VCL, PRIV_TASK, STRING db="")
+$Function STRING stats(PRIV_VCL, PRIV_TASK,
+    ENUM { json, prometheus } format="json",
+    BOOL stream=0,
+    STRING prometheus_name_prefix="vmod_redis_",
+    BOOL prometheus_default_labels=1,
+    STRING prometheus_extra_labels="",
+    STRING db="")
 
 Description
     Proxied version of ``.stats()``.
@@ -721,10 +727,34 @@ Description
     use this function, but if not called this will be handled automatically during
     the next call to ``.command()`` using the same object.
 
-$Method STRING .stats()
+$Method STRING .stats(
+    ENUM { json, prometheus } format="json",
+    BOOL stream=0,
+    STRING prometheus_name_prefix="vmod_redis_",
+    BOOL prometheus_default_labels=1,
+    STRING prometheus_extra_labels="")
 
+Arguments
+    format: format of the output string.
+
+    stream: if enabled, the response object will be streamed as a synthetic
+    response.
+
+    prometheus_name_prefix: prefix to be used in all Prometheus metric names.
+    It's used as a raw value; no validations or transformations at all.
+
+    prometheus_default_labels: if enabled, some default Prometheus labels will
+    be added to all stats.
+
+    prometheus_extra_labels: extra Prometheus labels to be added to all stats.
+    It's used as a raw value; no validations or transformations at all.
 Description
-    Returns internal stats represented as a JSON string.
+    Returns internal stats represented as a string.
+
+    If called during ``vcl_synth`` or ``vcl_backend_error`` with the ``stream``
+    argument enabled, this function will return an empty string and behave as
+    a call to the ``synthetic`` VCL function with the response object as input.
+    This highly reduces the amount of required workspace memory.
 
 $Method INT .counter(STRING name)
 
