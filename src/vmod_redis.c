@@ -553,6 +553,7 @@ vmod_db__init(
             Lck_Lock(&config->mutex);
             Lck_Lock(&instance->mutex);
             redis_server_t *server = unsafe_add_redis_server(ctx, instance, config, location, role);
+            AN(server);
             Lck_Unlock(&instance->mutex);
             Lck_Unlock(&config->mutex);
 
@@ -627,6 +628,7 @@ vmod_db_add_server(
         Lck_Lock(&config->mutex);
         Lck_Lock(&db->mutex);
         redis_server_t *server = unsafe_add_redis_server(ctx, db, config, location, role);
+        AN(server);
         unsigned discovery =
             (server != NULL) &&
             (db->cluster.enabled) &&
