@@ -3,6 +3,7 @@
 ##
 ## Configuration.
 ##
+IPV6=0
 REDIS_STANDALONE_MASTER_SERVERS=2
 REDIS_STANDALONE_SLAVE_SERVERS=2
 REDIS_STANDALONE_SENTINEL_SERVERS=3
@@ -90,7 +91,7 @@ fi
 ##
 if [[ ${@: -1} =~ ^.*standalone(\.[0-9]{7,})?\.[^\.]*\.vtc(\.disabled)?$ ]]; then
     for MASTER_INDEX in $(seq 1 $REDIS_STANDALONE_MASTER_SERVERS); do
-        MASTER_IP=127.0.0.$MASTER_INDEX
+        [[ $IPV6 = 1 ]] && MASTER_IP=::1 || MASTER_IP=127.0.0.$MASTER_INDEX
         MASTER_PORT=$((REDIS_STANDALONE_START_PORT+MASTER_INDEX))
         MASTER_TLS_PORT=$((MASTER_PORT+1000))
         cat > "$TMP/redis-master$MASTER_INDEX.conf" <<EOF
@@ -118,7 +119,7 @@ EOF
             -Dredis_master${MASTER_INDEX}_socket=$TMP/redis-master$MASTER_INDEX.sock"
 
         for SLAVE_INDEX in $(seq 1 $REDIS_STANDALONE_SLAVE_SERVERS); do
-            SLAVE_IP=127.0.$MASTER_INDEX.$SLAVE_INDEX
+            [[ $IPV6 = 1 ]] && SLAVE_IP=::1 || SLAVE_IP=127.0.$MASTER_INDEX.$SLAVE_INDEX
             SLAVE_PORT=$((REDIS_STANDALONE_START_PORT+REDIS_STANDALONE_MASTER_SERVERS+(MASTER_INDEX-1)*REDIS_STANDALONE_SLAVE_SERVERS+SLAVE_INDEX))
             SLAVE_TLS_PORT=$((SLAVE_PORT+1000))
             cat > "$TMP/redis-slave${MASTER_INDEX}_$SLAVE_INDEX.conf" <<EOF
@@ -158,7 +159,7 @@ EOF
     done
 
     for INDEX in $(seq 1 $REDIS_STANDALONE_SENTINEL_SERVERS); do
-        SENTINEL_IP=127.1.0.$INDEX
+        [[ $IPV6 = 1 ]] && SENTINEL_IP=::1 || SENTINEL_IP=127.1.0.$INDEX
         SENTINEL_PORT=$((REDIS_STANDALONE_START_PORT+2000+INDEX))
         SENTINEL_TLS_PORT=$((SENTINEL_PORT+1000))
         cat >> "$TMP/redis-sentinel$INDEX.conf" <<EOF
@@ -191,13 +192,14 @@ EOF
 elif [[ ${@: -1} =~ ^.*clustered(\.[0-9]{7,})?\.[^\.]*\.vtc(\.disabled)?$ ]]; then
     SERVERS=""
     for INDEX in $(seq 1 $REDIS_CLUSTER_SERVERS); do
+        [[ $IPV6 = 1 ]] && IP=::1 || IP=127.0.0.$INDEX
         PORT=$((REDIS_CLUSTER_START_PORT+INDEX))
         TLS_PORT=$((PORT+1000))
         cat > "$TMP/redis-server$INDEX.conf" <<EOF
         daemonize yes
         dir $TMP
         port $PORT
-        bind 127.0.0.$INDEX
+        bind $IP
         unixsocket $TMP/redis-server$INDEX.sock
         pidfile $TMP/redis-server$INDEX.pid
         cluster-enabled yes
@@ -217,11 +219,11 @@ EOF
         redis-server "$TMP/redis-server$INDEX.conf"
         CONTEXT="\
             $CONTEXT \
-            -Dredis_server${INDEX}_ip=127.0.0.$INDEX \
+            -Dredis_server${INDEX}_ip=$IP \
             -Dredis_server${INDEX}_port=$PORT \
             -Dredis_server${INDEX}_tls_port=$TLS_PORT \
             -Dredis_server${INDEX}_socket=$TMP/redis-server$INDEX.sock"
-        SERVERS="$SERVERS 127.0.0.$INDEX:$PORT"
+        SERVERS="$SERVERS $IP:$PORT"
     done
 
     # Wait for all nodes to bootstrap and then set up the cluster.
@@ -240,15 +242,16 @@ EOF
     #     (redis_master1, redis_master2, ...).
     #   - An example key for each of those master nodes (redis_key_in_master1,
     #   redis_key_in_master2, ...).
+    [[ $IPV6 = 1 ]] && HOST=::1 || HOST=127.0.1
     INDEX=1
     while read LINE; do
         CONTEXT="\
             $CONTEXT \
-            -Dredis_master${INDEX}_ip=$(echo $LINE | cut -f 2 -d ' ' | cut -f 1 -d ':') \
-            -Dredis_master${INDEX}_port=$(echo $LINE | cut -f 2 -d ' ' | cut -f 2 -d ':' | cut -f 1 -d '@') \
+            -Dredis_master${INDEX}_ip=$(echo $LINE | cut -f 2 -d ' ' | cut -f 1 -d '@' | rev | cut -f 2- -d ':' | rev) \
+            -Dredis_master${INDEX}_port=$(echo $LINE | cut -f 2 -d ' ' | cut -f 1 -d '@' | rev | cut -f 1 -d ':' | rev) \
             -Dredis_key_in_master${INDEX}=$(grep "^$(echo $LINE | cut -f 9 -d ' ' | cut -f 1 -d '-'): " $ROOT/assets/hashslot-keys.txt | cut -f 2 -d ' ')"
         INDEX=$(( INDEX + 1 ))
-    done <<< "$(redis-cli -p $((REDIS_CLUSTER_START_PORT+1)) CLUSTER NODES | grep master | sort -k 9 -n)"
+    done <<< "$(redis-cli -h $HOST -p $((REDIS_CLUSTER_START_PORT+1)) CLUSTER NODES | grep master | sort -k 9 -n)"
 fi
 
 ##
