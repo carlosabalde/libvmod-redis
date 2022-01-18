@@ -149,8 +149,8 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
 
         # Migrate key.
         master1.command("MIGRATE");
-        master1.push(regsub("${redis_master2_ip}:${redis_master2_port}", "([\d\.]*):([\d]*)", "\1"));
-        master1.push(regsub("${redis_master2_ip}:${redis_master2_port}", "([\d\.]*):([\d]*)", "\2"));
+        master1.push("${redis_master2_ip}");
+        master1.push("${redis_master2_port}");
         master1.push("${redis_key_in_master1}");
         master1.push("0");
         master1.push("0");
