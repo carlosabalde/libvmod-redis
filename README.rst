@@ -1,8 +1,8 @@
 
-.. image:: https://github.com/carlosabalde/libvmod-redis/workflows/CI/badge.svg?branch=master
+.. image:: https://github.com/carlosabalde/libvmod-redis/workflows/CI/badge.svg?branch=7.1
    :alt: GitHub Actions CI badge
    :target: https://github.com/carlosabalde/libvmod-redis/actions
-.. image:: https://codecov.io/gh/carlosabalde/libvmod-redis/branch/master/graph/badge.svg
+.. image:: https://codecov.io/gh/carlosabalde/libvmod-redis/branch/7.1/graph/badge.svg
    :alt: Codecov badge
    :target: https://codecov.io/gh/carlosabalde/libvmod-redis
 
