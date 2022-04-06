@@ -11,6 +11,9 @@
 #include <hiredis/hiredis_ssl.h>
 #endif
 #include <arpa/inet.h>
+#ifdef __FreeBSD__
+#include <sys/socket.h>
+#endif
 
 #include "vrt.h"
 #include "cache/cache.h"
