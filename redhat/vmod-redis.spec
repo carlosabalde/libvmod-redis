@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 7.6
+Version: 7.7
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,6 +36,8 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Thu Jun 02 2022 Carlos Abalde <carlos.abalde@gmail.com> - 7.7-1.20220602
+- Fixed missing string terminator in .stats() method.
 * Wed Jan 12 2022 Carlos Abalde <carlos.abalde@gmail.com> - 7.6-1.20220112
 - Added support for streaming & Prometheus format to the .stats() method.
 - Added CHECK_OBJ_NOTNULL() checks in all free_*() functions.
