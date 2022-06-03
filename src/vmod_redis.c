@@ -1262,7 +1262,7 @@ vmod_db_stats(
     if (stream) {
         result = WS_Copy(ctx->ws, "", -1);
     } else {
-        VSB_putc(vsb, '\0');
+        AZ(VSB_putc(vsb, '\0'));
         AZ(VSB_finish(vsb));
         result = WS_Copy(ctx->ws, VSB_data(vsb), VSB_len(vsb));
         VSB_destroy(&vsb);
