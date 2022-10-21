@@ -390,7 +390,7 @@ extern vmod_state_t vmod_state;
         if ((_ctx != NULL) && (_ctx->vsl != NULL)) { \
             VSLb(_ctx->vsl, _tag, _buffer, ##__VA_ARGS__); \
         } else { \
-            VSL(_tag, 0, _buffer, ##__VA_ARGS__); \
+            VSL(_tag, NO_VXID, _buffer, ##__VA_ARGS__); \
         } \
         \
         free(_buffer); \
