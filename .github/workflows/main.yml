@@ -47,7 +47,7 @@ jobs:
 
       - name: Install hiredis
         run: |
-          wget --no-check-certificate https://github.com/redis/hiredis/archive/v1.1.0-rc1.zip -O hiredis-1.1.0-rc1.zip
+          wget --no-check-certificate https://github.com/redis/hiredis/archive/v1.1.0.zip -O hiredis-1.1.0.zip
           unzip hiredis-*.zip
           pushd hiredis-*/
           make USE_SSL=1
