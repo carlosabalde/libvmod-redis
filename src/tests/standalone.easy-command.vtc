@@ -1,0 +1,58 @@
+varnishtest "Tests command execution timeout"
+
+server s1 {
+   rxreq
+   txresp
+} -repeat 1 -start
+
+varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
+    import ${vmod_redis};
+
+    sub vcl_init {
+        redis.subnets(
+            masks={""});
+
+        redis.sentinels(
+            locations={""},
+            period=0,
+            connection_timeout=500,
+            command_timeout=0);
+
+        new db = redis.db(
+            location="${redis_master1_ip}:${redis_master1_port}",
+            type=master,
+            connection_timeout=500,
+            connection_ttl=0,
+            command_timeout=0,
+            max_command_retries=0,
+            shared_connections=false,
+            max_connections=1,
+            password="",
+            sickness_ttl=0,
+            ignore_slaves=false,
+            max_cluster_hops=0);
+    }
+
+    sub vcl_deliver {
+        db.easy_command("SET", "easy-foo", "easy-hello");
+        set resp.http.Replied-1 = db.replied();
+        set resp.http.Reply-1 = db.get_reply();
+
+        db.easy_command("GET", "easy-foo");
+        set resp.http.Replied-2 = db.replied();
+        set resp.http.Reply-2 = db.get_reply();
+    }
+} -start
+
+client c1 {
+    txreq
+    rxresp
+
+    expect resp.http.Replied-1 == "true"
+    expect resp.http.Reply-1 == "OK"
+
+    expect resp.http.Replied-2 == "true"
+    expect resp.http.Reply-2 == "easy-hello"
+} -run
+
+varnish v1 -expect client_req == 1

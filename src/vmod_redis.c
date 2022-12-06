@@ -824,6 +824,27 @@ vmod_db_execute(
 }
 
 /******************************************************************************
+ * .easy_command();
+ *****************************************************************************/
+
+VCL_VOID
+vmod_db_easy_command(
+    VRT_CTX, struct vmod_redis_db *db, struct vmod_priv *vcl_priv,
+    struct vmod_priv *task_priv, VCL_STRANDS cmd)
+{
+    int i;
+
+    if (cmd->n)
+        vmod_db_command(ctx, db, task_priv, cmd->p[0]);
+
+    for (i = 1; i < cmd->n; i++)
+        vmod_db_push(ctx, db, task_priv, cmd->p[0]);
+
+    vmod_db_execute(ctx, db, vcl_priv, task_priv, 0);
+}
+
+
+/******************************************************************************
  * .replied();
  *****************************************************************************/
 

@@ -527,6 +527,17 @@ Description
       and ``EVAL`` or ``EVALSHA`` command are submitted in order to avoid this
       counterintuitive scenario.
 
+$Method VOID .easy_command(PRIV_VCL, PRIV_TASK, STRANDS command_with_args)
+
+Arguments
+    The words composing the `redis` command, each as an individual argument.
+    Such as `db.easy_command("set", "foo", "hello");`
+Return value
+    VOID
+Description
+    Equivalent to calling, `.command()`, `.push()` (possibly multiple times),
+    then finally `.execute()` using a single command.
+
 $Method BOOL .replied(PRIV_TASK)
 
 Return value
