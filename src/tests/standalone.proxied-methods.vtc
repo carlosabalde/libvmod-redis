@@ -82,6 +82,29 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         redis.execute(true, db="master1");
         set resp.http.Reply-4 = redis.get_reply(db="master1");
 
+	# same, with easy_execute
+        # SET (master1) -> GET (master1) -> GET (master2).
+        redis.use("master1");
+	redis.easy_execute("SET", "baz", "42");
+
+	redis.easy_execute("GET", "baz");
+        set resp.http.Reply-easy-1 = redis.get_reply();
+
+	redis.easy_execute("GET", "baz", db="master2", master = true);
+        set resp.http.Reply-easy-2 = redis.get_reply(db="master2");
+
+        # SET (master2) -> GET (master2) -> GET (master1).
+        redis.use("master2");
+	redis.easy_execute("SET", "qux", "42");
+
+        redis.command("GET");
+	redis.easy_execute("GET", "qux");
+        set resp.http.Reply-easy-3 = redis.get_reply();
+
+	redis.easy_execute("GET", "qux", db="master1");
+        set resp.http.Reply-easy-4 = redis.get_reply(db="master1");
+
+
         # Stats.
         set resp.http.master1-stats = redis.stats(db="master1");
         set resp.http.master1-servers-total = redis.counter("servers.total", db="master1");
@@ -113,17 +136,23 @@ client c1 {
     expect resp.http.Reply-3 == "Hello world!"
     expect resp.http.Reply-4 == ""
 
+    expect resp.http.Reply-easy-1 == "42"
+    expect resp.http.Reply-easy-2 == ""
+
+    expect resp.http.Reply-easy-3 == "42"
+    expect resp.http.Reply-easy-4 == ""
+
     expect resp.http.master1-servers-total == "1"
-    expect resp.http.master1-connections-total == "2"
-    expect resp.http.master1-connections-dropped-overflow == "1"
-    expect resp.http.master1-commands-total == "3"
+    expect resp.http.master1-connections-total == "3"
+    expect resp.http.master1-connections-dropped-overflow == "2"
+    expect resp.http.master1-commands-total == "6"
     expect resp.http.master1-commands-error == "0"
     expect resp.http.master1-commands-noscript == "0"
 
     expect resp.http.master2-servers-total == "1"
-    expect resp.http.master2-connections-total == "1"
-    expect resp.http.master2-connections-dropped-overflow == "1"
-    expect resp.http.master2-commands-total == "3"
+    expect resp.http.master2-connections-total == "2"
+    expect resp.http.master2-connections-dropped-overflow == "2"
+    expect resp.http.master2-commands-total == "6"
     expect resp.http.master2-commands-error == "0"
     expect resp.http.master2-commands-noscript == "0"
 } -run
