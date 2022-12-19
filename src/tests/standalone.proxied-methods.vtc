@@ -82,26 +82,26 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
         redis.execute(true, db="master1");
         set resp.http.Reply-4 = redis.get_reply(db="master1");
 
-	# same, with easy_execute
+        # same, with easy_execute
         # SET (master1) -> GET (master1) -> GET (master2).
         redis.use("master1");
-	redis.easy_execute("SET", "baz", "42");
+        redis.easy_execute("SET", "baz", "42");
 
-	redis.easy_execute("GET", "baz");
+        redis.easy_execute("GET", "baz");
         set resp.http.Reply-easy-1 = redis.get_reply();
 
-	redis.easy_execute("GET", "baz", db="master2", master = true);
+        redis.easy_execute("GET", "baz", db="master2", master = true);
         set resp.http.Reply-easy-2 = redis.get_reply(db="master2");
 
         # SET (master2) -> GET (master2) -> GET (master1).
         redis.use("master2");
-	redis.easy_execute("SET", "qux", "42");
+        redis.easy_execute("SET", "qux", "42");
 
         redis.command("GET");
-	redis.easy_execute("GET", "qux");
+        redis.easy_execute("GET", "qux");
         set resp.http.Reply-easy-3 = redis.get_reply();
 
-	redis.easy_execute("GET", "qux", db="master1");
+        redis.easy_execute("GET", "qux", db="master1");
         set resp.http.Reply-easy-4 = redis.get_reply(db="master1");
 
 

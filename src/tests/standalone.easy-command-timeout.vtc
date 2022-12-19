@@ -35,32 +35,32 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
 
     sub vcl_deliver {
         # Fast command (no timeout).
-	db.easy_execute("SET", "foo", "hello", master = true);
+        db.easy_execute("SET", "foo", "hello", master = true);
         set resp.http.Replied-1 = db.replied();
         set resp.http.Reply-1 = db.get_reply();
 
         # Slow command (no timeout).
-	db.easy_execute("DEBUG", "sleep", "3", master = true);
+        db.easy_execute("DEBUG", "sleep", "3", master = true);
         set resp.http.Replied-2 = db.replied();
         set resp.http.Reply-2 = db.get_reply();
 
         # Fast command (1000 ms timeout).
-	db.easy_execute("SET", "foo", "hello", master = true, timeout = 1000);
+        db.easy_execute("SET", "foo", "hello", master = true, timeout = 1000);
         set resp.http.Replied-3 = db.replied();
         set resp.http.Reply-3 = db.get_reply();
 
         # Slow command (1000 ms timeout).
-	db.easy_execute("DEBUG", "sleep", "3", master = true, timeout = 1000);
+        db.easy_execute("DEBUG", "sleep", "3", master = true, timeout = 1000);
         set resp.http.Replied-4 = db.replied();
         set resp.http.Reply-4 = db.get_reply();
 
         # Fast command (no timeout).
-	db.easy_execute("SET", "foo", "hello", master = true);
+        db.easy_execute("SET", "foo", "hello", master = true);
         set resp.http.Replied-5 = db.replied();
         set resp.http.Reply-5 = db.get_reply();
 
         # Slow command (no timeout).
-	db.easy_execute("DEBUG", "sleep", "3", master = true);
+        db.easy_execute("DEBUG", "sleep", "3", master = true);
         set resp.http.Replied-6 = db.replied();
         set resp.http.Reply-6 = db.get_reply();
 

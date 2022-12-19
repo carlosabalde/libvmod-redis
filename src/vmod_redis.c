@@ -827,9 +827,9 @@ vmod_db_execute(
  * .easy_execute();
  *****************************************************************************/
 
-#define HANDLE_ARG(N) 						\
-    if (args->valid_cmd_arg ## N) {  				\
-        vmod_db_push(ctx, db, args->task_priv, args->cmd_arg ## N);	\
+#define HANDLE_ARG(N)                                               \
+    if (args->valid_cmd_arg ## N) {                                 \
+        vmod_db_push(ctx, db, args->task_priv, args->cmd_arg ## N); \
     }
 
 /* we need this twice, with two different arg structures:
@@ -838,32 +838,32 @@ vmod_db_execute(
  * and sadly we can't use VMOD_PROXIED_METHOD because of this 
  */
 
-#define EASY_EXEC(name, arg_type)						\
-VCL_VOID									\
-name(										\
-    VRT_CTX, struct vmod_redis_db *db,						\
-    struct arg_type *args)							\
-{										\
-    AN(ctx);									\
-    AN(db);									\
-    AN(args);									\
-    AN(args->vcl_priv);								\
-    AN(args->task_priv);							\
-										\
-    vmod_db_command(ctx, db, args->task_priv, args->command);			\
-    HANDLE_ARG(1);   HANDLE_ARG(2);   HANDLE_ARG(3);   HANDLE_ARG(4);		\
-    HANDLE_ARG(5);   HANDLE_ARG(6);   HANDLE_ARG(7);   HANDLE_ARG(8);		\
-    HANDLE_ARG(9);   HANDLE_ARG(10);  HANDLE_ARG(11);  HANDLE_ARG(12);		\
-    HANDLE_ARG(13);  HANDLE_ARG(14);  HANDLE_ARG(15);  HANDLE_ARG(16);		\
-										\
-    if (args->valid_timeout) {							\
-        vmod_db_timeout(ctx, db, args->task_priv, args->timeout);		\
-    }										\
-    if (args->valid_retries) {							\
-        vmod_db_retries(ctx, db, args->task_priv, args->retries);		\
-    }										\
-										\
-    vmod_db_execute(ctx, db, args->vcl_priv, args->task_priv, args->master);	\
+#define EASY_EXEC(name, arg_type)                                            \
+VCL_VOID                                                                     \
+name(                                                                        \
+    VRT_CTX, struct vmod_redis_db *db,                                       \
+    struct arg_type *args)                                                   \
+{                                                                            \
+    AN(ctx);                                                                 \
+    AN(db);                                                                  \
+    AN(args);                                                                \
+    AN(args->vcl_priv);                                                      \
+    AN(args->task_priv);                                                     \
+                                                                             \
+    vmod_db_command(ctx, db, args->task_priv, args->command);                \
+    HANDLE_ARG(1);   HANDLE_ARG(2);   HANDLE_ARG(3);   HANDLE_ARG(4);        \
+    HANDLE_ARG(5);   HANDLE_ARG(6);   HANDLE_ARG(7);   HANDLE_ARG(8);        \
+    HANDLE_ARG(9);   HANDLE_ARG(10);  HANDLE_ARG(11);  HANDLE_ARG(12);       \
+    HANDLE_ARG(13);  HANDLE_ARG(14);  HANDLE_ARG(15);  HANDLE_ARG(16);       \
+                                                                             \
+    if (args->valid_timeout) {                                               \
+        vmod_db_timeout(ctx, db, args->task_priv, args->timeout);            \
+    }                                                                        \
+    if (args->valid_retries) {                                               \
+        vmod_db_retries(ctx, db, args->task_priv, args->retries);            \
+    }                                                                        \
+                                                                             \
+    vmod_db_execute(ctx, db, args->vcl_priv, args->task_priv, args->master); \
 }
 
 EASY_EXEC(vmod_db_easy_execute, arg_vmod_redis_db_easy_execute);

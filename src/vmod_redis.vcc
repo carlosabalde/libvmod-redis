@@ -161,11 +161,11 @@ $Function VOID easy_execute(PRIV_VCL vcl_priv, PRIV_TASK task_priv,
         [STRING cmd_arg14],
         [STRING cmd_arg15],
         [STRING cmd_arg16],
-	[INT timeout],
-	[INT retries],
-	BOOL master = 1,
-	STRING db=""
-	)
+        [INT timeout],
+        [INT retries],
+        BOOL master = 1,
+        STRING db=""
+        )
 
 Description
     Proxied version of ``.easy_execute()``.
@@ -572,10 +572,10 @@ $Method VOID .easy_execute(PRIV_VCL vcl_priv, PRIV_TASK task_priv,
         [STRING cmd_arg14],
         [STRING cmd_arg15],
         [STRING cmd_arg16],
-	[INT timeout],
-	[INT retries],
-	BOOL master = 1
-	)
+        [INT timeout],
+        [INT retries],
+        BOOL master = 1
+        )
 
 Arguments
     The command argument is mandatory, followed with up to 16 arguments,
