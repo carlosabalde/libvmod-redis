@@ -1,0 +1,110 @@
+varnishtest "Tests easy_execution timeout"
+
+server s1 {
+   rxreq
+   txresp
+} -repeat 1 -start
+
+varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
+    import ${vmod_redis};
+
+    sub vcl_init {
+        redis.subnets(
+            masks={""});
+
+        redis.sentinels(
+            locations={""},
+            period=0,
+            connection_timeout=500,
+            command_timeout=0);
+
+        new db = redis.db(
+            location="${redis_master1_ip}:${redis_master1_port}",
+            type=master,
+            connection_timeout=500,
+            connection_ttl=0,
+            command_timeout=0,
+            max_command_retries=0,
+            shared_connections=false,
+            max_connections=1,
+            password="",
+            sickness_ttl=0,
+            ignore_slaves=false,
+            max_cluster_hops=0);
+    }
+
+    sub vcl_deliver {
+        # Fast command (no timeout).
+        db.easy_execute("SET", "foo", "hello", master = true);
+        set resp.http.Replied-1 = db.replied();
+        set resp.http.Reply-1 = db.get_reply();
+
+        # Slow command (no timeout).
+        db.easy_execute("DEBUG", "sleep", "3", master = true);
+        set resp.http.Replied-2 = db.replied();
+        set resp.http.Reply-2 = db.get_reply();
+
+        # Fast command (1000 ms timeout).
+        db.easy_execute("SET", "foo", "hello", master = true, timeout = 1000);
+        set resp.http.Replied-3 = db.replied();
+        set resp.http.Reply-3 = db.get_reply();
+
+        # Slow command (1000 ms timeout).
+        db.easy_execute("DEBUG", "sleep", "3", master = true, timeout = 1000);
+        set resp.http.Replied-4 = db.replied();
+        set resp.http.Reply-4 = db.get_reply();
+
+        # Fast command (no timeout).
+        db.easy_execute("SET", "foo", "hello", master = true);
+        set resp.http.Replied-5 = db.replied();
+        set resp.http.Reply-5 = db.get_reply();
+
+        # Slow command (no timeout).
+        db.easy_execute("DEBUG", "sleep", "3", master = true);
+        set resp.http.Replied-6 = db.replied();
+        set resp.http.Reply-6 = db.get_reply();
+
+        # Stats.
+        set resp.http.db-stats = db.stats();
+        set resp.http.db-servers-total = db.counter("servers.total");
+        set resp.http.db-connections-total = db.counter("connections.total");
+        set resp.http.db-connections-dropped-error = db.counter("connections.dropped.error");
+        set resp.http.db-commands-total = db.counter("commands.total");
+        set resp.http.db-commands-error = db.counter("commands.error");
+        set resp.http.db-commands-failed = db.counter("commands.failed");
+        set resp.http.db-commands-noscript = db.counter("commands.noscript");
+    }
+} -start
+
+client c1 {
+    txreq
+    rxresp
+
+    expect resp.http.Replied-1 == "true"
+    expect resp.http.Reply-1 == "OK"
+
+    expect resp.http.Replied-2 == "true"
+    expect resp.http.Reply-2 == "OK"
+
+    expect resp.http.Replied-3 == "true"
+    expect resp.http.Reply-3 == "OK"
+
+    expect resp.http.Replied-4 == "false"
+    expect resp.http.Reply-4 == ""
+
+    expect resp.http.Replied-5 == "true"
+    expect resp.http.Reply-5 == "OK"
+
+    expect resp.http.Replied-6 == "true"
+    expect resp.http.Reply-6 == "OK"
+
+    expect resp.http.db-servers-total == "1"
+    expect resp.http.db-connections-total == "2"
+    expect resp.http.db-connections-dropped-error == "1"
+    expect resp.http.db-commands-total == "5"
+    expect resp.http.db-commands-failed == "1"
+    expect resp.http.db-commands-error == "0"
+    expect resp.http.db-commands-noscript == "0"
+} -run
+
+varnish v1 -expect client_req == 1
