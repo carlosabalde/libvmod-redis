@@ -579,14 +579,14 @@ $Method VOID .easy_execute(PRIV_VCL vcl_priv, PRIV_TASK task_priv,
 
 Arguments
     The command argument is mandatory, followed with up to 16 arguments,
-    optionally ending with `timeout` (as passed to `.timeout()`) and/or
-    `retries` (as passed to `.retries()`) and/or `master` (`.execute()`).
-    For example: `db.easy_command("set", "foo", "hello", retries=3, master=true);`
+    optionally ending with ``timeout`` (as passed to ``.timeout()``) and/or
+    ``retries`` (as passed to ``.retries()``) and/or ``master`` (``.execute()``).
+    For example: ``db.easy_command("set", "foo", "hello", retries=3, master=true);``
 Return value
     VOID
 Description
-    Equivalent to calling, `.command()`, `.push()` (possibly multiple times),
-    `.timeout()`, `.retries()` then finally `.execute()` using a single
+    Equivalent to calling, ``.command()``, ``.push()`` (possibly multiple times),
+    ``.timeout()``, ``.retries()`` then finally ``.execute()`` using a single
     command.
 
 $Method BOOL .replied(PRIV_TASK)
