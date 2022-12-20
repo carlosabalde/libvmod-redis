@@ -143,6 +143,33 @@ $Function VOID execute(PRIV_VCL, PRIV_TASK, BOOL master=1, STRING db="")
 Description
     Proxied version of ``.execute()``.
 
+$Function VOID easy_execute(PRIV_VCL, PRIV_TASK,
+        STRING command,
+        [STRING cmd_arg1],
+        [STRING cmd_arg2],
+        [STRING cmd_arg3],
+        [STRING cmd_arg4],
+        [STRING cmd_arg5],
+        [STRING cmd_arg6],
+        [STRING cmd_arg7],
+        [STRING cmd_arg8],
+        [STRING cmd_arg9],
+        [STRING cmd_arg10],
+        [STRING cmd_arg11],
+        [STRING cmd_arg12],
+        [STRING cmd_arg13],
+        [STRING cmd_arg14],
+        [STRING cmd_arg15],
+        [STRING cmd_arg16],
+	[INT timeout],
+	[INT retries],
+	BOOL master = 1,
+	STRING db=""
+	)
+
+Description
+    Proxied version of ``.easy_execute()``.
+
 $Function BOOL replied(PRIV_VCL, PRIV_TASK, STRING db="")
 
 Description
@@ -526,6 +553,41 @@ Description
       internally forces ``master == true`` when Redis Cluster support is enabled
       and ``EVAL`` or ``EVALSHA`` command are submitted in order to avoid this
       counterintuitive scenario.
+
+$Method VOID .easy_execute(PRIV_VCL, PRIV_TASK,
+        STRING command,
+        [STRING cmd_arg1],
+        [STRING cmd_arg2],
+        [STRING cmd_arg3],
+        [STRING cmd_arg4],
+        [STRING cmd_arg5],
+        [STRING cmd_arg6],
+        [STRING cmd_arg7],
+        [STRING cmd_arg8],
+        [STRING cmd_arg9],
+        [STRING cmd_arg10],
+        [STRING cmd_arg11],
+        [STRING cmd_arg12],
+        [STRING cmd_arg13],
+        [STRING cmd_arg14],
+        [STRING cmd_arg15],
+        [STRING cmd_arg16],
+	[INT timeout],
+	[INT retries],
+	BOOL master = 1
+	)
+
+Arguments
+    The command argument is mandatory, followed with up to 16 arguments,
+    optionally ending with `timeout` (as passed to `.timeout()`) and/or
+    `retries` (as passed to `.retries()`) and/or `master` (`.execute()`).
+    For example: `db.easy_command("set", "foo", "hello", retries=3, master=true);`
+Return value
+    VOID
+Description
+    Equivalent to calling, `.command()`, `.push()` (possibly multiple times),
+    `.timeout()`, `.retries()` then finally `.execute()` using a single
+    command.
 
 $Method BOOL .replied(PRIV_TASK)
 
