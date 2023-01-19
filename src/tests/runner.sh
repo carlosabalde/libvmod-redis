@@ -247,6 +247,7 @@ EOF
     while [ $(redis-cli -h $HOST -p $((REDIS_CLUSTER_START_PORT+1)) CLUSTER SLOTS | grep "$PATTERN" | wc -l) -lt $REDIS_CLUSTER_SERVERS ]; do
         sleep 1
     done
+    sleep 1
 
     # Add to context:
     #   - All master nodes' addresses ordered by the slots they handle
