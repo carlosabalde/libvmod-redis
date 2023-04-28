@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 3.20
+Version: 3.21
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,6 +36,11 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Fri Apr 28 2023 Carlos Abalde <carlos.abalde@gmail.com> - 3.21-1.20230428
+- Fixed a couple of Redis Cluster & Redis Sentinel IPv6 issues.
+- Fixed build under FreeBSD.
+- Added some missing AN() & AZ().
+- Fixed potential segmentation fault due to wrong logging in Sentinel thread.
 * Thu Jun 02 2022 Carlos Abalde <carlos.abalde@gmail.com> - 3.20-1.20220602
 - Fixed missing string terminator in .stats() method.
 * Wed Jan 12 2022 Carlos Abalde <carlos.abalde@gmail.com> - 3.19-1.20220112
