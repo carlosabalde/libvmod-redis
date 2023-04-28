@@ -295,4 +295,4 @@ BSD's implementation of the CRC-16 cryptographic hash function by Georges Menie 
 
 * http://download.redis.io/redis-stable/src/crc16.c
 
-Copyright (c) 2014-2022 Carlos Abalde <carlos.abalde@gmail.com>
+Copyright (c) Carlos Abalde <carlos.abalde@gmail.com>

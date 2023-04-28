@@ -10,6 +10,9 @@
 #include <hiredis/hiredis_ssl.h>
 #endif
 #include <arpa/inet.h>
+#ifdef __FreeBSD__
+#include <sys/socket.h>
+#endif
 
 #include "vcl.h"
 #include "vrt.h"
@@ -566,6 +569,7 @@ vmod_db__init(
             Lck_Lock(&config->mutex);
             Lck_Lock(&instance->mutex);
             redis_server_t *server = unsafe_add_redis_server(ctx, instance, location, role);
+            AN(server);
             Lck_Unlock(&instance->mutex);
             Lck_Unlock(&config->mutex);
 
@@ -638,6 +642,7 @@ vmod_db_add_server(
         Lck_Lock(&db->config->mutex);
         Lck_Lock(&db->mutex);
         redis_server_t *server = unsafe_add_redis_server(ctx, db, location, role);
+        AN(server);
         unsigned discovery =
             (server != NULL) &&
             (db->cluster.enabled) &&
@@ -1251,7 +1256,7 @@ vmod_db_stats(
     if (stream) {
         result = WS_Copy(ctx->ws, "", -1);
     } else {
-        VSB_putc(vsb, '\0');
+        AZ(VSB_putc(vsb, '\0'));
         AZ(VSB_finish(vsb));
         result = WS_Copy(ctx->ws, VSB_data(vsb), VSB_len(vsb));
         VSB_destroy(&vsb);
