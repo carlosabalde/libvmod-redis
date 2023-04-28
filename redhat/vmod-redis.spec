@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 17.0
+Version: 17.1
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,6 +36,12 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Fri Apr 28 2023 Carlos Abalde <carlos.abalde@gmail.com> - 17.1-1.20230428
+- Fixed a couple of Redis Cluster & Redis Sentinel IPv6 issues.
+- Fixed build under FreeBSD.
+- Added some missing AN() & AZ().
+- Introduced '.easy_execute()'.
+- Fixed potential segmentation fault due to wrong logging in Sentinel thread.
 * Wed Mar 15 2023 Carlos Abalde <carlos.abalde@gmail.com> - 17.0-1.20230315
 - Migrated to Varnish Cache 7.3.x.
 * Thu Sep 15 2022 Carlos Abalde <carlos.abalde@gmail.com> - 16.0-1.20220915
