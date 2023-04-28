@@ -352,8 +352,8 @@ sentinel_loop(void *object)
                                     "AUTH %s", state->password) != REDIS_OK) {
                                 REDIS_LOG_ERROR(NULL,
                                     "Failed to enqueue asynchronous Sentinel AUTH command (error=%d, sentinel=%s:%d): %s",
-                                    isentinel->host, isentinel->port,
-                                    HIREDIS_ERRSTR(isentinel->context));
+                                    isentinel->context->err, isentinel->host,
+                                    isentinel->port, HIREDIS_ERRSTR(isentinel->context));
                                 redisAsyncFree(isentinel->context);
                                 isentinel->context = NULL;
                             }
@@ -366,8 +366,8 @@ sentinel_loop(void *object)
                                     "HELLO %d", state->protocol) != REDIS_OK) {
                                 REDIS_LOG_ERROR(NULL,
                                     "Failed to enqueue asynchronous Sentinel HELLO command (error=%d, sentinel=%s:%d): %s",
-                                    isentinel->host, isentinel->port,
-                                    HIREDIS_ERRSTR(isentinel->context));
+                                    isentinel->context->err, isentinel->host,
+                                    isentinel->port, HIREDIS_ERRSTR(isentinel->context));
                                 redisAsyncFree(isentinel->context);
                                 isentinel->context = NULL;
                             }
@@ -379,8 +379,8 @@ sentinel_loop(void *object)
                                 SUBSCRIPTION_COMMAND) != REDIS_OK) {
                             REDIS_LOG_ERROR(NULL,
                                 "Failed to enqueue asynchronous Sentinel subscription command (error=%d, sentinel=%s:%d): %s",
-                                isentinel->host, isentinel->port,
-                                HIREDIS_ERRSTR(isentinel->context));
+                                isentinel->context->err, isentinel->host,
+                                isentinel->port, HIREDIS_ERRSTR(isentinel->context));
                             redisAsyncFree(isentinel->context);
                             isentinel->context = NULL;
                         }
@@ -603,30 +603,42 @@ unsafe_set_locations(struct state *state, const char *locations)
     // Parse input.
     const char *p = locations;
     while (*p != '\0') {
-        // Parse host.
+        // Find next item.
         while (isspace(*p)) p++;
         const char *q = p;
-        while (*q != '\0' && *q != ':') {
-            q++;
-        }
-        if ((p == q) || (*q != ':')) {
+        while (*q != '\0' && *q != ',') q++;
+        if (p == q) {
             error = 10;
             break;
         }
-        const char *host = p;
-        unsigned host_len = q - p;
 
         // Parse port.
-        p = q + 1;
-        if (!isdigit(*p)) {
+        const char *r = q - 1;
+        while (r > p && isspace(*r)) r--;
+        while (r > p && isdigit(*r)) r--;
+        if (*r != ':') {
             error = 20;
             break;
         }
-        int port = strtoul(p, (char **)&q, 10);
-        if ((p == q) || (port < 0) || (port > 65536)) {
+        r++;
+        if (!isdigit(*r)) {
             error = 30;
             break;
         }
+        const char *s;
+        int port = strtoul(r, (char **)&s, 10);
+        if (r == s || (*s != ',' && !isspace(*s) && *s != '\0') || port < 0 || port > 65536) {
+            error = 40;
+            break;
+        }
+
+        // Parse host.
+        if (r - p <= 1) {
+            error = 50;
+            break;
+        }
+        const char *host = p;
+        unsigned host_len = r - p - 1;
 
         // Store parsed Sentinel.
         struct sentinel *sentinel = new_sentinel(state, host, host_len, port);

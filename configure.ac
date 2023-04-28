@@ -1,6 +1,6 @@
 AC_PREREQ([2.68])
-AC_INIT([libvmod-redis], [7.7], [], [vmod-redis])
-AC_COPYRIGHT([Copyright (c) 2014-2022 Carlos Abalde <carlos.abalde@gmail.com>])
+AC_INIT([libvmod-redis], [7.8], [], [vmod-redis])
+AC_COPYRIGHT([Copyright (c) Carlos Abalde <carlos.abalde@gmail.com>])
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_SRCDIR(src/vmod_redis.vcc)
@@ -25,11 +25,13 @@ CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
 CC="$PTHREAD_CC"
 
 AC_ARG_WITH([rst2man],
-	AS_HELP_STRING(
-		[--with-rst2man=PATH],
-		[Location of rst2man (auto)]),
-	[RST2MAN="$withval"],
-	AC_CHECK_PROGS(RST2MAN, [rst2man rst2man.py], []))
+    [
+        AS_HELP_STRING(
+            [--with-rst2man=PATH],
+            [Location of rst2man (auto)])
+    ],
+    [RST2MAN="$withval"],
+    [AC_CHECK_PROGS(RST2MAN, [rst2man rst2man.py], [])])
 
 m4_ifndef([VARNISH_PREREQ], AC_MSG_ERROR([Need varnish.m4 -- see README.rst]))
 

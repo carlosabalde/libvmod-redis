@@ -10,6 +10,9 @@
 #include <hiredis/hiredis_ssl.h>
 #endif
 #include <arpa/inet.h>
+#ifdef __FreeBSD__
+#include <sys/socket.h>
+#endif
 
 #include "cache/cache.h"
 #include "vsb.h"
@@ -553,6 +556,7 @@ vmod_db__init(
             Lck_Lock(&config->mutex);
             Lck_Lock(&instance->mutex);
             redis_server_t *server = unsafe_add_redis_server(ctx, instance, config, location, role);
+            AN(server);
             Lck_Unlock(&instance->mutex);
             Lck_Unlock(&config->mutex);
 
@@ -627,6 +631,7 @@ vmod_db_add_server(
         Lck_Lock(&config->mutex);
         Lck_Lock(&db->mutex);
         redis_server_t *server = unsafe_add_redis_server(ctx, db, config, location, role);
+        AN(server);
         unsigned discovery =
             (server != NULL) &&
             (db->cluster.enabled) &&
@@ -805,6 +810,54 @@ vmod_db_execute(
         }
     }
 }
+
+/******************************************************************************
+ * .easy_execute();
+ *****************************************************************************/
+
+#define HANDLE_ARG(N) 						\
+    if (args->valid_cmd_arg ## N) {  				\
+        vmod_db_push(ctx, db, args->arg2, args->cmd_arg ## N);	\
+    }
+
+/* we need this twice, with two different arg structures:
+ * - one exposed directly by the vcc
+ * - the other will be used by the proxied version
+ * and sadly we can't use VMOD_PROXIED_METHOD because of this
+ */
+
+#define EASY_EXEC(name, arg_type)						\
+VCL_VOID									\
+name(										\
+    VRT_CTX, struct vmod_redis_db *db,						\
+    struct arg_type *args)							\
+{										\
+    AN(ctx);									\
+    AN(db);									\
+    AN(args);									\
+    AN(args->arg1);								\
+    AN(args->arg2);							\
+										\
+    vmod_db_command(ctx, db, args->arg2, args->command);			\
+    HANDLE_ARG(1);   HANDLE_ARG(2);   HANDLE_ARG(3);   HANDLE_ARG(4);		\
+    HANDLE_ARG(5);   HANDLE_ARG(6);   HANDLE_ARG(7);   HANDLE_ARG(8);		\
+    HANDLE_ARG(9);   HANDLE_ARG(10);  HANDLE_ARG(11);  HANDLE_ARG(12);		\
+    HANDLE_ARG(13);  HANDLE_ARG(14);  HANDLE_ARG(15);  HANDLE_ARG(16);		\
+										\
+    if (args->valid_timeout) {							\
+        vmod_db_timeout(ctx, db, args->arg2, args->timeout);		\
+    }										\
+    if (args->valid_retries) {							\
+        vmod_db_retries(ctx, db, args->arg2, args->retries);		\
+    }										\
+										\
+    vmod_db_execute(ctx, db, args->arg1, args->arg2, args->master);	\
+}
+
+EASY_EXEC(vmod_db_easy_execute, vmod_db_easy_execute_arg);
+EASY_EXEC(vmod_db_easy_execute_proxy, vmod_easy_execute_arg);
+
+#undef HANDLE_ARG
 
 /******************************************************************************
  * .replied();
@@ -1245,7 +1298,7 @@ vmod_db_stats(
     if (stream) {
         result = WS_Copy(ctx->ws, "", -1);
     } else {
-        VSB_putc(vsb, '\0');
+        AZ(VSB_putc(vsb, '\0'));
         AZ(VSB_finish(vsb));
         result = WS_Copy(ctx->ws, VSB_data(vsb), VSB_len(vsb));
         VSB_destroy(&vsb);
@@ -1359,6 +1412,34 @@ vmod_use(
         REDIS_LOG_ERROR(ctx,
             "Failed to use database (db=%s)",
             db);
+    }
+}
+
+VCL_VOID
+vmod_easy_execute(VRT_CTX, struct vmod_easy_execute_arg *args)
+{
+    struct vmod_redis_db *instance;
+
+    AN(ctx);
+    AN(args);
+    AN(args->arg1);
+    AN(args->arg2);
+
+    if ((args->db != NULL) && (strlen(args->db) > 0)) {
+        vcl_state_t *config = args->arg1->priv;
+        instance = get_db_instance(ctx, config, args->db);
+    } else {
+        task_state_t *state = get_task_state(ctx, args->arg2, 0);
+        instance = state->db;
+    }
+
+    if (instance != NULL) {
+        return vmod_db_easy_execute_proxy(ctx, instance, args);
+    } else {
+        REDIS_LOG_ERROR(ctx,
+            "Database instance not available%s",
+            "");
+        return;
     }
 }
 
