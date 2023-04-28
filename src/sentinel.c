@@ -351,8 +351,8 @@ sentinel_loop(void *object)
                                     "AUTH %s", state->password) != REDIS_OK) {
                                 REDIS_LOG_ERROR(NULL,
                                     "Failed to enqueue asynchronous Sentinel AUTH command (error=%d, sentinel=%s:%d): %s",
-                                    isentinel->host, isentinel->port,
-                                    HIREDIS_ERRSTR(isentinel->context));
+                                    isentinel->context.err, isentinel->host,
+                                    isentinel->port, HIREDIS_ERRSTR(isentinel->context));
                                 redisAsyncFree(isentinel->context);
                                 isentinel->context = NULL;
                             }
@@ -365,8 +365,8 @@ sentinel_loop(void *object)
                                     "HELLO %d", state->protocol) != REDIS_OK) {
                                 REDIS_LOG_ERROR(NULL,
                                     "Failed to enqueue asynchronous Sentinel HELLO command (error=%d, sentinel=%s:%d): %s",
-                                    isentinel->host, isentinel->port,
-                                    HIREDIS_ERRSTR(isentinel->context));
+                                    isentinel->context.err, isentinel->host,
+                                    isentinel->port, HIREDIS_ERRSTR(isentinel->context));
                                 redisAsyncFree(isentinel->context);
                                 isentinel->context = NULL;
                             }
@@ -378,8 +378,8 @@ sentinel_loop(void *object)
                                 SUBSCRIPTION_COMMAND) != REDIS_OK) {
                             REDIS_LOG_ERROR(NULL,
                                 "Failed to enqueue asynchronous Sentinel subscription command (error=%d, sentinel=%s:%d): %s",
-                                isentinel->host, isentinel->port,
-                                HIREDIS_ERRSTR(isentinel->context));
+                                isentinel->context.err, isentinel->host,
+                                isentinel->port, HIREDIS_ERRSTR(isentinel->context));
                             redisAsyncFree(isentinel->context);
                             isentinel->context = NULL;
                         }
