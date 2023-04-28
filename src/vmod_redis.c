@@ -812,16 +812,6 @@ vmod_db_execute(
 }
 
 /******************************************************************************
- * .cmd_start();
- *****************************************************************************/
-
-VCL_STRING
-vmod_cmd_start(VRT_CTX)
-{
-    return("");
-}
-
-/******************************************************************************
  * .easy_execute();
  *****************************************************************************/
 
@@ -833,7 +823,7 @@ vmod_cmd_start(VRT_CTX)
 /* we need this twice, with two different arg structures:
  * - one exposed directly by the vcc
  * - the other will be used by the proxied version
- * and sadly we can't use VMOD_PROXIED_METHOD because of this 
+ * and sadly we can't use VMOD_PROXIED_METHOD because of this
  */
 
 #define EASY_EXEC(name, arg_type)						\
@@ -1442,7 +1432,7 @@ vmod_easy_execute(VRT_CTX, struct vmod_easy_execute_arg *args)
         task_state_t *state = get_task_state(ctx, args->arg2, 0);
         instance = state->db;
     }
-   
+
     if (instance != NULL) {
         return vmod_db_easy_execute_proxy(ctx, instance, args);
     } else {
