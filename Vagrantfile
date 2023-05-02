@@ -8,6 +8,8 @@ $script = <<SCRIPT
     autotools-dev automake libtool python-docutils pkg-config libpcre3-dev \
     libeditline-dev libedit-dev make dpkg-dev git libjemalloc-dev \
     libev-dev libncurses-dev python3-sphinx graphviz libssl-dev
+  ln -fs /usr/bin/python3.8 /usr/bin/python3
+  ln -fs /usr/bin/python3.8 /usr/bin/python
 
   # Varnish Cache.
   sudo -u vagrant bash -c '\
@@ -68,6 +70,8 @@ Vagrant.configure('2') do |config|
       '--paravirtprovider', 'Default',
     ]
   end
+
+  config.vbguest.auto_update = false
 
   config.vm.define :v41 do |machine|
     machine.vm.box = 'ubuntu/focal64'

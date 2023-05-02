@@ -12,7 +12,9 @@ jobs:
       matrix:
         cc:
           - gcc
-          - clang
+          # Skip clang in this legacy branch due to issues compiling VC 4.1
+          # using clang.
+          # - clang
 
     steps:
       - uses: actions/checkout@v2
