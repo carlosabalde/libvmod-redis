@@ -69,6 +69,8 @@ Vagrant.configure('2') do |config|
     ]
   end
 
+  config.vbguest.auto_update = false
+
   config.vm.define :v60 do |machine|
     machine.vm.box = 'ubuntu/focal64'
     machine.vm.box_version = '=20211026.0.0'
