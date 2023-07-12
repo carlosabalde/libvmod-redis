@@ -26,7 +26,7 @@ $script = <<SCRIPT
   # hiredis.
   sudo -u vagrant bash -c '\
     cd /home/vagrant; \
-    wget --no-check-certificate https://github.com/redis/hiredis/archive/v1.1.0.zip -O hiredis-1.1.0.zip; \
+    wget --no-check-certificate https://github.com/redis/hiredis/archive/v1.2.0.zip -O hiredis-1.2.0.zip; \
     unzip hiredis-*.zip; \
     rm -f hiredis-*.zip; \
     cd hiredis*; \
