@@ -1,3 +1,5 @@
+/.env
+
 Makefile
 Makefile.in
 .deps/

@@ -1,0 +1,34 @@
+---
+
+#
+# Cheat sheet:
+#   $ echo -e "UID=$(id -u)\nGID=$(id -g)" > .env
+#   $ docker compose up --build --detach
+#   $ docker compose exec --user dev --workdir /mnt/host dev bash
+#     $ ./autogen.sh
+#     $ ./configure
+#     $ make
+#     $ make check
+#   $ docker compose down --volumes --remove-orphans
+#
+
+version: '3.7'
+
+name: libvmod-redis-4_1
+
+services:
+  dev:
+    hostname: dev
+    build:
+      context: .
+    privileged: true
+    environment:
+      HOST_UID: ${UID:?}
+      HOST_GID: ${GID:?}
+    volumes:
+      - .:/mnt/host.raw
+    tmpfs:
+      - /run
+      - /run/lock
+      - /var/cache
+      - /tmp:exec
