@@ -21,6 +21,7 @@ services:
     hostname: dev
     build:
       context: .
+      no_cache: true
     privileged: true
     environment:
       HOST_UID: ${UID:?}
