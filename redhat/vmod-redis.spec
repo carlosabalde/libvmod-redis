@@ -7,8 +7,8 @@ URL: https://github.com/carlosabalde/libvmod-redis
 Group: System Environment/Daemons
 Source0: libvmod-redis.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
-Requires: varnish >= 7.3.0, hiredis >= 0.11.0, libev >= 4.03
-BuildRequires: make, python-docutils, varnish >= 7.3.0, varnish-devel >= 7.3.0, hiredis-devel >= 0.11.0, libev-devel >= 4.03
+Requires: varnish >= 7.4.0, hiredis >= 0.11.0, libev >= 4.03
+BuildRequires: make, python-docutils, varnish >= 7.4.0, varnish-devel >= 7.4.0, hiredis-devel >= 0.11.0, libev-devel >= 4.03
 
 %description
 Redis VMOD for Varnish
