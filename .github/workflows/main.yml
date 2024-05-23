@@ -19,8 +19,8 @@ jobs:
 
       - name: Install packages
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -qq \
+          sudo apt update
+          sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=non-empty-value apt install -y \
             automake autotools-dev lcov libedit-dev libeditline-dev libev-dev \
             libncurses-dev libpcre3-dev libssl-dev libtool python-docutils \
             python3-sphinx
