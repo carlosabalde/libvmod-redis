@@ -1,4 +1,4 @@
-FROM ubuntu:jammy-20220428
+FROM ubuntu:noble-20240423
 
 ENV DEBIAN_FRONTEND noninteractive
 
@@ -28,7 +28,7 @@ RUN apt update \
         libtool \
         make \
         nano \
-        netcat \
+        netcat-traditional \
         pkg-config \
         python3 \
         python3-docutils \
