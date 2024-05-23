@@ -76,7 +76,7 @@ jobs:
         if: ${{ matrix.make_target == 'lcov' }}
         run: |
           cp libvmod-redis-*-coverage.info codecov.info
-          bash <(curl -s https://codecov.io/bash) -X gcov -X coveragepy
+          bash <(curl -s https://codecov.io/bash) -X gcov -X coveragepy -t ${{ secrets.CODECOV_TOKEN }}
 
       - name: Show test report
         if: ${{ failure() }}
