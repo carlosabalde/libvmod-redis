@@ -65,7 +65,7 @@ RUN cd /tmp \
     && ldconfig
 
 RUN cd /tmp \
-    && wget --no-check-certificate http://download.redis.io/releases/redis-7.0.9.tar.gz \
+    && wget --no-check-certificate http://download.redis.io/releases/redis-7.4.0.tar.gz \
     && tar zxvf redis-*.tar.gz \
     && rm -f redis-*.tar.gz \
     && cd redis-* \
