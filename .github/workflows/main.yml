@@ -10,6 +10,9 @@ jobs:
 
     strategy:
       matrix:
+        db_engine:
+          - redis
+          - valkey
         cc:
           - gcc
           - clang
@@ -52,11 +55,21 @@ jobs:
 
       - name: Install Redis
         run: |
-          wget http://download.redis.io/releases/redis-7.4.0.tar.gz
+          wget --no-check-certificate http://download.redis.io/releases/redis-7.4.0.tar.gz
           tar zxvf redis-*.tar.gz
           pushd redis-*/
           make BUILD_TLS=yes
           sudo make BUILD_TLS=yes PREFIX='/usr/local' install
+          sudo ldconfig
+          popd
+
+      - name: Install Valkey
+        run: |
+          wget --no-check-certificate https://github.com/valkey-io/valkey/archive/refs/tags/7.2.6.tar.gz -O valkey-7.2.6.tar.gz
+          tar zxvf valkey-*.tar.gz
+          pushd valkey-*/
+          make BUILD_TLS=yes
+          sudo make BUILD_TLS=yes PREFIX='/usr/local' USE_REDIS_SYMLINKS=no install
           sudo ldconfig
           popd
 
@@ -65,4 +78,4 @@ jobs:
           ./autogen.sh
           CC='${{ matrix.cc }}' ./configure --prefix=/usr
           make -j4
-          make check -j1
+          DB_ENGINE='${{ matrix.db_engine }}' make check -j1

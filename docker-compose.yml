@@ -8,7 +8,7 @@
 #     $ ./autogen.sh
 #     $ ./configure
 #     $ make
-#     $ make check
+#     $ DB_ENGINE=valkey make check
 #   $ docker compose down --volumes --remove-orphans
 #
 
