@@ -70,5 +70,14 @@ RUN cd /tmp \
     && make BUILD_TLS=yes PREFIX='/usr/local' install \
     && ldconfig
 
+RUN cd /tmp \
+    && wget --no-check-certificate https://github.com/valkey-io/valkey/archive/refs/tags/7.2.6.tar.gz -O valkey-7.2.6.tar.gz \
+    && tar zxvf valkey-*.tar.gz \
+    && rm -f valkey-*.tar.gz \
+    && cd valkey-* \
+    && make BUILD_TLS=yes \
+    && make BUILD_TLS=yes PREFIX='/usr/local' USE_REDIS_SYMLINKS=no install \
+    && ldconfig
+
 COPY ./docker-entrypoint.sh /
 ENTRYPOINT ["/docker-entrypoint.sh"]
