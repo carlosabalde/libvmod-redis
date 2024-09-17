@@ -580,6 +580,10 @@ vmod_db__init(
             "New database instance registered (db=%s)",
             instance->name);
     }
+
+    if (*db == NULL) {
+        REDIS_FAIL_WS(ctx,);
+    }
 }
 
 VCL_VOID
