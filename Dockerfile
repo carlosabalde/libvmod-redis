@@ -62,7 +62,7 @@ RUN cd /tmp \
     && ldconfig
 
 RUN cd /tmp \
-    && wget --no-check-certificate http://download.redis.io/releases/redis-7.4.0.tar.gz \
+    && wget --no-check-certificate http://download.redis.io/releases/redis-7.4.1.tar.gz \
     && tar zxvf redis-*.tar.gz \
     && rm -f redis-*.tar.gz \
     && cd redis-* \
@@ -71,7 +71,7 @@ RUN cd /tmp \
     && ldconfig
 
 RUN cd /tmp \
-    && wget --no-check-certificate https://github.com/valkey-io/valkey/archive/refs/tags/7.2.6.tar.gz -O valkey-7.2.6.tar.gz \
+    && wget --no-check-certificate https://github.com/valkey-io/valkey/archive/refs/tags/8.0.1.tar.gz -O valkey-8.0.1.tar.gz \
     && tar zxvf valkey-*.tar.gz \
     && rm -f valkey-*.tar.gz \
     && cd valkey-* \
