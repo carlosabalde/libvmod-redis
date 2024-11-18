@@ -6,7 +6,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
 
     strategy:
       matrix:
@@ -34,13 +34,13 @@ jobs:
         run: |
           sudo apt update
           sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=non-empty-value apt install -y \
-            automake autotools-dev lcov libedit-dev libeditline-dev libev-dev \
-            libncurses-dev libpcre3-dev libssl-dev libtool python-docutils \
+            automake autotools-dev lcov libedit-dev libev-dev \
+            libncurses-dev libpcre3-dev libssl-dev libtool python3-docutils \
             python3-sphinx
 
       - name: Install Varnish Cache
         run: |
-          wget --no-check-certificate https://varnish-cache.org/_downloads/varnish-6.0.9.tgz
+          wget --no-check-certificate https://varnish-cache.org/_downloads/varnish-6.0.13.tgz
           tar zxvf varnish-*.tgz
           pushd varnish-*/
           ./autogen.sh
