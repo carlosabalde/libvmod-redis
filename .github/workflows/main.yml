@@ -10,9 +10,6 @@ jobs:
 
     strategy:
       matrix:
-        db_engine:
-          - redis
-          - valkey
         cc:
           - gcc
           - clang
@@ -22,8 +19,7 @@ jobs:
         configure_flags:
           - ''
         include:
-          - db_engine: redis
-            cc: gcc
+          - cc: gcc
             make_target: lcov
             configure_flags: --enable-code-coverage
 
@@ -69,22 +65,12 @@ jobs:
           sudo ldconfig
           popd
 
-      - name: Install Valkey
-        run: |
-          wget --no-check-certificate https://github.com/valkey-io/valkey/archive/refs/tags/8.0.1.tar.gz -O valkey-8.0.1.tar.gz
-          tar zxvf valkey-*.tar.gz
-          pushd valkey-*/
-          make BUILD_TLS=yes
-          sudo make BUILD_TLS=yes PREFIX='/usr/local' USE_REDIS_SYMLINKS=no install
-          sudo ldconfig
-          popd
-
       - name: Build & test VMOD
         run: |
           ./autogen.sh
           CC='${{ matrix.cc }}' ./configure --prefix=/usr ${{ matrix.configure_flags }}
           make -j4
-          DB_ENGINE='${{ matrix.db_engine }}' make ${{ matrix.make_target }} -j1
+          make ${{ matrix.make_target }} -j1
 
       - name: Push code coverage
         if: ${{ matrix.make_target == 'lcov' }}
