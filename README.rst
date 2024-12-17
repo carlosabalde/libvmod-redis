@@ -6,7 +6,7 @@
    :alt: Codecov badge
    :target: https://codecov.io/gh/carlosabalde/libvmod-redis
 
-VMOD using the `synchronous hiredis library API <https://github.com/redis/hiredis>`_ to access Redis servers from VCL. For a libvalkey + Valkey alternative, please, chec the `libvmod-redis VMOD <https://github.com/carlosabalde/libvmod-valkey>`_ project.
+VMOD using the `synchronous hiredis library API <https://github.com/redis/hiredis>`_ to access Redis servers from VCL. For a libvalkey + Valkey alternative, please, check the `libvmod-valkey VMOD <https://github.com/carlosabalde/libvmod-valkey>`_ project.
 
 Highlights:
 
