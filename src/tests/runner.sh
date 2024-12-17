@@ -5,7 +5,6 @@
 ##
 IPV6=0
 
-DB_ENGINE=${DB_ENGINE:-redis}
 DB_STANDALONE_MASTER_SERVERS=2
 DB_STANDALONE_SLAVE_SERVERS=2
 DB_STANDALONE_SENTINEL_SERVERS=3
@@ -64,8 +63,8 @@ trap "cleanup $TMP" EXIT
 ##
 ## Check CLI is available & get DB version. Fail test if DB is not available.
 ##
-if [ -x "$(command -v $DB_ENGINE-cli)" ]; then
-    VERSION=$($DB_ENGINE-cli --version | sed "s/^$DB_ENGINE-cli \([^ ]*\).*$/\1/" | awk -F. '{ printf("%d%03d%03d\n", $1, $2, $3) }')
+if [ -x "$(command -v redis-cli)" ]; then
+    VERSION=$(redis-cli --version | sed "s/^redis-cli \([^ ]*\).*$/\1/" | awk -F. '{ printf("%d%03d%03d\n", $1, $2, $3) }')
     CONTEXT="\
         $CONTEXT \
         -Dredis_version=$VERSION \
@@ -116,7 +115,7 @@ EOF
             enable-debug-command local
 EOF
         fi
-        $DB_ENGINE-server "$TMP/db-master$MASTER_INDEX.conf"
+        redis-server "$TMP/db-master$MASTER_INDEX.conf"
         CONTEXT="\
             $CONTEXT \
             -Dredis_master${MASTER_INDEX}_ip=$MASTER_IP \
@@ -145,7 +144,7 @@ EOF
                 tls-ca-cert-file $ROOT/assets/tls-ca-certificate.crt
 EOF
             fi
-            $DB_ENGINE-server "$TMP/db-slave${MASTER_INDEX}_$SLAVE_INDEX.conf"
+            redis-server "$TMP/db-slave${MASTER_INDEX}_$SLAVE_INDEX.conf"
             CONTEXT="\
                 $CONTEXT \
                 -Dredis_slave${MASTER_INDEX}_${SLAVE_INDEX}_ip=$SLAVE_IP \
@@ -184,7 +183,7 @@ EOF
             tls-ca-cert-file $ROOT/assets/tls-ca-certificate.crt
 EOF
         fi
-        $DB_ENGINE-server "$TMP/db-sentinel$INDEX.conf" --sentinel
+        redis-server "$TMP/db-sentinel$INDEX.conf" --sentinel
         CONTEXT="\
             $CONTEXT \
             -Dredis_sentinel${INDEX}_ip=$SENTINEL_IP \
@@ -224,7 +223,7 @@ EOF
             tls-ca-cert-file $ROOT/assets/tls-ca-certificate.crt
 EOF
         fi
-        $DB_ENGINE-server "$TMP/db-server$INDEX.conf"
+        redis-server "$TMP/db-server$INDEX.conf"
         CONTEXT="\
             $CONTEXT \
             -Dredis_server${INDEX}_ip=$IP \
@@ -237,7 +236,7 @@ EOF
     # Wait for all nodes to bootstrap and then set up the cluster.
     sleep 1
     if [ "$VERSION" -ge '5000000' ]; then
-        yes yes | $DB_ENGINE-cli --cluster create $SERVERS --cluster-replicas $DB_CLUSTER_REPLICAS > /dev/null
+        yes yes | redis-cli --cluster create $SERVERS --cluster-replicas $DB_CLUSTER_REPLICAS > /dev/null
     else
         yes yes | redis-trib.rb create --replicas $DB_CLUSTER_REPLICAS $SERVERS > /dev/null
     fi
@@ -245,7 +244,7 @@ EOF
     # Wait for cluster formation in a rudementary way.
     [[ $IPV6 = 1 ]] && HOST=::1 || HOST=127.0.0.1
     [[ $IPV6 = 1 ]] && PATTERN=::1 || PATTERN=127[.]0[.]0[.]
-    while [ $($DB_ENGINE-cli -h $HOST -p $((DB_CLUSTER_START_PORT+1)) CLUSTER SLOTS | grep "$PATTERN" | wc -l) -lt $DB_CLUSTER_SERVERS ]; do
+    while [ $(redis-cli -h $HOST -p $((DB_CLUSTER_START_PORT+1)) CLUSTER SLOTS | grep "$PATTERN" | wc -l) -lt $DB_CLUSTER_SERVERS ]; do
         sleep 1
     done
     sleep 1
@@ -263,7 +262,7 @@ EOF
             -Dredis_master${INDEX}_port=$(echo $LINE | cut -f 2 -d ' ' | cut -f 1 -d '@' | rev | cut -f 1 -d ':' | rev) \
             -Dredis_key_in_master${INDEX}=$(grep "^$(echo $LINE | cut -f 9 -d ' ' | cut -f 1 -d '-'): " $ROOT/assets/hashslot-keys.txt | cut -f 2 -d ' ')"
         INDEX=$(( INDEX + 1 ))
-    done <<< "$($DB_ENGINE-cli -h $HOST -p $((DB_CLUSTER_START_PORT+1)) CLUSTER NODES | grep master | sort -k 9 -n)"
+    done <<< "$(redis-cli -h $HOST -p $((DB_CLUSTER_START_PORT+1)) CLUSTER NODES | grep master | sort -k 9 -n)"
 fi
 
 ##
