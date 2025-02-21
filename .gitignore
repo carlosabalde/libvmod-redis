@@ -31,5 +31,6 @@ Makefile.in
 /src/vcc_*_if.c
 /src/vcc_*_if.h
 /src/vmod_*rst
+/src/vmod_vcs_version.txt
 
 /.vagrant/

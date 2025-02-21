@@ -37,3 +37,5 @@ EXTRA_DIST = \
 	tests/runner.sh \
 	vmod_redis.vcc \
 	$(VMOD_TESTS)
+
+DISTCLEANFILES = vmod_vcs_version.txt
