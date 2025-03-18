@@ -41,8 +41,11 @@ RUN apt update \
     && apt clean \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone https://github.com/varnishcache/varnish-cache.git /tmp/varnish \
-    && cd /tmp/varnish \
+RUN cd /tmp \
+    && wget --no-check-certificate https://varnish-cache.org/_downloads/varnish-7.7.0.tgz \
+    && tar zxvf varnish-*.tgz \
+    && rm -f varnish-*.tgz \
+    && cd varnish-* \
     && ./autogen.sh \
     && ./configure \
     && make \

@@ -36,8 +36,9 @@ jobs:
 
       - name: Install Varnish Cache
         run: |
-          git clone https://github.com/varnishcache/varnish-cache.git ./varnish
-          pushd varnish
+          wget --no-check-certificate https://varnish-cache.org/_downloads/varnish-7.7.0.tgz
+          tar zxvf varnish-*.tgz
+          pushd varnish-*/
           ./autogen.sh
           CC='${{ matrix.cc }}' ./configure
           make -sj32
