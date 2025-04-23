@@ -50,7 +50,7 @@ RUN git clone https://github.com/varnishcache/varnish-cache.git /tmp/varnish \
     && ldconfig
 
 RUN cd /tmp \
-    && wget --no-check-certificate https://github.com/redis/hiredis/archive/v1.2.0.zip -O hiredis-1.2.0.zip \
+    && wget --no-check-certificate https://github.com/redis/hiredis/archive/v1.3.0.zip -O hiredis-1.3.0.zip \
     && unzip hiredis-*.zip \
     && rm -f hiredis-*.zip \
     && cd hiredis* \
@@ -59,7 +59,7 @@ RUN cd /tmp \
     && ldconfig
 
 RUN cd /tmp \
-    && wget --no-check-certificate http://download.redis.io/releases/redis-7.4.1.tar.gz \
+    && wget --no-check-certificate http://download.redis.io/releases/redis-7.4.3.tar.gz \
     && tar zxvf redis-*.tar.gz \
     && rm -f redis-*.tar.gz \
     && cd redis-* \

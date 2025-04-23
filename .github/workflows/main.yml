@@ -47,7 +47,7 @@ jobs:
 
       - name: Install hiredis
         run: |
-          wget --no-check-certificate https://github.com/redis/hiredis/archive/v1.2.0.zip -O hiredis-1.2.0.zip
+          wget --no-check-certificate https://github.com/redis/hiredis/archive/v1.3.0.zip -O hiredis-1.3.0.zip
           unzip hiredis-*.zip
           pushd hiredis-*/
           make USE_SSL=1
@@ -57,7 +57,7 @@ jobs:
 
       - name: Install Redis
         run: |
-          wget --no-check-certificate http://download.redis.io/releases/redis-7.4.1.tar.gz
+          wget --no-check-certificate http://download.redis.io/releases/redis-7.4.3.tar.gz
           tar zxvf redis-*.tar.gz
           pushd redis-*/
           make BUILD_TLS=yes
