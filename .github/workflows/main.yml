@@ -38,6 +38,7 @@ jobs:
         run: |
           git clone https://github.com/varnishcache/varnish-cache.git ./varnish
           pushd varnish
+          git submodule update --init
           ./autogen.sh
           CC='${{ matrix.cc }}' ./configure
           make -sj32

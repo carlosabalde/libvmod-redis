@@ -43,6 +43,7 @@ RUN apt update \
 
 RUN git clone https://github.com/varnishcache/varnish-cache.git /tmp/varnish \
     && cd /tmp/varnish \
+    && git submodule update --init \
     && ./autogen.sh \
     && ./configure \
     && make \
