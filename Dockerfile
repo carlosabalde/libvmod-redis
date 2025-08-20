@@ -62,7 +62,7 @@ RUN cd /tmp \
     && ldconfig
 
 RUN cd /tmp \
-    && wget --no-check-certificate https://github.com/redis/redis/archive/refs/tags/8.0.0.tar.gz -O redis-8.0.0.tar.gz \
+    && wget --no-check-certificate https://github.com/redis/redis/archive/refs/tags/8.2.1.tar.gz -O redis-8.2.1.tar.gz \
     && tar zxvf redis-*.tar.gz \
     && rm -f redis-*.tar.gz \
     && cd redis-* \
