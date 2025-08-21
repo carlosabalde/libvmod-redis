@@ -281,7 +281,7 @@ INSTALLATION
 
 The source tree is based on autotools to configure the building, and does also have the necessary bits in place to do functional unit tests using the varnishtest tool.
 
-**Beware this project contains multiples branches (master, 4.1, 4.0, etc.). Please, select the branch to be used depending on your Varnish Cache version (Varnish trunk → master, Varnish 4.1.x → 4.1, Varnish 4.0.x → 4.0, etc.).**
+**Beware this project contains multiples branches (main, 4.1, 4.0, etc.). Please, select the branch to be used depending on your Varnish Cache version (Varnish trunk → main, Varnish 4.1.x → 4.1, Varnish 4.0.x → 4.0, etc.).**
 
 Dependencies:
 
