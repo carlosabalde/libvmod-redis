@@ -1221,6 +1221,7 @@ vmod_db_stats(
             if (!stream) {
                 VSB_destroy(&vsb);
             }
+            Lck_Unlock(&db->mutex);
             REDIS_FAIL_WS(ctx, NULL);
         }
         const char *separator = (strlen(labels) > 0) ? "," : "";
