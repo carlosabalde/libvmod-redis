@@ -41,7 +41,7 @@ RUN apt update \
     && apt clean \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone https://github.com/varnishcache/varnish-cache.git /tmp/varnish \
+RUN git clone https://github.com/varnish/varnish.git /tmp/varnish \
     && cd /tmp/varnish \
     && git submodule update --init \
     && ./autogen.sh \
