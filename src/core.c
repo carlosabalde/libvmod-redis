@@ -1260,6 +1260,7 @@ populate_execution_plan(
                                     }
                                 } else {
                                     WS_Release(ctx->ws, 0);
+                                    Lck_Unlock(&db->mutex);
                                     REDIS_FAIL_WS(ctx, );
                                 }
                             }
@@ -1319,6 +1320,7 @@ populate_execution_plan(
                                     }
                                 } else {
                                     WS_Release(ctx->ws, 0);
+                                    Lck_Unlock(&db->mutex);
                                     REDIS_FAIL_WS(ctx, );
                                 }
                             }
