@@ -1,12 +1,12 @@
 
-.. image:: https://github.com/carlosabalde/libvmod-redis/workflows/CI/badge.svg?branch=6.0
+.. image:: https://github.com/carlosabalde/libvmod-redis/actions/workflows/main.yml/badge.svg?branch=6.0
    :alt: GitHub Actions CI badge
    :target: https://github.com/carlosabalde/libvmod-redis/actions
 .. image:: https://codecov.io/gh/carlosabalde/libvmod-redis/branch/6.0/graph/badge.svg
    :alt: Codecov badge
    :target: https://codecov.io/gh/carlosabalde/libvmod-redis
 
-VMOD using the `synchronous hiredis library API <https://github.com/redis/hiredis>`_ to access Redis servers from VCL.
+VMOD using the `synchronous hiredis library API <https://github.com/redis/hiredis>`_ to access Redis servers from VCL. For an alternative using libvalkey + Valkey, please check the `libvmod-valkey VMOD <https://github.com/carlosabalde/libvmod-valkey>`_ project.
 
 Highlights:
 
@@ -277,7 +277,7 @@ INSTALLATION
 
 The source tree is based on autotools to configure the building, and does also have the necessary bits in place to do functional unit tests using the varnishtest tool.
 
-**Beware this project contains multiples branches (master, 4.1, 4.0, etc.). Please, select the branch to be used depending on your Varnish Cache version (Varnish trunk → master, Varnish 4.1.x → 4.1, Varnish 4.0.x → 4.0, etc.).**
+**Beware this project contains multiples branches (main, 4.1, 4.0, etc.). Please, select the branch to be used depending on your Varnish Cache version (Varnish trunk → main, Varnish 4.1.x → 4.1, Varnish 4.0.x → 4.0, etc.).**
 
 Dependencies:
 

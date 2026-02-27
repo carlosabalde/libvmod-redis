@@ -6,7 +6,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
 
     strategy:
       matrix:
@@ -24,19 +24,19 @@ jobs:
             configure_flags: --enable-code-coverage
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Install packages
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -qq \
-            automake autotools-dev lcov libedit-dev libeditline-dev libev-dev \
-            libncurses-dev libpcre3-dev libssl-dev libtool python-docutils \
+          sudo apt update
+          sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=non-empty-value apt install -y \
+            automake autotools-dev lcov libedit-dev libev-dev \
+            libncurses-dev libpcre3-dev libssl-dev libtool python3-docutils \
             python3-sphinx
 
       - name: Install Varnish Cache
         run: |
-          wget --no-check-certificate https://varnish-cache.org/_downloads/varnish-6.0.9.tgz
+          wget --no-check-certificate https://varnish-cache.org/_downloads/varnish-6.0.13.tgz
           tar zxvf varnish-*.tgz
           pushd varnish-*/
           ./autogen.sh
@@ -48,7 +48,7 @@ jobs:
 
       - name: Install hiredis
         run: |
-          wget --no-check-certificate https://github.com/redis/hiredis/archive/v1.1.0.zip -O hiredis-1.1.0.zip
+          wget --no-check-certificate https://github.com/redis/hiredis/archive/v1.3.0.zip -O hiredis-1.3.0.zip
           unzip hiredis-*.zip
           pushd hiredis-*/
           make USE_SSL=1
@@ -58,7 +58,7 @@ jobs:
 
       - name: Install Redis
         run: |
-          wget http://download.redis.io/releases/redis-7.0.9.tar.gz
+          wget --no-check-certificate https://github.com/redis/redis/archive/refs/tags/8.4.0.tar.gz -O redis-8.4.0.tar.gz
           tar zxvf redis-*.tar.gz
           pushd redis-*/
           make BUILD_TLS=yes
@@ -75,9 +75,10 @@ jobs:
 
       - name: Push code coverage
         if: ${{ matrix.make_target == 'lcov' }}
-        run: |
-          cp libvmod-redis-*-coverage.info codecov.info
-          bash <(curl -s https://codecov.io/bash) -X gcov -X coveragepy
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
 
       - name: Show test report
         if: ${{ failure() }}

@@ -413,6 +413,9 @@ extern vmod_state_t vmod_state;
 #define REDIS_FAIL_WS(ctx, result) \
     REDIS_FAIL(ctx, result, "Workspace overflow")
 
+#define REDIS_FAIL_INSTANCE(ctx, result) \
+    REDIS_FAIL(ctx, result, "Failed to create instance")
+
 #ifdef TLS_ENABLED
 #define REDIS_TLS(ctx, rcontext, db, message1, message2, ...) \
     do { \
