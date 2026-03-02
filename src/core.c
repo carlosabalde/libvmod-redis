@@ -1469,6 +1469,11 @@ retry:
             result = new_redis_context(server, rcontext, now);
             VTAILQ_INSERT_TAIL(&server->pool.busy_contexts, result, list);
             server->pool.ncontexts++;
+        } else {
+            // Connection failed but we may have freed stale slots above.
+            // Wake a waiting thread so it can try to create its own
+            // connection.
+            AZ(pthread_cond_signal(&server->pool.cond));
         }
     }
 
