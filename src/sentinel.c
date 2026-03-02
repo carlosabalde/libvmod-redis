@@ -972,6 +972,9 @@ discover_servers(struct state *state)
                 redisFree(rcontext);
                 rcontext = NULL;
             }
+            if (reply != NULL) {
+                freeReplyObject(reply);
+            }
         }
 
         // Send 'HELLO' command.
@@ -989,6 +992,9 @@ discover_servers(struct state *state)
                     HIREDIS_ERRSTR(rcontext, reply));
                 redisFree(rcontext);
                 rcontext = NULL;
+            }
+            if (reply != NULL) {
+                freeReplyObject(reply);
             }
         }
 
