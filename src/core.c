@@ -981,7 +981,7 @@ unsafe_discover_redis_server_role(VRT_CTX, redis_server_t *server)
         } else {
             REDIS_LOG_ERROR(ctx,
                 "Failed to execute role discovery command (error=%d, db=%s, server=%s): %s",
-                rcontext, server->db->name, server->location.raw,
+                rcontext->err, server->db->name, server->location.raw,
                 HIREDIS_ERRSTR(rcontext, reply));
         }
 
