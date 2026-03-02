@@ -1021,7 +1021,7 @@ discover_servers(struct state *state)
                                 freeReplyObject(reply2);
                             } else {
                                 REDIS_LOG_ERROR(NULL,
-                                    "Failed to execute Sentinel slaves command (error=%s, master_name=%s, sentinel=%s:%d): %s",
+                                    "Failed to execute Sentinel slaves command (error=%d, master_name=%s, sentinel=%s:%d): %s",
                                     rcontext->err, master_names[i], isentinel->host, isentinel->port,
                                     HIREDIS_ERRSTR(rcontext));
                             }
