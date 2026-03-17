@@ -41,9 +41,11 @@ RUN apt update \
     && apt clean \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone https://github.com/varnish/varnish.git /tmp/varnish \
-    && cd /tmp/varnish \
-    && git submodule update --init \
+RUN cd /tmp \
+    && wget --no-check-certificate https://github.com/varnish/varnish/releases/download/varnish-9.0.0/varnish-9.0.0.tar.gz \
+    && tar zxvf varnish-*.tar.gz \
+    && rm -f varnish-*.tar.gz \
+    && cd varnish-* \
     && ./autogen.sh \
     && ./configure \
     && make \
