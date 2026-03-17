@@ -36,8 +36,8 @@ jobs:
 
       - name: Install Varnish Cache
         run: |
-          wget --no-check-certificate https://varnish-cache.org/_downloads/varnish-8.0.0.tgz
-          tar zxvf varnish-*.tgz
+          wget --no-check-certificate https://github.com/varnish/varnish/releases/download/varnish-8.0.1/varnish-8.0.1.tar.gz
+          tar zxvf varnish-*.tar.gz
           pushd varnish-*/
           ./autogen.sh
           CC='${{ matrix.cc }}' ./configure
@@ -58,7 +58,7 @@ jobs:
 
       - name: Install Redis
         run: |
-          wget --no-check-certificate https://github.com/redis/redis/archive/refs/tags/8.2.1.tar.gz -O redis-8.2.1.tar.gz
+          wget --no-check-certificate https://github.com/redis/redis/archive/refs/tags/8.4.0.tar.gz -O redis-8.4.0.tar.gz
           tar zxvf redis-*.tar.gz
           pushd redis-*/
           make BUILD_TLS=yes
@@ -75,9 +75,10 @@ jobs:
 
       - name: Push code coverage
         if: ${{ matrix.make_target == 'lcov' }}
-        run: |
-          cp libvmod-redis-*-coverage.info codecov.info
-          bash <(curl -s https://codecov.io/bash) -X gcov -X coveragepy -t ${{ secrets.CODECOV_TOKEN }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
 
       - name: Show test report
         if: ${{ failure() }}

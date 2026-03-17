@@ -981,7 +981,7 @@ unsafe_discover_redis_server_role(VRT_CTX, redis_server_t *server)
         } else {
             REDIS_LOG_ERROR(ctx,
                 "Failed to execute role discovery command (error=%d, db=%s, server=%s): %s",
-                rcontext, server->db->name, server->location.raw,
+                rcontext->err, server->db->name, server->location.raw,
                 HIREDIS_ERRSTR(rcontext, reply));
         }
 
@@ -1260,6 +1260,7 @@ populate_execution_plan(
                                     }
                                 } else {
                                     WS_Release(ctx->ws, 0);
+                                    Lck_Unlock(&db->mutex);
                                     REDIS_FAIL_WS(ctx, );
                                 }
                             }
@@ -1319,6 +1320,7 @@ populate_execution_plan(
                                     }
                                 } else {
                                     WS_Release(ctx->ws, 0);
+                                    Lck_Unlock(&db->mutex);
                                     REDIS_FAIL_WS(ctx, );
                                 }
                             }
@@ -1467,6 +1469,11 @@ retry:
             result = new_redis_context(server, rcontext, now);
             VTAILQ_INSERT_TAIL(&server->pool.busy_contexts, result, list);
             server->pool.ncontexts++;
+        } else {
+            // Connection failed but we may have freed stale slots above.
+            // Wake a waiting thread so it can try to create its own
+            // connection.
+            AZ(pthread_cond_signal(&server->pool.cond));
         }
     }
 

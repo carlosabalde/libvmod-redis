@@ -1035,8 +1035,8 @@ vmod_db_get_array_reply_length(
     if ((state->command.db == db) &&
         (state->command.reply != NULL) &&
         (state->command.reply->type == REDIS_REPLY_ARRAY ||
-         RESP3_SWITCH(state->command.reply->type != REDIS_REPLY_MAP, 0) ||
-         RESP3_SWITCH(state->command.reply->type != REDIS_REPLY_SET, 0))) {
+         RESP3_SWITCH(state->command.reply->type == REDIS_REPLY_MAP, 0) ||
+         RESP3_SWITCH(state->command.reply->type == REDIS_REPLY_SET, 0))) {
         return state->command.reply->elements;
     } else {
         return 0;
@@ -1233,6 +1233,7 @@ vmod_db_stats(
             if (!stream) {
                 VSB_destroy(&vsb);
             }
+            Lck_Unlock(&db->mutex);
             REDIS_FAIL_WS(ctx, NULL);
         }
         const char *separator = (strlen(labels) > 0) ? "," : "";
