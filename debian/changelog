@@ -1,3 +1,14 @@
+libvmod-redis (22.1-1) stable; urgency=low
+
+  * Fixed missing unlocks on workspace overflows
+  * Fixed missing cond signal in lock_shared_redis_context
+  * Fixed format string mismatch in unsafe_discover_redis_server_role
+  * Fixed format string mismatch in Sentinel slaves error log
+  * Fixed != vs == logic bug in vmod_db_get_array_reply_length
+  * Fixed reply object leaks in Sentinel AUTH and HELLO commands
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Tue, 17 Mar 2026 16:00:00 +0100
+
 libvmod-redis (22.0-1) stable; urgency=low
 
   * Migrated to Varnish Cache 8.0.x

@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 22.0
+Version: 22.1
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,6 +36,13 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Tue Mar 17 2026 Carlos Abalde <carlos.abalde@gmail.com> - 22.1-1.20260317
+- Fixed missing unlocks on workspace overflows.
+- Fixed missing cond signal in lock_shared_redis_context.
+- Fixed format string mismatch in unsafe_discover_redis_server_role.
+- Fixed format string mismatch in Sentinel slaves error log.
+- Fixed != vs == logic bug in vmod_db_get_array_reply_length.
+- Fixed reply object leaks in Sentinel AUTH and HELLO commands.
 * Mon Sep 15 2025 Carlos Abalde <carlos.abalde@gmail.com> - 22.0-1.20250915
 - Migrated to Varnish Cache 8.0.x.
 * Tue Mar 18 2025 Carlos Abalde <carlos.abalde@gmail.com> - 21.0-1.20250318
