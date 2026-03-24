@@ -806,7 +806,7 @@ unsafe_add_redis_server(
         }
 
         // Flush the sickness flag.
-        unsigned now = time(NULL);
+        time_t now = time(NULL);
         if (result->sickness.exp > now) {
             result->sickness.exp = now;
         }
