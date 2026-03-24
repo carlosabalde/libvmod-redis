@@ -255,7 +255,7 @@ unsafe_set_subnets(VRT_CTX, vcl_state_t *config, const char *masks)
         const char *q;
 
         // Parse weight.
-        int weight = strtoul(p, (char **)&q, 10);
+        int weight = strtol(p, (char **)&q, 10);
         if ((p == q) || (weight < 0) || (weight >= NREDIS_SERVER_WEIGHTS)) {
             error = 10;
             break;
@@ -287,7 +287,7 @@ unsafe_set_subnets(VRT_CTX, vcl_state_t *config, const char *masks)
             error = 40;
             break;
         }
-        int bits = strtoul(p, (char **)&q, 10);
+        int bits = strtol(p, (char **)&q, 10);
         if ((p == q) || (bits < 0) || (bits > 32)) {
             error = 50;
             break;
