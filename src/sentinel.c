@@ -1088,7 +1088,7 @@ unsafe_update_dbs_aux(struct state *state, redis_server_t *server)
             }
 
             // Change sickness flag?
-            unsigned now = time(NULL);
+            time_t now = time(NULL);
             if (server->sickness.exp <= now) {
                 if (is->down) {
                     server->sickness.exp = UINT_MAX;
