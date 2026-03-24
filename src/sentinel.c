@@ -626,7 +626,7 @@ unsafe_set_locations(struct state *state, const char *locations)
             break;
         }
         const char *s;
-        int port = strtoul(r, (char **)&s, 10);
+        int port = strtol(r, (char **)&s, 10);
         if (r == s || (*s != ',' && !isspace((unsigned char)*s) && *s != '\0') || port < 0 || port > 65536) {
             error = 40;
             break;
