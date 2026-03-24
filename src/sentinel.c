@@ -604,7 +604,7 @@ unsafe_set_locations(struct state *state, const char *locations)
     const char *p = locations;
     while (*p != '\0') {
         // Find next item.
-        while (isspace(*p)) p++;
+        while (isspace((unsigned char)*p)) p++;
         const char *q = p;
         while (*q != '\0' && *q != ',') q++;
         if (p == q) {
@@ -614,20 +614,20 @@ unsafe_set_locations(struct state *state, const char *locations)
 
         // Parse port.
         const char *r = q - 1;
-        while (r > p && isspace(*r)) r--;
-        while (r > p && isdigit(*r)) r--;
+        while (r > p && isspace((unsigned char)*r)) r--;
+        while (r > p && isdigit((unsigned char)*r)) r--;
         if (*r != ':') {
             error = 20;
             break;
         }
         r++;
-        if (!isdigit(*r)) {
+        if (!isdigit((unsigned char)*r)) {
             error = 30;
             break;
         }
         const char *s;
         int port = strtoul(r, (char **)&s, 10);
-        if (r == s || (*s != ',' && !isspace(*s) && *s != '\0') || port < 0 || port > 65536) {
+        if (r == s || (*s != ',' && !isspace((unsigned char)*s) && *s != '\0') || port < 0 || port > 65536) {
             error = 40;
             break;
         }
@@ -646,7 +646,7 @@ unsafe_set_locations(struct state *state, const char *locations)
 
         // More items?
         p = q;
-        while (isspace(*p) || (*p == ',')) p++;
+        while (isspace((unsigned char)*p) || (*p == ',')) p++;
     }
 
     // Check error flag.
