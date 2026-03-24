@@ -264,7 +264,7 @@ unsafe_set_subnets(VRT_CTX, vcl_state_t *config, const char *masks)
         // Parse address in the mask.
         char address[32];
         p = q;
-        while (isspace(*p)) p++;
+        while (isspace((unsigned char)*p)) p++;
         q = p;
         while (*q != '\0' && *q != '/') {
             q++;
@@ -283,7 +283,7 @@ unsafe_set_subnets(VRT_CTX, vcl_state_t *config, const char *masks)
 
         // Parse number of bits in the mask.
         p = q + 1;
-        if (!isdigit(*p)) {
+        if (!isdigit((unsigned char)*p)) {
             error = 40;
             break;
         }
@@ -299,7 +299,7 @@ unsafe_set_subnets(VRT_CTX, vcl_state_t *config, const char *masks)
 
         // More items?
         p = q;
-        while (isspace(*p) || (*p == ',')) p++;
+        while (isspace((unsigned char)*p) || (*p == ',')) p++;
     }
 
     // Check error flag.
