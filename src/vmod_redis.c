@@ -255,7 +255,7 @@ unsafe_set_subnets(VRT_CTX, vcl_state_t *config, const char *masks)
         const char *q;
 
         // Parse weight.
-        int weight = strtoul(p, (char **)&q, 10);
+        int weight = strtol(p, (char **)&q, 10);
         if ((p == q) || (weight < 0) || (weight >= NREDIS_SERVER_WEIGHTS)) {
             error = 10;
             break;
@@ -264,7 +264,7 @@ unsafe_set_subnets(VRT_CTX, vcl_state_t *config, const char *masks)
         // Parse address in the mask.
         char address[32];
         p = q;
-        while (isspace(*p)) p++;
+        while (isspace((unsigned char)*p)) p++;
         q = p;
         while (*q != '\0' && *q != '/') {
             q++;
@@ -283,11 +283,11 @@ unsafe_set_subnets(VRT_CTX, vcl_state_t *config, const char *masks)
 
         // Parse number of bits in the mask.
         p = q + 1;
-        if (!isdigit(*p)) {
+        if (!isdigit((unsigned char)*p)) {
             error = 40;
             break;
         }
-        int bits = strtoul(p, (char **)&q, 10);
+        int bits = strtol(p, (char **)&q, 10);
         if ((p == q) || (bits < 0) || (bits > 32)) {
             error = 50;
             break;
@@ -299,7 +299,7 @@ unsafe_set_subnets(VRT_CTX, vcl_state_t *config, const char *masks)
 
         // More items?
         p = q;
-        while (isspace(*p) || (*p == ',')) p++;
+        while (isspace((unsigned char)*p) || (*p == ',')) p++;
     }
 
     // Check error flag.
