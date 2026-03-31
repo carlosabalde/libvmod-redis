@@ -6,10 +6,13 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.platform }}
 
     strategy:
       matrix:
+        platform:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
         cc:
           - gcc
           - clang
@@ -19,12 +22,13 @@ jobs:
         configure_flags:
           - ''
         include:
-          - cc: gcc
+          - platform: ubuntu-24.04
+            cc: gcc
             make_target: lcov
             configure_flags: --enable-code-coverage
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install packages
         run: |
@@ -36,8 +40,8 @@ jobs:
 
       - name: Install Varnish Cache
         run: |
-          wget --no-check-certificate https://varnish-cache.org/_downloads/varnish-6.0.13.tgz
-          tar zxvf varnish-*.tgz
+          wget --no-check-certificate https://github.com/varnish/varnish/releases/download/varnish-6.0.17/varnish-6.0.17.tar.gz
+          tar zxvf varnish-*.tar.gz
           pushd varnish-*/
           ./autogen.sh
           CC='${{ matrix.cc }}' ./configure

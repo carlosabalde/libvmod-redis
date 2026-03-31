@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 7.10
+Version: 7.11
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,6 +36,8 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Tue Mar 31 2026 Carlos Abalde <carlos.abalde@gmail.com> - 7.11-1.20260331
+- Fixed several ARM64 portability issues.
 * Mon Mar 02 2026 Carlos Abalde <carlos.abalde@gmail.com> - 7.10-1.20260302
 - Fixed missing cond signal in lock_shared_redis_context.
 - Fixed format string mismatch in unsafe_discover_redis_server_role.
