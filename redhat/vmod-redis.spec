@@ -1,14 +1,14 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 22.1
+Version: 22.2
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
 Group: System Environment/Daemons
 Source0: libvmod-redis.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
-Requires: varnish >= 8.8.0, hiredis >= 0.11.0, libev >= 4.03
-BuildRequires: make, python-docutils, varnish >= 8.8.0, varnish-devel >= 8.8.0, hiredis-devel >= 0.11.0, libev-devel >= 4.03
+Requires: varnish >= 8.0.0, hiredis >= 0.11.0, libev >= 4.03
+BuildRequires: make, python-docutils, varnish >= 8.0.0, varnish-devel >= 8.0.0, hiredis-devel >= 0.11.0, libev-devel >= 4.03
 
 %description
 Redis VMOD for Varnish
@@ -36,6 +36,8 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Tue Mar 31 2026 Carlos Abalde <carlos.abalde@gmail.com> - 22.2-1.20260331
+- Fixed several ARM64 portability issues.
 * Tue Mar 17 2026 Carlos Abalde <carlos.abalde@gmail.com> - 22.1-1.20260317
 - Fixed missing unlocks on workspace overflows.
 - Fixed missing cond signal in lock_shared_redis_context.
