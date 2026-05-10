@@ -12,8 +12,6 @@
 #   $ docker compose down --volumes --remove-orphans
 #
 
-version: '3.7'
-
 name: libvmod-redis-9_0
 
 services:
@@ -21,6 +19,7 @@ services:
     hostname: dev
     build:
       context: .
+    init: true
     privileged: true
     environment:
       HOST_UID: ${UID:?}
