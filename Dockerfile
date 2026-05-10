@@ -1,6 +1,6 @@
 FROM ubuntu:noble-20260410
 
-ENV DEBIAN_FRONTEND noninteractive
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN groupadd -g 5000 dev \
     && useradd -u 5000 -g 5000 -m -s /bin/bash dev
