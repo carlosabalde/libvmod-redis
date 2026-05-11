@@ -30,12 +30,22 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # docker build \
+      #   --build-arg VARNISH_CC='${{ matrix.cc }}' \
+      #   --tag libvmod-redis-dev \
+      #   .
       - name: Build Docker image
-        run: |
-          docker build \
-            --build-arg VARNISH_CC='${{ matrix.cc }}' \
-            --tag libvmod-redis-dev \
-            .
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: libvmod-redis-dev
+          build-args: VARNISH_CC=${{ matrix.cc }}
+          cache-from: type=gha,scope=${{ matrix.platform }}-${{ matrix.cc }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}-${{ matrix.cc }}
 
       - name: Build & test VMOD
         run: |
