@@ -1,4 +1,6 @@
-FROM ubuntu:noble-20260410
+FROM ubuntu:resolute-20260421
+
+ARG VARNISH_CC=gcc
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -12,12 +14,15 @@ RUN apt update \
         autotools-dev \
         bindfs \
         binutils \
+        bsdextrautils \
+        clang \
         curl \
         dpkg-dev \
         git \
         gpg \
         graphviz \
         jq \
+        lcov \
         less \
         libedit-dev \
         libev-dev \
@@ -45,7 +50,7 @@ RUN git clone https://github.com/varnish/varnish.git /tmp/varnish \
     && cd /tmp/varnish \
     && git submodule update --init \
     && ./autogen.sh \
-    && ./configure \
+    && CC="${VARNISH_CC}" ./configure \
     && make \
     && make PREFIX='/usr/local' install \
     && ldconfig
