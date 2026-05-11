@@ -1,4 +1,6 @@
-FROM ubuntu:noble-20260410
+FROM ubuntu:resolute-20260421
+
+ARG VARNISH_CC=gcc
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -12,12 +14,15 @@ RUN apt update \
         autotools-dev \
         bindfs \
         binutils \
+        bsdextrautils \
+        clang \
         curl \
         dpkg-dev \
         git \
         gpg \
         graphviz \
         jq \
+        lcov \
         less \
         libedit-dev \
         libev-dev \
@@ -47,7 +52,7 @@ RUN cd /tmp \
     && rm -f varnish-*.tar.gz \
     && cd varnish-* \
     && ./autogen.sh \
-    && ./configure \
+    && CC="${VARNISH_CC}" ./configure \
     && make \
     && make PREFIX='/usr/local' install \
     && ldconfig

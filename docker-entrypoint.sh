@@ -3,6 +3,8 @@
 set -euo pipefail
 IFS=$'\n\t'
 
+mkdir -p /mnt/host
+
 # Beware 'privileged: true' is required for this.
 bindfs \
     --force-user=$(id -u dev) \
