@@ -78,7 +78,7 @@ new_redis_server(
     ALLOC_OBJ(result, REDIS_SERVER_MAGIC);
     AN(result);
 
-    char *ptr = strrchr(location, ':');
+    const char *ptr = strrchr(location, ':');
     if (ptr != NULL) {
         result->location.type = REDIS_SERVER_LOCATION_HOST_TYPE;
         result->location.parsed.address.host = strndup(location, ptr - location);
