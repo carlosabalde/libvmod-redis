@@ -56,7 +56,7 @@ RUN git clone https://github.com/varnish/varnish.git /tmp/varnish \
     && ldconfig
 
 RUN cd /tmp \
-    && wget --no-check-certificate https://github.com/redis/hiredis/archive/v1.3.0.zip -O hiredis-1.3.0.zip \
+    && wget --no-check-certificate https://github.com/redis/hiredis/archive/v1.4.0.zip -O hiredis-1.4.0.zip \
     && unzip hiredis-*.zip \
     && rm -f hiredis-*.zip \
     && cd hiredis* \
