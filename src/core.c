@@ -92,15 +92,11 @@ new_redis_server(
         AN(result->location.parsed.path);
     }
 
-    // Do not continue if this is a clustered database but the location is not
-    // provided using the IP + port format.
-    struct in_addr ia4;
-    struct in6_addr ia6;
+    // Do not continue if this is a clustered database but the location has been
+    // provided using the socket format.
     if ((db->cluster.enabled) &&
-        ((result->location.type != REDIS_SERVER_LOCATION_HOST_TYPE) ||
-         ((inet_pton(AF_INET, result->location.parsed.address.host, &ia4) == 0) &&
-          (inet_pton(AF_INET6, result->location.parsed.address.host, &ia6) == 0)))) {
-        free((void *) result->location.parsed.address.host);
+        (result->location.type == REDIS_SERVER_LOCATION_SOCKET_TYPE)) {
+        free((void *) result->location.parsed.path);
         FREE_OBJ(result);
         return NULL;
     }
