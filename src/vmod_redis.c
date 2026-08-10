@@ -192,6 +192,18 @@ handle_vcl_discard_event(VRT_CTX, vcl_state_t *config)
 int
 event_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
 {
+    // Initialize logging configuration.
+    static int logging_initialized = 0;
+    if (e == VCL_EVENT_LOAD && !logging_initialized) {
+        logging_initialized = 1;
+        const char *log_sinks = getenv("VMOD_REDIS_LOG_SINKS");
+        if (log_sinks == NULL) {
+            log_sinks = "syslog";
+        }
+        vmod_state.log.syslog_enabled = strstr(log_sinks, "syslog") != NULL;
+        vmod_state.log.stderr_enabled = strstr(log_sinks, "stderr") != NULL;
+    }
+
     // Log event.
     const char *name;
     switch (e) {

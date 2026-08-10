@@ -127,9 +127,9 @@ client c1 -connect ${v1_sock} {
 } -run
 
 logexpect l1 {
-    expect * 0 VCL_Error   {^\[REDIS\]\[helloCallback:.*Failed to negotiate protocol in Sentinel connection.*NOAUTH.*}
-    expect * 0 VCL_Error   {^\[REDIS\]\[disconnectCallback:.*Sentinel connection lost.*NOAUTH.*}
-    expect * 0 VCL_Error   {^\[REDIS\]\[discover_servers:.*Failed to execute Sentinel HELLO command.*NOAUTH.*}
+    expect * 0 VCL_Error   {^\[REDIS\]\[\d+\]\[helloCallback:.*Failed to negotiate protocol in Sentinel connection.*NOAUTH.*}
+    expect * 0 VCL_Error   {^\[REDIS\]\[\d+\]\[disconnectCallback:.*Sentinel connection lost.*NOAUTH.*}
+    expect * 0 VCL_Error   {^\[REDIS\]\[\d+\]\[discover_servers:.*Failed to execute Sentinel HELLO command.*NOAUTH.*}
 } -start
 
 logexpect l1 -wait
@@ -142,9 +142,9 @@ client c2 -connect ${v2_sock} {
 } -run
 
 logexpect l2 {
-    expect * 0 VCL_Error   {^\[REDIS\]\[authorizeCallback:.*Failed to authenticate Sentinel connection.*WRONGPASS.*}
-    expect * 0 VCL_Error   {^\[REDIS\]\[disconnectCallback:.*Sentinel connection lost.*NOAUTH.*}
-    expect * 0 VCL_Error   {^\[REDIS\]\[discover_servers:.*Failed to execute Sentinel AUTH command.*WRONGPASS.*}
+    expect * 0 VCL_Error   {^\[REDIS\]\[\d+\]\[authorizeCallback:.*Failed to authenticate Sentinel connection.*WRONGPASS.*}
+    expect * 0 VCL_Error   {^\[REDIS\]\[\d+\]\[disconnectCallback:.*Sentinel connection lost.*NOAUTH.*}
+    expect * 0 VCL_Error   {^\[REDIS\]\[\d+\]\[discover_servers:.*Failed to execute Sentinel AUTH command.*WRONGPASS.*}
 } -start
 
 logexpect l2 -wait

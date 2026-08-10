@@ -29,7 +29,9 @@ vmod_state_t vmod_state = {
     .locks.refs = 0,
     .locks.vsc_seg = NULL,
     .locks.config = NULL,
-    .locks.db = NULL
+    .locks.db = NULL,
+    .log.syslog_enabled = 0,
+    .log.stderr_enabled = 0
 };
 
 struct plan {

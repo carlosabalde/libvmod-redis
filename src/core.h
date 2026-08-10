@@ -3,6 +3,7 @@
 
 #include <syslog.h>
 #include <pthread.h>
+#include <time.h>
 #include <hiredis/hiredis.h>
 #ifdef TLS_ENABLED
 #include <hiredis/hiredis_ssl.h>
@@ -337,6 +338,12 @@ typedef struct vmod_state {
         struct VSC_lck *config;
         struct VSC_lck *db;
     } locks;
+
+    // Logging configuration.
+    struct {
+        unsigned syslog_enabled;
+        unsigned stderr_enabled;
+    } log;
 } vmod_state_t;
 
 extern vmod_state_t vmod_state;
@@ -364,36 +371,36 @@ extern vmod_state_t vmod_state;
 #define RESP3_SWITCH(a, b) b
 #endif
 
+// Both 'syslog()' and 'fprintf()' serialize threads. Each grabs a process-wide
+// lock (glibc's internal lock and stdio's FILE lock, respectively) across its
+// syscall. Therefore, do NOT use this macro in hot paths. Syslog (which doesn't
+// matter much in containers) and stderr (which is gated by a pipe consumed by
+// the Varnish management process) logging should be rare, especially when
+// handling requests.
+//
+// Alternative: enable/disable syslog and/or stderr logging using the env var
+// (see VMOD event function), or adjust this macro to limit syslog and stderr to
+// non-request stuff (no VXID cases: initializations, helper threads, etc.).
+// Better for performance, but not ideal for visibility.
 #define REDIS_LOG(ctx, priority, fmt, ...) \
     do { \
+        long _tst = (long) time(NULL); \
+        \
+        if (vmod_state.log.syslog_enabled) { \
+            syslog(priority, "[REDIS][%s:%d] " fmt, __func__, __LINE__, ##__VA_ARGS__); \
+        } \
+        \
+        if (vmod_state.log.stderr_enabled) { \
+            fprintf(stderr, "[REDIS][%ld][%d][%s:%d] " fmt "\n", _tst, priority, __func__, __LINE__, ##__VA_ARGS__); \
+        } \
+        \
         const struct vrt_ctx *_ctx = ctx; \
-        \
-        char *_buffer; \
-        if (priority <= LOG_ERR) { \
-            assert(asprintf( \
-                &_buffer, \
-                "[REDIS][%s:%d] %s", __func__, __LINE__, fmt) > 0); \
+        unsigned _slt = ((priority) <= LOG_ERR) ? SLT_VCL_Error : ((priority) < LOG_DEBUG) ? SLT_VCL_Log : SLT_Debug; \
+        if (_ctx != NULL && _ctx->vsl != NULL) { \
+            VSLb(_ctx->vsl, _slt, "[REDIS][%ld][%s:%d] " fmt, _tst, __func__, __LINE__, ##__VA_ARGS__); \
         } else { \
-            assert(asprintf( \
-                &_buffer, \
-                "[REDIS] %s", fmt) > 0); \
+            VSL(_slt, 0, "[REDIS][%ld][%s:%d] " fmt, _tst, __func__, __LINE__, ##__VA_ARGS__); \
         } \
-        \
-        syslog(priority, _buffer, ##__VA_ARGS__); \
-        \
-        unsigned _tag; \
-        if (priority <= LOG_ERR) { \
-            _tag = SLT_VCL_Error; \
-        } else { \
-            _tag = SLT_VCL_Log; \
-        } \
-        if ((_ctx != NULL) && (_ctx->vsl != NULL)) { \
-            VSLb(_ctx->vsl, _tag, _buffer, ##__VA_ARGS__); \
-        } else { \
-            VSL(_tag, 0, _buffer, ##__VA_ARGS__); \
-        } \
-        \
-        free(_buffer); \
     } while (0)
 
 #define REDIS_LOG_ERROR(ctx, fmt, ...) \
@@ -402,10 +409,12 @@ extern vmod_state_t vmod_state;
     REDIS_LOG(ctx, LOG_WARNING, fmt, ##__VA_ARGS__)
 #define REDIS_LOG_INFO(ctx, fmt, ...) \
     REDIS_LOG(ctx, LOG_INFO, fmt, ##__VA_ARGS__)
+#define REDIS_LOG_DEBUG(ctx, fmt, ...) \
+    REDIS_LOG(ctx, LOG_DEBUG, fmt, ##__VA_ARGS__)
 
 #define REDIS_FAIL(ctx, result, fmt, ...) \
     do { \
-        syslog(LOG_ALERT, "[REDIS][%s:%d] " fmt, __func__, __LINE__, ##__VA_ARGS__); \
+        REDIS_LOG(ctx, LOG_ALERT, fmt, ##__VA_ARGS__); \
         VRT_fail(ctx, "[REDIS][%s:%d] " fmt, __func__, __LINE__, ##__VA_ARGS__); \
         return result; \
     } while (0)
