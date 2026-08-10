@@ -345,9 +345,12 @@ $Object db(PRIV_VCL,
 
 Arguments
     location: Redis connection string. Both host (IP or DNS name) + port and
-    UNIX sockets are supported. Only the IP + port format is allowed when Redis
-    Cluster support is enabled. **Do not use DNS names in combination with
-    ``redis.subnets()`` or ``redis.sentinels()``**.
+    UNIX sockets are supported. If Redis Cluster support has been enabled only
+    the host + port format is allowed. **Do not use DNS names in combination
+    with ``redis.subnets()``**. **When using ``redis.sentinels()``, make sure
+    instances are registered with the exact same name they will be advertised
+    as by the Sentinel instances (exact same IPs or exact same DNS names,
+    depending on how Redis and Sentinel have been configured)**.
 
     type: type of the Redis server referenced by ``location``:
 
@@ -457,8 +460,8 @@ $Method VOID .add_server(
 Arguments
     location: Redis connection string. Both host (IP or DNS name) + port and
     UNIX sockets are supported. If Redis Cluster support has been enabled only
-    the IP + port format is allowed. **Do not use DNS names in combination with
-    ``redis.subnets()`` or ``redis.sentinels()``**.
+    the host + port format is allowed. **Do not use DNS names in combination
+    with ``redis.subnets()``**.
 
     type: type of the Redis server referenced by ``location``:
 
