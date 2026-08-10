@@ -288,6 +288,14 @@ Dependencies:
 * `hiredis <https://github.com/redis/hiredis>`_ - minimalistic C Redis client library.
 * `libev <http://software.schmorp.de/pkg/libev.html>`_ - full-featured and high-performance event loop.
 
+USING DNS NAMES
+===============
+
+This VMOD supports the use of DNS names when configuring the Redis server locations, but some considerations must be taken into account:
+
+* When using a Redis Sentinel setup, the names registered in the configuration must be the exact same names advertised by the Sentinel servers in order for the VMOD to be able to perform automatic discovery of sick / healthy servers and changes in their roles. So, when using DNS names, all Redis instances should be configured using hostnames for properties `replica-announce-ip` and `replicaof`, whereas the Sentinel instances should be configured using hostnames as well for properties `sentinel monitor` and `sentinel announce-ip`. Finally, `sentinel resolve-hostnames` and `sentinel announce-hostnames` should be set to `yes` in the Sentinel configuration files as well. See: https://redis.io/docs/latest/operate/oss_and_stack/management/sentinel/#ip-addresses-and-dns-names.
+* When using a Redis Cluster setup, the cluster must be explictly configured to use DNS names or by default it will use IP addresses. This includes setting the `cluster-announce-hostname` property in the configuration files of all Redis instances to the hostname of the server, as well as setting `cluster-preferred-endpoint-type` to `hostname`.
+
 COPYRIGHT
 =========
 
