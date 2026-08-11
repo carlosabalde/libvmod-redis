@@ -348,9 +348,11 @@ Arguments
     UNIX sockets are supported. If Redis Cluster support has been enabled only
     the host + port format is allowed. **Do not use DNS names in combination
     with ``redis.subnets()``**. **When using ``redis.sentinels()``, make sure
-    instances are registered with the exact same name they will be advertised
-    as by the Sentinel instances (exact same IPs or exact same DNS names,
-    depending on how Redis and Sentinel have been configured)**.
+    the location used here exactly matches the value advertised by the Sentinel
+    instances**: the same IP address or the same DNS name, depending on how
+    Redis and Sentinel have been configured. Likewise, **when Redis Cluster
+    support is enabled, the location used here must exactly match the value
+    advertised by the ``CLUSTER SLOTS`` command**.
 
     type: type of the Redis server referenced by ``location``:
 
@@ -461,7 +463,12 @@ Arguments
     location: Redis connection string. Both host (IP or DNS name) + port and
     UNIX sockets are supported. If Redis Cluster support has been enabled only
     the host + port format is allowed. **Do not use DNS names in combination
-    with ``redis.subnets()``**.
+    with ``redis.subnets()``**. **When using ``redis.sentinels()``, make sure
+    the location used here exactly matches the value advertised by the Sentinel
+    instances**: the same IP address or the same DNS name, depending on how
+    Redis and Sentinel have been configured. Likewise, **when Redis Cluster
+    support is enabled, the location used here must exactly match the value
+    advertised by the ``CLUSTER SLOTS`` command**.
 
     type: type of the Redis server referenced by ``location``:
 
