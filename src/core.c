@@ -527,18 +527,13 @@ new_weight_rule(unsigned weight, const char *regexp)
 
     result->weight = weight;
 
-    int errorcode, erroroffset;
-    result->vre = VRE_compile(regexp, 0, &errorcode, &erroroffset, 1);
+    const char *error;
+    int erroroffset;
+    result->vre = VRE_compile(regexp, 0, &error, &erroroffset);
     if (result->vre == NULL) {
-        struct vsb vsb;
-        char errbuf[VRE_ERROR_LEN];
-        AN(VSB_init(&vsb, errbuf, sizeof errbuf));
-        AZ(VRE_error(&vsb, errorcode));
-        AZ(VSB_finish(&vsb));
-        VSB_fini(&vsb);
         REDIS_LOG_ERROR(NULL,
             "Failed to compile regular expression (regexp=%s): %s",
-            regexp, errbuf);
+            regexp, error);
     }
 
     return result;
