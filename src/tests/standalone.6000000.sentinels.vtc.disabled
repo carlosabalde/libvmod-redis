@@ -13,8 +13,8 @@ varnish v1 -vcl+backend {
     import ${vmod_redis};
 
     sub vcl_init {
-        redis.subnets(
-            masks={""});
+        redis.weights(
+            rules={""});
 
         redis.sentinels(
             locations={"
@@ -39,8 +39,8 @@ varnish v2 -vcl+backend {
     import ${vmod_redis};
 
     sub vcl_init {
-        redis.subnets(
-            masks={""});
+        redis.weights(
+            rules={""});
 
         redis.sentinels(
             locations={"
@@ -66,8 +66,8 @@ varnish v3 -vcl+backend {
     import ${vmod_redis};
 
     sub vcl_init {
-        redis.subnets(
-            masks={""});
+        redis.weights(
+            rules={""});
 
         redis.sentinels(
             locations={"

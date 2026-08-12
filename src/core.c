@@ -10,10 +10,6 @@
 #ifdef TLS_ENABLED
 #include <hiredis/hiredis_ssl.h>
 #endif
-#include <arpa/inet.h>
-#ifdef __FreeBSD__
-#include <sys/socket.h>
-#endif
 
 #include "cache/cache.h"
 
@@ -427,7 +423,7 @@ new_vcl_state()
 
     Lck_New(&result->mutex, vmod_state.locks.config);
 
-    VTAILQ_INIT(&result->subnets);
+    VTAILQ_INIT(&result->weight_rules);
 
     VTAILQ_INIT(&result->dbs);
 
@@ -463,12 +459,12 @@ free_vcl_state(vcl_state_t *priv)
 
    CHECK_OBJ_NOTNULL(priv, VCL_STATE_MAGIC);
 
-    subnet_t *isubnet;
-    while (!VTAILQ_EMPTY(&priv->subnets)) {
-        isubnet = VTAILQ_FIRST(&priv->subnets);
-        CHECK_OBJ_NOTNULL(isubnet, SUBNET_MAGIC);
-        VTAILQ_REMOVE(&priv->subnets, isubnet, list);
-        free_subnet(isubnet);
+    weight_rule_t *iweight_rule;
+    while (!VTAILQ_EMPTY(&priv->weight_rules)) {
+        iweight_rule = VTAILQ_FIRST(&priv->weight_rules);
+        CHECK_OBJ_NOTNULL(iweight_rule, WEIGHT_RULE_MAGIC);
+        VTAILQ_REMOVE(&priv->weight_rules, iweight_rule, list);
+        free_weight_rule(iweight_rule);
     }
 
     database_t *idb;
@@ -522,30 +518,45 @@ free_vcl_state(vcl_state_t *priv)
     FREE_OBJ(priv);
 }
 
-subnet_t *
-new_subnet(unsigned weight, struct in_addr ia4, unsigned bits)
+weight_rule_t *
+new_weight_rule(unsigned weight, const char *regexp)
 {
-    subnet_t *result;
-    ALLOC_OBJ(result, SUBNET_MAGIC);
+    weight_rule_t *result;
+    ALLOC_OBJ(result, WEIGHT_RULE_MAGIC);
     AN(result);
 
     result->weight = weight;
-    result->mask.s_addr = (bits == 0 ? 0x0 : (0xffffffff << (32 - bits)));
-    result->address.s_addr = ntohl(ia4.s_addr) & result->mask.s_addr;
+
+    int errorcode, erroroffset;
+    result->vre = VRE_compile(regexp, 0, &errorcode, &erroroffset, 1);
+    if (result->vre == NULL) {
+        struct vsb vsb;
+        char errbuf[VRE_ERROR_LEN];
+        AN(VSB_init(&vsb, errbuf, sizeof errbuf));
+        AZ(VRE_error(&vsb, errorcode));
+        AZ(VSB_finish(&vsb));
+        VSB_fini(&vsb);
+        REDIS_LOG_ERROR(NULL,
+            "Failed to compile regular expression (regexp=%s): %s",
+            regexp, errbuf);
+    }
 
     return result;
 }
 
 void
-free_subnet(subnet_t *subnet)
+free_weight_rule(weight_rule_t *weight_rule)
 {
-    CHECK_OBJ_NOTNULL(subnet, SUBNET_MAGIC);
+    CHECK_OBJ_NOTNULL(weight_rule, WEIGHT_RULE_MAGIC);
 
-    subnet->weight = 0;
-    subnet->mask = (struct in_addr){ 0 };
-    subnet->address = (struct in_addr){ 0 };
+    weight_rule->weight = 0;
 
-    FREE_OBJ(subnet);
+    if (weight_rule->vre != NULL) {
+        VRE_free(&weight_rule->vre);
+        weight_rule->vre = NULL;
+    }
+
+    FREE_OBJ(weight_rule);
 }
 
 database_t *
@@ -760,22 +771,21 @@ unsafe_add_redis_server(
                 result->role = unsafe_discover_redis_server_role(ctx, result);
             }
 
-            // Calculate weight.
+            // Calculate weight. Beware 'VRT_re_match()' asserts on a NULL
+            // 'ctx'. That's fine for now: all callers (i.e., VCL initialization,
+            // '.add_server()' and cluster discovery) provide a valid one. If
+            // servers ever get registered from a context-less thread (e.g.,
+            // the Sentinel thread), switching to 'VRE_match() could be
+            // considered.
             if (result->location.type == REDIS_SERVER_LOCATION_HOST_TYPE) {
-                struct in_addr ia4;
-                if (inet_pton(AF_INET, result->location.parsed.address.host, &ia4)) {
-                    result->weight = NREDIS_SERVER_WEIGHTS - 1;
-                    subnet_t *isubnet;
-                    VTAILQ_FOREACH(isubnet, &config->subnets, list) {
-                        CHECK_OBJ_NOTNULL(isubnet, SUBNET_MAGIC);
-                        if ((ntohl(ia4.s_addr) & isubnet->mask.s_addr) ==
-                            (isubnet->address.s_addr & isubnet->mask.s_addr)) {
-                            result->weight = isubnet->weight;
-                            break;
-                        }
+                result->weight = NREDIS_SERVER_WEIGHTS - 1;
+                weight_rule_t *iweight_rule;
+                VTAILQ_FOREACH(iweight_rule, &config->weight_rules, list) {
+                    CHECK_OBJ_NOTNULL(iweight_rule, WEIGHT_RULE_MAGIC);
+                    if (VRT_re_match(ctx, result->location.raw, iweight_rule->vre)) {
+                        result->weight = iweight_rule->weight;
+                        break;
                     }
-                } else {
-                    result->weight = NREDIS_SERVER_WEIGHTS - 1;
                 }
             } else {
                 result->weight = 0;
