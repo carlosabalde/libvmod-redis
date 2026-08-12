@@ -316,17 +316,13 @@ unsafe_discover_slots_aux(
                                         endpoint = "";
                                     }
                                 } else if (strcmp(name, "port") == 0) {
-                                    if (node->element[k+1]->type == REDIS_REPLY_STRING) {
-                                        port = atoi(node->element[k+1]->str);
-                                    } else if ((node->element[k+1]->type == REDIS_REPLY_INTEGER) &&
+                                    if ((node->element[k+1]->type == REDIS_REPLY_INTEGER) &&
                                                (node->element[k+1]->integer > 0) &&
                                                (node->element[k+1]->integer <= UINT16_MAX)) {
                                         port = (unsigned)node->element[k+1]->integer;
                                     }
                                 } else if (strcmp(name, "tls-port") == 0) {
-                                    if (node->element[k+1]->type == REDIS_REPLY_STRING) {
-                                        tls_port = atoi(node->element[k+1]->str);
-                                    } else if ((node->element[k+1]->type == REDIS_REPLY_INTEGER) &&
+                                    if ((node->element[k+1]->type == REDIS_REPLY_INTEGER) &&
                                                (node->element[k+1]->integer > 0) &&
                                                (node->element[k+1]->integer <= UINT16_MAX)) {
                                         tls_port = (unsigned)node->element[k+1]->integer;
