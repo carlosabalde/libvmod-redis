@@ -17,7 +17,7 @@
 #define BANNED_COMMANDS "|INFO|MULTI|EXEC|SLAVEOF|REPLICAOF|CONFIG|SHUTDOWN|SCRIPT|"
 #define KEY_INDEX3_COMMANDS "|EVAL|EVALSHA|EVAL_RO|EVALSHA_RO|"
 
-#define CLUSTER_DISCOVERY_COMMAND "CLUSTER SLOTS"
+#define CLUSTER_DISCOVERY_COMMAND "CLUSTER SHARDS"
 
 static void unsafe_discover_slots(
     VRT_CTX, struct vmod_redis_db *db, vcl_state_t *config, redis_server_t *server);
@@ -97,7 +97,7 @@ cluster_execute(
                     AN(server);
 
                     // ASK vs. MOVED.
-                    if (strncmp(result->str, "MOVED", 3) == 0) {
+                    if (strncmp(result->str, "MOVED", 5) == 0) {
                         // Update stats.
                         db->stats.cluster.replies.moved++;
 
@@ -176,7 +176,7 @@ cluster_execute(
 static void
 unsafe_add_slot(
     VRT_CTX, struct vmod_redis_db *db, vcl_state_t *config, unsigned start,
-    unsigned stop, char *host, int port, enum REDIS_SERVER_ROLE role)
+    unsigned stop, const char *endpoint, int port, enum REDIS_SERVER_ROLE role)
 {
     // Assertions.
     Lck_AssertHeld(&config->mutex);
@@ -184,7 +184,7 @@ unsafe_add_slot(
 
     // Add / update server.
     char location[256];
-    snprintf(location, sizeof(location), "%s:%d", host, port);
+    snprintf(location, sizeof(location), "%s:%d", endpoint, port);
     redis_server_t *server = unsafe_add_redis_server(ctx, db, config, location, role);
     AN(server);
 
@@ -264,40 +264,125 @@ unsafe_discover_slots_aux(
                     }
                 }
 
-                // Extract slots.
+                // Iterate shards.
                 for (int i = 0; i < reply->elements; i++) {
-                    if ((reply->element[i]->type == REDIS_REPLY_ARRAY) &&
-                        (reply->element[i]->elements >= 3) &&
-                        (reply->element[i]->element[0]->type == REDIS_REPLY_INTEGER) &&
-                        (reply->element[i]->element[1]->type == REDIS_REPLY_INTEGER) &&
-                        (reply->element[i]->element[2]->type == REDIS_REPLY_ARRAY) &&
-                        (reply->element[i]->element[2]->elements >= 2) &&
-                        (reply->element[i]->element[2]->element[0]->type == REDIS_REPLY_STRING) &&
-                        (reply->element[i]->element[2]->element[1]->type == REDIS_REPLY_INTEGER)) {
-                        // Extract slot data.
-                        int start = reply->element[i]->element[0]->integer;
-                        int end = reply->element[i]->element[1]->integer;
+                    const redisReply *shard = reply->element[i];
+                    if (shard->type != REDIS_REPLY_ARRAY) {
+                        continue;
+                    }
 
-                        // Check slot data.
-                        if ((start >= 0) && (start < NREDIS_CLUSTER_SLOTS) &&
-                            (end >= 0) && (end < NREDIS_CLUSTER_SLOTS)) {
-                            unsafe_add_slot(
-                                ctx, db, config, start, end,
-                                reply->element[i]->element[2]->element[0]->str,
-                                reply->element[i]->element[2]->element[1]->integer,
-                                REDIS_SERVER_MASTER_ROLE);
+                    // Find "slots" and "nodes" properties by iterating key-value pairs.
+                    const redisReply *slots = NULL;
+                    const redisReply *nodes = NULL;
+                    for (int j = 0; j + 1 < shard->elements; j += 2) {
+                        if (shard->element[j]->type != REDIS_REPLY_STRING) {
+                            continue;
+                        }
+                        const char *key = shard->element[j]->str;
+                        if ((strcmp(key, "slots") == 0) &&
+                            (shard->element[j+1]->type == REDIS_REPLY_ARRAY) &&
+                            (shard->element[j+1]->elements >= 2)) {
+                            slots = shard->element[j+1];
+                        } else if ((strcmp(key, "nodes") == 0) &&
+                                   (shard->element[j+1]->type == REDIS_REPLY_ARRAY) &&
+                                   (shard->element[j+1]->elements >= 1)) {
+                            nodes = shard->element[j+1];
+                        }
+                    }
+                    if (slots == NULL || nodes == NULL) {
+                        continue;
+                    }
 
-                            // Extract slave servers data.
-                            for (int j = 3; j < reply->element[i]->elements; j++) {
-                                if ((reply->element[i]->element[j]->type == REDIS_REPLY_ARRAY) &&
-                                    (reply->element[i]->element[j]->elements >= 2) &&
-                                    (reply->element[i]->element[j]->element[0]->type == REDIS_REPLY_STRING) &&
-                                    (reply->element[i]->element[j]->element[1]->type == REDIS_REPLY_INTEGER)) {
-                                    unsafe_add_slot(
-                                        ctx, db, config, start, end,
-                                        reply->element[i]->element[j]->element[0]->str,
-                                        reply->element[i]->element[j]->element[1]->integer,
-                                        REDIS_SERVER_SLAVE_ROLE);
+                    // Iterate nodes.
+                    for (int j = 0; j < nodes->elements; j++) {
+                        const redisReply *node = nodes->element[j];
+                        if (node->type == REDIS_REPLY_ARRAY) {
+                            // Initializations.
+                            const char *endpoint = NULL;
+                            unsigned port = 0;
+                            unsigned tls_port = 0;
+                            enum REDIS_SERVER_ROLE role = REDIS_SERVER_TBD_ROLE;
+
+                            // Look for relevant properties.
+                            for (int k = 0; k + 1 < node->elements; k += 2) {
+                                if (node->element[k]->type != REDIS_REPLY_STRING) {
+                                    continue;
+                                }
+                                const char *name = node->element[k]->str;
+                                if (strcmp(name, "endpoint") == 0) {
+                                    if (node->element[k+1]->type == REDIS_REPLY_STRING) {
+                                        endpoint = node->element[k+1]->str;
+                                    } else if (node->element[k+1]->type == REDIS_REPLY_NIL) {
+                                        endpoint = "";
+                                    }
+                                } else if (strcmp(name, "port") == 0) {
+                                    if (node->element[k+1]->type == REDIS_REPLY_STRING) {
+                                        port = atoi(node->element[k+1]->str);
+                                    } else if ((node->element[k+1]->type == REDIS_REPLY_INTEGER) &&
+                                               (node->element[k+1]->integer > 0) &&
+                                               (node->element[k+1]->integer <= UINT16_MAX)) {
+                                        port = (unsigned)node->element[k+1]->integer;
+                                    }
+                                } else if (strcmp(name, "tls-port") == 0) {
+                                    if (node->element[k+1]->type == REDIS_REPLY_STRING) {
+                                        tls_port = atoi(node->element[k+1]->str);
+                                    } else if ((node->element[k+1]->type == REDIS_REPLY_INTEGER) &&
+                                               (node->element[k+1]->integer > 0) &&
+                                               (node->element[k+1]->integer <= UINT16_MAX)) {
+                                        tls_port = (unsigned)node->element[k+1]->integer;
+                                    }
+                                } else if ((strcmp(name, "role") == 0) &&
+                                           (node->element[k+1]->type == REDIS_REPLY_STRING)) {
+                                    const char *value = node->element[k+1]->str;
+                                    if (strstr(value, "master") != NULL ||
+                                        strstr(value, "primary") != NULL) {
+                                        role = REDIS_SERVER_MASTER_ROLE;
+                                    }
+                                    if (strstr(value, "slave") != NULL ||
+                                        strstr(value, "replica") != NULL) {
+                                        role = REDIS_SERVER_SLAVE_ROLE;
+                                    }
+                                }
+                            }
+                            // "?" means misconfigured hostname; skip.
+                            if (endpoint != NULL && strcmp(endpoint, "?") == 0) {
+                                continue;
+                            }
+                            // NULL or "" means use the server we queried.
+                            if (endpoint == NULL || endpoint[0] == '\0') {
+                                endpoint = server->location.parsed.address.host;
+                            }
+                            // Prefer tls-port or port depending on the db configuration.
+#ifdef TLS_ENABLED
+                            unsigned effective_port = (db->tls_ssl_ctx != NULL) ? tls_port : port;
+                            if (effective_port == 0) {
+                                effective_port = (db->tls_ssl_ctx != NULL) ? port : tls_port;
+                            }
+#else
+                            unsigned effective_port = port;
+#endif
+                            // If all info for the node has been found, continue.
+                            if ((endpoint != NULL) &&
+                                (effective_port > 0) &&
+                                (role != REDIS_SERVER_TBD_ROLE)) {
+                                // Iterate slot ranges.
+                                for (int k = 0; k < slots->elements - 1; k += 2) {
+                                    // Extract slot data.
+                                    if ((slots->element[k]->type != REDIS_REPLY_INTEGER) ||
+                                        (slots->element[k + 1]->type != REDIS_REPLY_INTEGER)) {
+                                        continue;
+                                    }
+                                    int start = slots->element[k]->integer;
+                                    int end = slots->element[k + 1]->integer;
+
+                                    // Check slot data.
+                                    if ((start >= 0) && (start < NREDIS_CLUSTER_SLOTS) &&
+                                        (end >= 0) && (end < NREDIS_CLUSTER_SLOTS)) {
+                                        // Add / update server and register slots.
+                                        unsafe_add_slot(
+                                            ctx, db, config, start, end,
+                                            endpoint, effective_port, role);
+                                    }
                                 }
                             }
                         }

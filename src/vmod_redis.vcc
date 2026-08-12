@@ -359,7 +359,7 @@ Arguments
     Sentinel instances**: the same IP address or the same DNS name, depending on
     how Redis and Sentinel have been configured. Likewise, **when Redis Cluster
     support is enabled, the location used here must exactly match the value
-    advertised by the ``CLUSTER SLOTS`` command**.
+    advertised by the ``CLUSTER SHARDS`` command**.
 
     type: type of the Redis server referenced by ``location``:
 
@@ -368,7 +368,7 @@ Arguments
 
     - The ``cluster`` value enables Redis Cluster support, automatically
       discovering other servers in the cluster and their roles on demand
-      using the ``CLUSTER SLOTS`` command.
+      using the ``CLUSTER SHARDS`` command.
 
     connection_timeout: connection timeout (milliseconds; 0 means no timeout)
     to the Redis server.
@@ -479,7 +479,7 @@ Arguments
     Sentinel instances**: the same IP address or the same DNS name, depending on
     how Redis and Sentinel have been configured. Likewise, **when Redis Cluster
     support is enabled, the location used here must exactly match the value
-    advertised by the ``CLUSTER SLOTS`` command**.
+    advertised by the ``CLUSTER SHARDS`` command**.
 
     type: type of the Redis server referenced by ``location``:
 
@@ -494,7 +494,7 @@ Description
 
     If Redis Cluster support has been enabled other servers in the cluster and
     their roles are automatically discovered by the VMOD using the
-    ``CLUSTER SLOTS`` command. In any case, knowing more cluster servers during
+    ``CLUSTER SHARDS`` command. In any case, knowing more cluster servers during
     startup increases the chances of discover the cluster topology if some server
     is failing.
 

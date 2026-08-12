@@ -265,7 +265,7 @@ EOF
     # Wait for cluster formation in a rudementary way.
     [[ $IPV6 = 1 ]] && HOST=::1 || HOST=127.0.0.1
     [[ $IPV6 = 1 ]] && PATTERN=::1 || PATTERN=127[.]0[.]0[.]
-    while [ $(redis-cli -h $HOST -p $((DB_CLUSTER_START_PORT+1)) CLUSTER SLOTS | grep "$PATTERN" | wc -l) -lt $DB_CLUSTER_SERVERS ]; do
+    while [ $(redis-cli -h $HOST -p $((DB_CLUSTER_START_PORT+1)) CLUSTER SHARDS | grep "$PATTERN" | wc -l) -lt $DB_CLUSTER_SERVERS ]; do
         sleep 1
     done
     sleep 1
