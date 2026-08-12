@@ -330,12 +330,10 @@ unsafe_discover_slots_aux(
                                 } else if ((strcmp(name, "role") == 0) &&
                                            (node->element[k+1]->type == REDIS_REPLY_STRING)) {
                                     const char *value = node->element[k+1]->str;
-                                    if (strstr(value, "master") != NULL ||
-                                        strstr(value, "primary") != NULL) {
+                                    if (strstr(value, "master") != NULL) {
                                         role = REDIS_SERVER_MASTER_ROLE;
                                     }
-                                    if (strstr(value, "slave") != NULL ||
-                                        strstr(value, "replica") != NULL) {
+                                    if (strstr(value, "replica") != NULL) {
                                         role = REDIS_SERVER_SLAVE_ROLE;
                                     }
                                 }
