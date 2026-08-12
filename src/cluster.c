@@ -210,6 +210,7 @@ unsafe_discover_slots_aux(
 
     // Initializations.
     unsigned done = 0;
+    unsigned parse_errors = 0;
 
     // Create context.
     redisContext *rcontext;
@@ -249,65 +250,83 @@ unsafe_discover_slots_aux(
             redisReply *reply = redisCommand(rcontext, CLUSTER_DISCOVERY_COMMAND);
 
             // Check reply.
-            if ((!rcontext->err) &&
-                (reply != NULL) &&
-                (reply->type == REDIS_REPLY_ARRAY)) {
-                // Reset previous slots.
-                redis_server_t *iserver;
-                for (unsigned iweight = 0; iweight < NREDIS_SERVER_WEIGHTS; iweight++) {
-                    for (enum REDIS_SERVER_ROLE irole = 0; irole < NREDIS_SERVER_ROLES; irole++) {
-                        VTAILQ_FOREACH(iserver, &db->servers[iweight][irole], list) {
-                            for (int i = 0; i < NREDIS_CLUSTER_SLOTS; i++) {
-                                iserver->cluster.slots[i] = 0;
+            if ((!rcontext->err) && (reply != NULL)) {
+                // Log reply.
+                if (db->debug) {
+                    struct vsb *reply_vsb = redis_reply_to_string(reply);
+                    REDIS_LOG_DEBUG(NULL,
+                        "Cluster discovery reply received (db=%s, server=%s): %s",
+                        db->name, server->location.raw, VSB_data(reply_vsb));
+                    VSB_destroy(&reply_vsb);
+                }
+
+                if (reply->type == REDIS_REPLY_ARRAY) {
+                    // Reset previous slots.
+                    redis_server_t *iserver;
+                    for (unsigned iweight = 0; iweight < NREDIS_SERVER_WEIGHTS; iweight++) {
+                        for (enum REDIS_SERVER_ROLE irole = 0; irole < NREDIS_SERVER_ROLES; irole++) {
+                            VTAILQ_FOREACH(iserver, &db->servers[iweight][irole], list) {
+                                for (int i = 0; i < NREDIS_CLUSTER_SLOTS; i++) {
+                                    iserver->cluster.slots[i] = 0;
+                                }
                             }
                         }
                     }
-                }
 
-                // Iterate shards.
-                for (int i = 0; i < reply->elements; i++) {
-                    const redisReply *shard = reply->element[i];
-                    if (shard->type != REDIS_REPLY_ARRAY) {
-                        continue;
-                    }
-
-                    // Find "slots" and "nodes" properties by iterating key-value pairs.
-                    const redisReply *slots = NULL;
-                    const redisReply *nodes = NULL;
-                    for (int j = 0; j + 1 < shard->elements; j += 2) {
-                        if (shard->element[j]->type != REDIS_REPLY_STRING) {
+                    // Iterate shards.
+                    for (int i = 0; i < reply->elements; i++) {
+                        const redisReply *shard = reply->element[i];
+                        if (shard->type != REDIS_REPLY_ARRAY) {
+                            parse_errors++;
                             continue;
                         }
-                        const char *key = shard->element[j]->str;
-                        if ((strcmp(key, "slots") == 0) &&
-                            (shard->element[j+1]->type == REDIS_REPLY_ARRAY) &&
-                            (shard->element[j+1]->elements >= 2)) {
-                            slots = shard->element[j+1];
-                        } else if ((strcmp(key, "nodes") == 0) &&
-                                   (shard->element[j+1]->type == REDIS_REPLY_ARRAY) &&
-                                   (shard->element[j+1]->elements >= 1)) {
-                            nodes = shard->element[j+1];
-                        }
-                    }
-                    if (slots == NULL || nodes == NULL) {
-                        continue;
-                    }
 
-                    // Iterate nodes.
-                    for (int j = 0; j < nodes->elements; j++) {
-                        const redisReply *node = nodes->element[j];
-                        if (node->type == REDIS_REPLY_ARRAY) {
+                        // Find "slots" and "nodes" properties by iterating key-value pairs.
+                        const redisReply *slots = NULL;
+                        const redisReply *nodes = NULL;
+                        for (int j = 0; j + 1 < shard->elements; j += 2) {
+                            if (shard->element[j]->type != REDIS_REPLY_STRING) {
+                                parse_errors++;
+                                continue;
+                            }
+
+                            const char *key = shard->element[j]->str;
+                            if ((strcmp(key, "slots") == 0) &&
+                                (shard->element[j+1]->type == REDIS_REPLY_ARRAY) &&
+                                (shard->element[j+1]->elements >= 2)) {
+                                slots = shard->element[j+1];
+                            } else if ((strcmp(key, "nodes") == 0) &&
+                                    (shard->element[j+1]->type == REDIS_REPLY_ARRAY) &&
+                                    (shard->element[j+1]->elements >= 1)) {
+                                nodes = shard->element[j+1];
+                            }
+                        }
+                        if (slots == NULL || nodes == NULL) {
+                            parse_errors++;
+                            continue;
+                        }
+
+                        // Iterate nodes.
+                        for (int j = 0; j < nodes->elements; j++) {
+                            const redisReply *node = nodes->element[j];
+                            if (node->type != REDIS_REPLY_ARRAY) {
+                                parse_errors++;
+                                continue;
+                            }
+
                             // Initializations.
                             const char *endpoint = NULL;
                             unsigned port = 0;
                             unsigned tls_port = 0;
                             enum REDIS_SERVER_ROLE role = REDIS_SERVER_TBD_ROLE;
 
-                            // Look for relevant properties.
+                            // Extract node data.
                             for (int k = 0; k + 1 < node->elements; k += 2) {
                                 if (node->element[k]->type != REDIS_REPLY_STRING) {
+                                    parse_errors++;
                                     continue;
                                 }
+
                                 const char *name = node->element[k]->str;
                                 if (strcmp(name, "endpoint") == 0) {
                                     if (node->element[k+1]->type == REDIS_REPLY_STRING) {
@@ -317,29 +336,29 @@ unsafe_discover_slots_aux(
                                     }
                                 } else if (strcmp(name, "port") == 0) {
                                     if ((node->element[k+1]->type == REDIS_REPLY_INTEGER) &&
-                                               (node->element[k+1]->integer > 0) &&
-                                               (node->element[k+1]->integer <= UINT16_MAX)) {
+                                                (node->element[k+1]->integer > 0) &&
+                                                (node->element[k+1]->integer <= UINT16_MAX)) {
                                         port = (unsigned)node->element[k+1]->integer;
                                     }
                                 } else if (strcmp(name, "tls-port") == 0) {
                                     if ((node->element[k+1]->type == REDIS_REPLY_INTEGER) &&
-                                               (node->element[k+1]->integer > 0) &&
-                                               (node->element[k+1]->integer <= UINT16_MAX)) {
+                                                (node->element[k+1]->integer > 0) &&
+                                                (node->element[k+1]->integer <= UINT16_MAX)) {
                                         tls_port = (unsigned)node->element[k+1]->integer;
                                     }
                                 } else if ((strcmp(name, "role") == 0) &&
-                                           (node->element[k+1]->type == REDIS_REPLY_STRING)) {
+                                            (node->element[k+1]->type == REDIS_REPLY_STRING)) {
                                     const char *value = node->element[k+1]->str;
                                     if (strstr(value, "master") != NULL) {
                                         role = REDIS_SERVER_MASTER_ROLE;
-                                    }
-                                    if (strstr(value, "replica") != NULL) {
+                                    } else if (strstr(value, "replica") != NULL) {
                                         role = REDIS_SERVER_SLAVE_ROLE;
                                     }
                                 }
                             }
                             // "?" means misconfigured hostname; skip.
                             if (endpoint != NULL && strcmp(endpoint, "?") == 0) {
+                                parse_errors++;
                                 continue;
                             }
                             // NULL or "" means use the server we queried.
@@ -355,37 +374,56 @@ unsafe_discover_slots_aux(
 #else
                             unsigned effective_port = port;
 #endif
-                            // If all info for the node has been found, continue.
-                            if ((endpoint != NULL) &&
-                                (effective_port > 0) &&
-                                (role != REDIS_SERVER_TBD_ROLE)) {
-                                // Iterate slot ranges.
-                                for (int k = 0; k < slots->elements - 1; k += 2) {
-                                    // Extract slot data.
-                                    if ((slots->element[k]->type != REDIS_REPLY_INTEGER) ||
-                                        (slots->element[k + 1]->type != REDIS_REPLY_INTEGER)) {
-                                        continue;
-                                    }
-                                    int start = slots->element[k]->integer;
-                                    int end = slots->element[k + 1]->integer;
+                            // Check node data.
+                            if ((endpoint == NULL) ||
+                                (effective_port == 0) ||
+                                (role == REDIS_SERVER_TBD_ROLE)) {
+                                parse_errors++;
+                                continue;
+                            }
 
-                                    // Check slot data.
-                                    if ((start >= 0) && (start < NREDIS_CLUSTER_SLOTS) &&
-                                        (end >= 0) && (end < NREDIS_CLUSTER_SLOTS)) {
-                                        // Add / update server and register slots.
-                                        unsafe_add_slot(
-                                            ctx, db, config, start, end,
-                                            endpoint, effective_port, role);
-                                    }
+                            // Iterate slot ranges.
+                            for (int k = 0; k < slots->elements - 1; k += 2) {
+                                // Extract slot data.
+                                if ((slots->element[k]->type != REDIS_REPLY_INTEGER) ||
+                                    (slots->element[k + 1]->type != REDIS_REPLY_INTEGER)) {
+                                    parse_errors++;
+                                    continue;
                                 }
+                                int start = slots->element[k]->integer;
+                                int end = slots->element[k + 1]->integer;
+
+                                // Check slot data.
+                                if ((start < 0) || (start >= NREDIS_CLUSTER_SLOTS) ||
+                                    (end < 0) || (end >= NREDIS_CLUSTER_SLOTS)) {
+                                    parse_errors++;
+                                    continue;
+                                }
+
+                                // Add / update server and register slots.
+                                unsafe_add_slot(
+                                    ctx, db, config, start, end,
+                                    endpoint, effective_port, role);
                             }
                         }
                     }
-                }
 
-                // Stop execution.
-                done = 1;
-                db->stats.cluster.discoveries.total++;
+                    // Log parse errors.
+                    if (parse_errors > 0) {
+                        REDIS_LOG_ERROR(ctx,
+                            "Failed to parse some cluster discovery data (db=%s, server=%s)",
+                            db->name, server->location.raw);
+                    }
+
+                    // Stop execution.
+                    done = 1;
+                    db->stats.cluster.discoveries.total++;
+                } else {
+                    REDIS_LOG_ERROR(ctx,
+                        "Unexpected cluster discovery reply (type=%d, db=%s, server=%s)",
+                        reply->type, db->name, server->location.raw);
+                    db->stats.cluster.discoveries.failed++;
+                }
             } else {
                 REDIS_LOG_ERROR(ctx,
                     "Failed to execute cluster discovery command (error=%d, db=%s, server=%s): %s",
