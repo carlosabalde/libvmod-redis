@@ -10,9 +10,9 @@ VMOD using the `synchronous hiredis library API <https://github.com/redis/hiredi
 
 Highlights:
 
-* **Full support for execution of LUA scripts** (i.e. ``EVAL`` command), including optimistic automatic execution of ``EVALSHA`` commands.
+* **Full support for execution of Lua scripts** (i.e. ``EVAL`` command), including optimistic automatic execution of ``EVALSHA`` commands.
 * **All Redis reply data types are supported**, including partial support to access to components of simple (i.e. not nested) array replies.
-* **Redis pipelines are not (and won't be) supported**. LUA scripting, which is fully supported by the VMOD, it's a much more flexible alternative to pipelines for atomic execution and minimizing latency. Pipelines are hard to use and error prone, specially when using the ``WATCH`` command.
+* **Redis pipelines are not (and won't be) supported**. Lua scripting, which is fully supported by the VMOD, it's a much more flexible alternative to pipelines for atomic execution and minimizing latency. Pipelines are hard to use and error prone, specially when using the ``WATCH`` command.
 * **Support for classic Redis deployments** using multiple replicated Redis servers **and for clustered deployments based on Redis Cluster**.
 * **Support for multiple databases and multiple Redis connections**, local to each Varnish worker thread, or shared using one or more pools.
 * **Support for smart command execution**, selecting the destination server according with the preferred role (i.e. master or slave) and with distance and healthiness metrics collected during execution.
@@ -51,7 +51,8 @@ import redis;
         STRING tls_certfile="",
         STRING tls_keyfile="",
         STRING tls_sni="",
-        STRING password="")
+        STRING password="",
+        BOOL debug=false)
 
     ##
     ## Proxy.
@@ -94,6 +95,7 @@ import redis;
         STRING password="",
         INT sickness_ttl=60,
         BOOL ignore_slaves=false,
+        BOOL debug=false,
         INT max_cluster_hops=32)
     Method VOID .add_server(
         STRING location,
@@ -159,7 +161,8 @@ Single server
 
     sub vcl_init {
         # VMOD configuration: simple case, keeping up to one Redis connection
-        # per Varnish worker thread.
+        # per Varnish worker thread. Beware this is just an example: using
+        # shared connections is usually a better approach.
         new db = redis.db(
             location="192.168.1.100:6379",
             type=master,
@@ -178,7 +181,7 @@ Single server
         # Alternatively, the same can be achieved with one single command
         db.easy_execute("SET", "foo", "Hello world!");
 
-        # LUA scripting.
+        # Lua scripting.
         db.command("EVAL");
         db.push({"
             redis.call('SET', KEYS[1], ARGV[1])
@@ -210,7 +213,8 @@ Multiple servers
     sub vcl_init {
         # VMOD configuration: master-slave replication, keeping up to two
         # Redis connections per Varnish worker thread (up to one to the master
-        # server & up to one to the closest slave server).
+        # server & up to one to the closest slave server). Beware this is just
+        # an example: using shared connections is usually a better approach.
         redis.subnets(
             masks={"
                 0 192.168.1.102/32,
@@ -248,7 +252,7 @@ Clustered setup
 ::
 
     sub vcl_init {
-        # VMOD configuration: clustered setup, keeping up to 100 Redis
+        # VMOD configuration: clustered setup, keeping up to 128 Redis
         # connections per server, all shared between all Varnish worker threads.
         # Two initial cluster servers are provided; remaining servers are
         # automatically discovered.

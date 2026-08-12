@@ -21,24 +21,24 @@ cleanup() {
 
     for MASTER_INDEX in $(seq 1 $DB_STANDALONE_MASTER_SERVERS); do
         if [[ -s "$1/db-master$MASTER_INDEX.pid" ]]; then
-            kill -9 $(cat "$1/db-master$MASTER_INDEX.pid")
+            kill -9 $(cat "$1/db-master$MASTER_INDEX.pid") || true
         fi
         for SLAVE_INDEX in $(seq 1 $DB_STANDALONE_SLAVE_SERVERS); do
             if [[ -s "$1/db-slave${MASTER_INDEX}_$SLAVE_INDEX.pid" ]]; then
-                kill -9 $(cat "$1/db-slave${MASTER_INDEX}_$SLAVE_INDEX.pid")
+                kill -9 $(cat "$1/db-slave${MASTER_INDEX}_$SLAVE_INDEX.pid") || true
             fi
         done
     done
 
     for INDEX in $(seq 1 $DB_STANDALONE_SENTINEL_SERVERS); do
         if [[ -s "$1/db-sentinel$INDEX.pid" ]]; then
-            kill -9 $(cat "$1/db-sentinel$INDEX.pid")
+            kill -9 $(cat "$1/db-sentinel$INDEX.pid") || true
         fi
     done
 
     for INDEX in $(seq 1 $DB_CLUSTER_SERVERS); do
         if [[ -s "$1/db-server$INDEX.pid" ]]; then
-            kill -9 $(cat "$1/db-server$INDEX.pid")
+            kill -9 $(cat "$1/db-server$INDEX.pid") || true
         fi
     done
 
@@ -135,6 +135,7 @@ EOF
             unixsocket $TMP/db-slave${MASTER_INDEX}_$SLAVE_INDEX.sock
             pidfile $TMP/db-slave${MASTER_INDEX}_$SLAVE_INDEX.pid
             slaveof $MASTER_IP $MASTER_PORT
+            slave-announce-ip $SLAVE_IP
 EOF
             if [ "$VERSION" -ge '6000000' ]; then
                 cat >> "$TMP/db-slave${MASTER_INDEX}_$SLAVE_INDEX.conf" <<EOF
@@ -142,6 +143,11 @@ EOF
                 tls-cert-file $ROOT/assets/tls-certificate.crt
                 tls-key-file $ROOT/assets/tls-certificate.key
                 tls-ca-cert-file $ROOT/assets/tls-ca-certificate.crt
+                slave-announce-port $SLAVE_TLS_PORT
+EOF
+            else
+                cat >> "$TMP/db-slave${MASTER_INDEX}_$SLAVE_INDEX.conf" <<EOF
+                slave-announce-port $SLAVE_PORT
 EOF
             fi
             redis-server "$TMP/db-slave${MASTER_INDEX}_$SLAVE_INDEX.conf"
@@ -154,8 +160,16 @@ EOF
         done
 
         for SENTINEL_INDEX in $(seq 1 $DB_STANDALONE_SENTINEL_SERVERS); do
+            if [ "$VERSION" -ge '6000000' ]; then
+                cat >> "$TMP/db-sentinel$SENTINEL_INDEX.conf" <<EOF
+                sentinel monitor db-master$MASTER_INDEX $MASTER_IP $MASTER_TLS_PORT 1
+EOF
+            else
+                cat >> "$TMP/db-sentinel$SENTINEL_INDEX.conf" <<EOF
+                sentinel monitor db-master$MASTER_INDEX $MASTER_IP $MASTER_PORT 1
+EOF
+            fi
             cat >> "$TMP/db-sentinel$SENTINEL_INDEX.conf" <<EOF
-            sentinel monitor db-master$MASTER_INDEX $MASTER_IP $MASTER_PORT 1
             sentinel down-after-milliseconds db-master$MASTER_INDEX 5000
             sentinel failover-timeout db-master$MASTER_INDEX 60000
             sentinel parallel-syncs db-master$MASTER_INDEX 1
@@ -174,6 +188,7 @@ EOF
         port $SENTINEL_PORT
         pidfile $TMP/db-sentinel$INDEX.pid
         requirepass s3cr3t
+        sentinel announce-ip $SENTINEL_IP
 EOF
         if [ "$VERSION" -ge '6000000' ]; then
             cat >> "$TMP/db-sentinel$INDEX.conf" <<EOF
@@ -181,6 +196,12 @@ EOF
             tls-cert-file $ROOT/assets/tls-certificate.crt
             tls-key-file $ROOT/assets/tls-certificate.key
             tls-ca-cert-file $ROOT/assets/tls-ca-certificate.crt
+            tls-replication yes
+            sentinel announce-port $SENTINEL_TLS_PORT
+EOF
+        else
+            cat >> "$TMP/db-sentinel$INDEX.conf" <<EOF
+            sentinel announce-port $SENTINEL_PORT
 EOF
         fi
         redis-server "$TMP/db-sentinel$INDEX.conf" --sentinel
