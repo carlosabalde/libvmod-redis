@@ -9,10 +9,6 @@
 #ifdef TLS_ENABLED
 #include <hiredis/hiredis_ssl.h>
 #endif
-#include <arpa/inet.h>
-#ifdef __FreeBSD__
-#include <sys/socket.h>
-#endif
 
 #include "cache/cache.h"
 #include "vsb.h"
@@ -236,11 +232,11 @@ event_function(VRT_CTX, struct vmod_priv *vcl_priv, enum vcl_event_e e)
 }
 
 /******************************************************************************
- * redis.subnets();
+ * redis.weights();
  *****************************************************************************/
 
 static void
-unsafe_set_subnets(VRT_CTX, vcl_state_t *config, const char *masks)
+unsafe_set_weight_rules(VRT_CTX, vcl_state_t *config, const char *rules)
 {
     // Assertions.
     Lck_AssertHeld(&config->mutex);
@@ -249,7 +245,7 @@ unsafe_set_subnets(VRT_CTX, vcl_state_t *config, const char *masks)
     unsigned error = 0;
 
     // Parse input.
-    const char *p = masks;
+    const char *p = rules;
     while (*p != '\0') {
         // Initializations.
         const char *q;
@@ -261,67 +257,62 @@ unsafe_set_subnets(VRT_CTX, vcl_state_t *config, const char *masks)
             break;
         }
 
-        // Parse address in the mask.
-        char address[32];
+        // Extract regexp, ignoring trailing blanks & CRs.
         p = q;
-        while (isspace((unsigned char)*p)) p++;
+        while (isblank((unsigned char)*p)) p++;
         q = p;
-        while (*q != '\0' && *q != '/') {
+        while (*q != '\0' && *q != '\n') {
             q++;
         }
-        if ((p == q) || (*q != '/') || (q - p >= sizeof(address))) {
+        const char *r = q;
+        while ((r > p) &&
+               (isblank((unsigned char)*(r - 1)) || (*(r - 1) == '\r'))) {
+            r--;
+        }
+        if (p == r) {
             error = 20;
             break;
         }
-        memcpy(address, p, q - p);
-        address[q - p] = '\0';
-        struct in_addr ia4;
-        if (inet_pton(AF_INET, address, &ia4) == 0) {
+        const char *regexp = strndup(p, r - p);
+        AN(regexp);
+
+        // Create new weight rule.
+        weight_rule_t *weight_rule = new_weight_rule(weight, regexp);
+        free((void *) regexp);
+        if (weight_rule->vre == NULL) {
+            free_weight_rule(weight_rule);
             error = 30;
             break;
         }
 
-        // Parse number of bits in the mask.
-        p = q + 1;
-        if (!isdigit((unsigned char)*p)) {
-            error = 40;
-            break;
-        }
-        int bits = strtol(p, (char **)&q, 10);
-        if ((p == q) || (bits < 0) || (bits > 32)) {
-            error = 50;
-            break;
-        }
-
-        // Store parsed subnet.
-        subnet_t *subnet = new_subnet(weight, ia4, bits);
-        VTAILQ_INSERT_TAIL(&config->subnets, subnet, list);
+        // Store weight rule.
+        VTAILQ_INSERT_TAIL(&config->weight_rules, weight_rule, list);
 
         // More items?
         p = q;
-        while (isspace((unsigned char)*p) || (*p == ',')) p++;
+        while (isblank((unsigned char)*p) || (*p == '\n')) p++;
     }
 
     // Check error flag.
     if (error) {
-        // Release parsed subnets.
-        subnet_t *isubnet;
-        while (!VTAILQ_EMPTY(&config->subnets)) {
-            isubnet = VTAILQ_FIRST(&config->subnets);
-            CHECK_OBJ_NOTNULL(isubnet, SUBNET_MAGIC);
-            VTAILQ_REMOVE(&config->subnets, isubnet, list);
-            free_subnet(isubnet);
+        // Release parsed weight rules.
+        weight_rule_t *iweight_rule;
+        while (!VTAILQ_EMPTY(&config->weight_rules)) {
+            iweight_rule = VTAILQ_FIRST(&config->weight_rules);
+            CHECK_OBJ_NOTNULL(iweight_rule, WEIGHT_RULE_MAGIC);
+            VTAILQ_REMOVE(&config->weight_rules, iweight_rule, list);
+            free_weight_rule(iweight_rule);
         }
 
         // Log error.
         REDIS_LOG_ERROR(ctx,
-            "Got error while parsing subnets (error=%d, masks=%s)",
-            error, masks);
+            "Got error while parsing weight rules (error=%d, rules=%s)",
+            error, rules);
     }
 }
 
 VCL_VOID
-vmod_subnets(VRT_CTX, struct vmod_priv *vcl_priv, VCL_STRING masks)
+vmod_weights(VRT_CTX, struct vmod_priv *vcl_priv, VCL_STRING rules)
 {
     // Initializations.
     vcl_state_t *config = vcl_priv->priv;
@@ -332,21 +323,19 @@ vmod_subnets(VRT_CTX, struct vmod_priv *vcl_priv, VCL_STRING masks)
     // Silently ignore calls to this function if any database instance has
     // already been registered.
     if (VTAILQ_EMPTY(&config->dbs)) {
-        // Do not continue if subnets have already been set.
-        if (VTAILQ_EMPTY(&config->subnets)) {
+        // Do not continue if weight rules have already been set.
+        if (VTAILQ_EMPTY(&config->weight_rules)) {
             const char *value = NULL;
-            if ((masks != NULL) && (strlen(masks) > 0)) {
-                value = masks;
+            if ((rules != NULL) && (strlen(rules) > 0)) {
+                value = rules;
             } else {
-                value = getenv("VMOD_REDIS_SUBNETS");
+                value = getenv("VMOD_REDIS_WEIGHTS");
             }
             if ((value != NULL) && (strlen(value) > 0)) {
-                unsafe_set_subnets(ctx, config, value);
+                unsafe_set_weight_rules(ctx, config, value);
             }
         } else {
-            REDIS_LOG_ERROR(ctx,
-                "%s already set",
-                "Subnets");
+            REDIS_LOG_ERROR(ctx, "Weight rules already set");
         }
     }
 

@@ -13,7 +13,6 @@
 #endif
 #include <hiredis/async.h>
 #include <hiredis/adapters/libev.h>
-#include <arpa/inet.h>
 
 #include "cache/cache.h"
 
