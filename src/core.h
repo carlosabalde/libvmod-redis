@@ -13,6 +13,7 @@
 
 #include "vqueue.h"
 #include "vsb.h"
+#include "vre.h"
 
 #define NREDIS_SERVER_ROLES 3
 #define NREDIS_SERVER_WEIGHTS 4
@@ -254,23 +255,20 @@ typedef struct task_state {
     } command;
 } task_state_t;
 
-typedef struct subnet {
+typedef struct weight_rule {
     // Object marker.
-#define SUBNET_MAGIC 0x27facd57
+#define WEIGHT_RULE_MAGIC 0x27facd58
     unsigned magic;
 
     // Weight.
     unsigned weight;
 
-    // Address and mask stored in unsigned 32 bit variables (in_addr.s_addr)
-    // using host byte oder.
-    // XXX: only IPv4 subnets supported.
-    struct in_addr address;
-    struct in_addr mask;
+    // Regular expression.
+    vre_t *vre;
 
     // Tail queue.
-    VTAILQ_ENTRY(subnet) list;
-} subnet_t;
+    VTAILQ_ENTRY(weight_rule) list;
+} weight_rule_t;
 
 typedef struct database {
     // Object marker.
@@ -292,8 +290,8 @@ struct vcl_state {
     // Mutex.
     struct lock mutex;
 
-    // Subnets (rw field to be protected by the associated mutex).
-    VTAILQ_HEAD(,subnet) subnets;
+    // Weight rules (rw field to be protected by the associated mutex).
+    VTAILQ_HEAD(,weight_rule) weight_rules;
 
     // Databases (rw field to be protected by the associated mutex).
     VTAILQ_HEAD(,database) dbs;
@@ -523,8 +521,8 @@ void free_task_state(task_state_t *state);
 vcl_state_t *new_vcl_state();
 void free_vcl_state(vcl_state_t *priv);
 
-subnet_t *new_subnet(unsigned weight, struct in_addr ia4, unsigned bits);
-void free_subnet(subnet_t *subnet);
+weight_rule_t *new_weight_rule(unsigned weight, const char *regexp);
+void free_weight_rule(weight_rule_t *weight_rule);
 
 database_t *new_database(struct vmod_redis_db *db);
 void free_database(database_t *db);

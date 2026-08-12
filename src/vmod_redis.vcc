@@ -15,15 +15,16 @@ VMOD using the synchronous hiredis library API to access Redis servers from VCL.
 
 $Event event_function
 
-$Function VOID subnets(PRIV_VCL,
-    STRING masks="")
+$Function VOID weights(PRIV_VCL,
+    STRING rules="")
 
 Arguments
-    subnets:
-        Comma-delimited list of weights + subnet masks used to select among
-        servers associated to a database instance when executing commands.
-        Order is relevant. Only IPv4 addresses are supported. If not provided,
-        value in the VMOD_REDIS_SUBNETS environment variable will be used.
+    rules:
+        Newline-delimited list of weights + regexps used to select among host
+        (IP or DNS name) + port servers associated to a database instance when
+        executing commands (UNIX socket always get the minimum weight). Order is
+        relevant. If not provided, value in the VMOD_REDIS_WEIGHTS environment
+        variable will be used.
 
         This is useful in setups using Redis instances deployed across multiple
         data centers or availability zones.
@@ -353,11 +354,10 @@ $Object db(PRIV_VCL,
 Arguments
     location: Redis connection string. Both host (IP or DNS name) + port and
     UNIX sockets are supported. If Redis Cluster support has been enabled only
-    the host + port format is allowed. **Do not use DNS names in combination
-    with ``redis.subnets()``**. **When using ``redis.sentinels()``, make sure
-    the location used here exactly matches the value advertised by the Sentinel
-    instances**: the same IP address or the same DNS name, depending on how
-    Redis and Sentinel have been configured. Likewise, **when Redis Cluster
+    the host + port format is allowed. **When using ``redis.sentinels()``, make
+    sure the location used here exactly matches the value advertised by the
+    Sentinel instances**: the same IP address or the same DNS name, depending on
+    how Redis and Sentinel have been configured. Likewise, **when Redis Cluster
     support is enabled, the location used here must exactly match the value
     advertised by the ``CLUSTER SLOTS`` command**.
 
@@ -474,11 +474,10 @@ $Method VOID .add_server(
 Arguments
     location: Redis connection string. Both host (IP or DNS name) + port and
     UNIX sockets are supported. If Redis Cluster support has been enabled only
-    the host + port format is allowed. **Do not use DNS names in combination
-    with ``redis.subnets()``**. **When using ``redis.sentinels()``, make sure
-    the location used here exactly matches the value advertised by the Sentinel
-    instances**: the same IP address or the same DNS name, depending on how
-    Redis and Sentinel have been configured. Likewise, **when Redis Cluster
+    the host + port format is allowed. **When using ``redis.sentinels()``, make
+    sure the location used here exactly matches the value advertised by the
+    Sentinel instances**: the same IP address or the same DNS name, depending on
+    how Redis and Sentinel have been configured. Likewise, **when Redis Cluster
     support is enabled, the location used here must exactly match the value
     advertised by the ``CLUSTER SLOTS`` command**.
 
@@ -547,8 +546,8 @@ Description
     Executes a previously enqueued Redis command.
 
     When more than one Redis server is available, the destination server
-    is selected according with ``master`` and with the list of weights +
-    subnet masks provided when calling ``redis.subnets()``.
+    is selected according with ``master`` and with the list of rules provided
+    when calling ``redis.weights()``.
 
     WARNING: allowing execution of commands in slave servers (i.e. ``master ==
     false``) must be carefully used:
