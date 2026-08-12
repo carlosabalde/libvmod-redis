@@ -44,7 +44,8 @@ $Function VOID sentinels(PRIV_VCL,
     STRING tls_certfile="",
     STRING tls_keyfile="",
     STRING tls_sni="",
-    STRING password="")
+    STRING password="",
+    BOOL debug=0)
 
 Arguments
     locations:
@@ -97,6 +98,11 @@ Arguments
     password: if not empty, requests for authentication using the ``AUTH``
     command will be submitted when creating new Redis Sentinel connections.
     This password will be used for all Redis Sentinel servers.
+
+    debug: if enabled, useful troubleshooting information will be logged to VSL
+    using ``Debug`` tags (beware of the default ``vsl_mask`` parameter in
+    Varnish). Same information will also be logged to syslog and/or stderr
+    depending on the value of the ``VMOD_REDIS_LOG_SINKS`` environment variable.
 Description
     Using this function is not mandatory.
 
@@ -341,6 +347,7 @@ $Object db(PRIV_VCL,
     STRING password="",
     INT sickness_ttl=60,
     BOOL ignore_slaves=0,
+    BOOL debug=0,
     INT max_cluster_hops=32)
 
 Arguments
@@ -449,6 +456,11 @@ Arguments
     commands. In other words, enabling this option implicitly forces
     ``master == true`` when using the ``.execute()`` method.
 
+    debug: if enabled, useful troubleshooting information will be logged to VSL
+    using ``Debug`` tags (beware of the default ``vsl_mask`` parameter in
+    Varnish). Same information will also be logged to syslog and/or stderr
+    depending on the value of the ``VMOD_REDIS_LOG_SINKS`` environment variable.
+
     max_cluster_hops: maximum number of redirections (0 means no limit) when
     executing a command and Redis Cluster support has been enabled.
 Description
@@ -544,7 +556,7 @@ Description
     - When Redis Cluster support is disabled, sending a read-write command to
       a read-only slave server will result in an error reply.
 
-    - It's safe to send read-only LUA scripts using ``EVAL`` or ``EVALSHA``
+    - It's safe to send read-only Lua scripts using ``EVAL`` or ``EVALSHA``
       commands to a read-only slave server when Redis Cluster support is
       disabled. Being a read-only slave server does not block writes in the
       script cache.
@@ -555,7 +567,7 @@ Description
       topology. The client side won't notice the redirection, but triggering
       such an expensive operation on every command is a **terrible idea**.
 
-    - **It's not safe to send read-only LUA scripts using ``EVAL`` or ``EVALSHA``
+    - **It's not safe to send read-only Lua scripts using ``EVAL`` or ``EVALSHA``
       commands to a slave server when Redis Cluster support is enabled**. Redis
       Cluster handles ``EVAL`` and ``EVALSHA1`` command as write operations that
       must be redirected to a master server. Therefore, this would result on a

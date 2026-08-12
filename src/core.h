@@ -12,6 +12,7 @@
 #include <inttypes.h>
 
 #include "vqueue.h"
+#include "vsb.h"
 
 #define NREDIS_SERVER_ROLES 3
 #define NREDIS_SERVER_WEIGHTS 4
@@ -146,6 +147,7 @@ struct vmod_redis_db {
     const char *password;
     time_t sickness_ttl;
     unsigned ignore_slaves;
+    unsigned debug;
 
     // Redis servers (rw field -allocated in the heap- to be protected by the
     // associated mutex), clustered by weight & role.
@@ -313,6 +315,7 @@ struct vcl_state {
         const char *tls_sni;
 #endif
         const char *password;
+        unsigned debug;
 
         // Thread reference + shared state.
         pthread_t thread;
@@ -364,7 +367,7 @@ extern vmod_state_t vmod_state;
         HIREDIS_ERRSTR_2(__VA_ARGS__), \
         HIREDIS_ERRSTR_1(__VA_ARGS__))
 
-#if HIREDIS_MAJOR >= 1 && HIREDIS_MINOR >= 0
+#if HIREDIS_MAJOR >= 1
 #define RESP3_ENABLED 1
 #define RESP3_SWITCH(a, b) a
 #else
@@ -510,7 +513,8 @@ struct vmod_redis_db *new_vmod_redis_db(
     redisSSLContext *tls_ssl_ctx,
 #endif
     const char *user, const char *password, unsigned sickness_ttl,
-    unsigned ignore_slaves, unsigned clustered, unsigned max_cluster_hops);
+    unsigned ignore_slaves, unsigned debug,
+    unsigned clustered, unsigned max_cluster_hops);
 void free_vmod_redis_db(struct vmod_redis_db *db);
 
 task_state_t *new_task_state();
@@ -533,5 +537,7 @@ redisReply *redis_execute(
 redis_server_t * unsafe_add_redis_server(
     VRT_CTX, struct vmod_redis_db *db, vcl_state_t *config,
     const char *location, enum REDIS_SERVER_ROLE role);
+
+struct vsb *redis_reply_to_string(const redisReply *reply);
 
 #endif
