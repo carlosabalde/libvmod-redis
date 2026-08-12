@@ -30,10 +30,10 @@ import redis;
 ::
 
     ##
-    ## Subnets.
+    ## Weights.
     ##
 
-    Function subnets(STRING masks="")
+    Function weights(STRING rules="")
 
     ##
     ## Sentinels.
@@ -215,11 +215,10 @@ Multiple servers
         # Redis connections per Varnish worker thread (up to one to the master
         # server & up to one to the closest slave server). Beware this is just
         # an example: using shared connections is usually a better approach.
-        redis.subnets(
-            masks={"
-                0 192.168.1.102/32,
-                1 192.168.1.103/32,
-                2 0.0.0.0/32
+        redis.weights(
+            rules={"
+                0 ^192[.]168[.]1[.]102:.*$
+                1 ^192[.]168[.]1[.]103:.*$
             "});
         new db = redis.db(
             location="192.168.1.100:6379",
