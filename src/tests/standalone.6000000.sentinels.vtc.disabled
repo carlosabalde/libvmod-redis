@@ -29,7 +29,8 @@ varnish v1 -vcl+backend {
             tls=true,
             tls_cafile="${redis_tls_cafile}",
             tls_certfile="${redis_tls_certfile}",
-            tls_keyfile="${redis_tls_keyfile}");
+            tls_keyfile="${redis_tls_keyfile}",
+            debug=true);
     }
 } -start
 
@@ -55,7 +56,8 @@ varnish v2 -vcl+backend {
             tls_cafile="${redis_tls_cafile}",
             tls_certfile="${redis_tls_certfile}",
             tls_keyfile="${redis_tls_keyfile}",
-            password="wrong-password");
+            password="wrong-password",
+            debug=true);
     }
 } -start
 
@@ -81,7 +83,8 @@ varnish v3 -vcl+backend {
             tls_cafile="${redis_tls_cafile}",
             tls_certfile="${redis_tls_certfile}",
             tls_keyfile="${redis_tls_keyfile}",
-            password="s3cr3t");
+            password="s3cr3t",
+            debug=true);
 
         new db = redis.db(
             location="${redis_master1_ip}:${redis_master1_tls_port}",
@@ -100,6 +103,7 @@ varnish v3 -vcl+backend {
             password="",
             sickness_ttl=0,
             ignore_slaves=false,
+            debug=true,
             max_cluster_hops=0);
         db.add_server("${redis_slave1_1_ip}:${redis_slave1_1_tls_port}", auto);
         db.add_server("${redis_slave1_2_ip}:${redis_slave1_2_tls_port}", auto);

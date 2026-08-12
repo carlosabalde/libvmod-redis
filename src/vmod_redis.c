@@ -376,7 +376,7 @@ vmod_sentinels(
     VCL_INT connection_timeout, VCL_INT command_timeout, VCL_ENUM protocol,
     VCL_BOOL tls, VCL_STRING tls_cafile, VCL_STRING tls_capath,
     VCL_STRING tls_certfile, VCL_STRING tls_keyfile, VCL_STRING tls_sni,
-    VCL_STRING password)
+    VCL_STRING password, VCL_BOOL debug)
 {
     // Initializations.
     vcl_state_t *config = vcl_priv->priv;
@@ -455,6 +455,7 @@ vmod_sentinels(
                     config->sentinels.password = strdup(password);
                     AN(config->sentinels.password);
                 }
+                config->sentinels.debug = debug;
             }
 
             // If required, startup of the Sentinel thread and execution of
@@ -486,7 +487,7 @@ vmod_db__init(
     VCL_BOOL tls, VCL_STRING tls_cafile, VCL_STRING tls_capath,
     VCL_STRING tls_certfile, VCL_STRING tls_keyfile, VCL_STRING tls_sni,
     VCL_STRING user, VCL_STRING password, VCL_INT sickness_ttl,
-    VCL_BOOL ignore_slaves, VCL_INT max_cluster_hops)
+    VCL_BOOL ignore_slaves, VCL_BOOL debug, VCL_INT max_cluster_hops)
 {
     // Assert input.
     CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
@@ -572,7 +573,7 @@ vmod_db__init(
 #ifdef TLS_ENABLED
             tls_ssl_ctx,
 #endif
-            user, password, sickness_ttl, ignore_slaves, clustered, max_cluster_hops);
+            user, password, sickness_ttl, ignore_slaves, debug, clustered, max_cluster_hops);
 
         // Add initial server if provided.
         if ((location != NULL) && (strlen(location) > 0)) {
@@ -796,9 +797,9 @@ vmod_db_execute(
             master = 1;
         }
 
-        // Force execution of LUA scripts in a master server when Redis Cluster
+        // Force execution of Lua scripts in a master server when Redis Cluster
         // support is enabled. It's responsibility of the caller to avoid
-        // execution of LUA scripts in slaves servers when clustering is
+        // execution of Lua scripts in slaves servers when clustering is
         // enabled. However, due it's counter-intuitiveness and the hidden and
         // expensive side effects (redirections followed by executions of
         // discoveries of the cluster topology) we enforce this here.

@@ -15,7 +15,7 @@
 #include "cluster.h"
 
 #define BANNED_COMMANDS "|INFO|MULTI|EXEC|SLAVEOF|REPLICAOF|CONFIG|SHUTDOWN|SCRIPT|"
-#define KEY_INDEX3_COMMANDS "|EVAL|EVALSHA|"
+#define KEY_INDEX3_COMMANDS "|EVAL|EVALSHA|EVAL_RO|EVALSHA_RO|"
 
 #define CLUSTER_DISCOVERY_COMMAND "CLUSTER SLOTS"
 
@@ -227,6 +227,15 @@ unsafe_discover_slots_aux(
 
     // Check context.
     if ((rcontext != NULL) && (!rcontext->err)) {
+        // Set command execution timeout early: this also bounds the upcoming
+        // TLS handshake & AUTH / HELLO commands.
+        int tr = redisSetTimeout(rcontext, db->command_timeout);
+        if (tr != REDIS_OK) {
+            REDIS_LOG_ERROR(ctx,
+                "Failed to set cluster discovery command execution timeout (error=%d, db=%s, server=%s)",
+                tr, server->db->name, server->location.raw);
+        }
+
         // Optionally setup TLS & submit AUTH / HELLO command.
         REDIS_BLESS_CONTEXT(
             ctx, rcontext, server->db,
@@ -236,14 +245,6 @@ unsafe_discover_slots_aux(
 
         // Do not continue if failed to initialize the connection.
         if (rcontext != NULL) {
-            // Set command execution timeout.
-            int tr = redisSetTimeout(rcontext, db->command_timeout);
-            if (tr != REDIS_OK) {
-                REDIS_LOG_ERROR(ctx,
-                    "Failed to set cluster discovery command execution timeout (error=%d, db=%s, server=%s)",
-                    tr, server->db->name, server->location.raw);
-            }
-
             // Send command.
             redisReply *reply = redisCommand(rcontext, CLUSTER_DISCOVERY_COMMAND);
 
