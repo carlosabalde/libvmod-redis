@@ -262,10 +262,16 @@ EOF
         yes yes | redis-trib.rb create --replicas $DB_CLUSTER_REPLICAS $SERVERS > /dev/null
     fi
 
-    # Wait for cluster formation in a rudementary way.
+    # Wait for cluster formation in a rudementary way. Beware 'cluster_state'
+    # only checks all slots are covered (i.e. 'cluster-require-full-coverage'
+    # is enabled), but replicas do not handle slots, so the number of known
+    # nodes needs to be checked too.
     [[ $IPV6 = 1 ]] && HOST=::1 || HOST=127.0.0.1
-    [[ $IPV6 = 1 ]] && PATTERN=::1 || PATTERN=127[.]0[.]0[.]
-    while [ $(redis-cli -h $HOST -p $((DB_CLUSTER_START_PORT+1)) CLUSTER SHARDS | grep "$PATTERN" | wc -l) -lt $DB_CLUSTER_SERVERS ]; do
+    while true; do
+        INFO=$(redis-cli -h $HOST -p $((DB_CLUSTER_START_PORT+1)) CLUSTER INFO | tr -d '\r')
+        STATE=$(echo "$INFO" | sed -n 's/^cluster_state:\(.*\)$/\1/p')
+        KNOWN=$(echo "$INFO" | sed -n 's/^cluster_known_nodes:\(.*\)$/\1/p')
+        [[ "$STATE" == 'ok' && "$KNOWN" -ge $DB_CLUSTER_SERVERS ]] && break
         sleep 1
     done
     sleep 1
