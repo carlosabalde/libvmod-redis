@@ -304,6 +304,25 @@ parse_node(
     return 1;
 }
 
+static void
+unsafe_reset_slots(struct vmod_redis_db *db)
+{
+    // Assertions.
+    Lck_AssertHeld(&db->mutex);
+
+    // Reset slots of all known servers.
+    redis_server_t *iserver;
+    for (unsigned iweight = 0; iweight < NREDIS_SERVER_WEIGHTS; iweight++) {
+        for (enum REDIS_SERVER_ROLE irole = 0; irole < NREDIS_SERVER_ROLES; irole++) {
+            VTAILQ_FOREACH(iserver, &db->servers[iweight][irole], list) {
+                for (int i = 0; i < NREDIS_CLUSTER_SLOTS; i++) {
+                    iserver->cluster.slots[i] = 0;
+                }
+            }
+        }
+    }
+}
+
 static redis_server_t *
 unsafe_add_node(
     VRT_CTX, struct vmod_redis_db *db, vcl_state_t *config, const node_t *node)
@@ -416,21 +435,10 @@ unsafe_discover_slots_aux(
                 }
 
                 if (reply->type == REDIS_REPLY_ARRAY) {
-                    // Reset previous slots.
-                    redis_server_t *iserver;
-                    for (unsigned iweight = 0; iweight < NREDIS_SERVER_WEIGHTS; iweight++) {
-                        for (enum REDIS_SERVER_ROLE irole = 0; irole < NREDIS_SERVER_ROLES; irole++) {
-                            VTAILQ_FOREACH(iserver, &db->servers[iweight][irole], list) {
-                                for (int i = 0; i < NREDIS_CLUSTER_SLOTS; i++) {
-                                    iserver->cluster.slots[i] = 0;
-                                }
-                            }
-                        }
-                    }
-
                     // Iterate shards.
                     unsigned parse_errors = 0;
                     unsigned slot_ranges = 0;
+                    unsigned reset = 0;
                     for (int i = 0; i < reply->elements; i++) {
                         const redisReply *shard = reply->element[i];
                         if ((shard->type != REDIS_REPLY_ARRAY) &&
@@ -505,6 +513,17 @@ unsafe_discover_slots_aux(
                             if (node_server == NULL) {
                                 parse_errors++;
                                 continue;
+                            }
+
+                            // Reset previous slots, but only once and only just
+                            // before registering the first one: this way a
+                            // reply that cannot be parsed at all (e.g. an
+                            // unexpected schema) keeps the current topology
+                            // untouched instead of leaving the database with
+                            // no slots at all.
+                            if ((nranges > 0) && (!reset)) {
+                                unsafe_reset_slots(db);
+                                reset = 1;
                             }
 
                             // Register slots.
