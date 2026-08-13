@@ -173,7 +173,7 @@ cluster_execute(
  * UTILITIES.
  *****************************************************************************/
 
-static void
+static unsigned
 unsafe_add_slot(
     VRT_CTX, struct vmod_redis_db *db, vcl_state_t *config, unsigned start,
     unsigned stop, const char *endpoint, int port, enum REDIS_SERVER_ROLE role)
@@ -182,16 +182,32 @@ unsafe_add_slot(
     Lck_AssertHeld(&config->mutex);
     Lck_AssertHeld(&db->mutex);
 
-    // Add / update server.
+    // Beware the endpoint is provided by the discovered server: a too long
+    // value would silently truncate the location (e.g. dropping the ':port'
+    // suffix, which would then be parsed as a UNIX socket path) ==> simply
+    // discard it.
     char location[256];
-    snprintf(location, sizeof(location), "%s:%d", endpoint, port);
+    int n = snprintf(location, sizeof(location), "%s:%d", endpoint, port);
+    if ((n < 0) || ((size_t) n >= sizeof(location))) {
+        REDIS_LOG_ERROR(ctx,
+            "Failed to register slots: server location is too long (db=%s, endpoint=%s)",
+            db->name, endpoint);
+        return 0;
+    }
+
+    // Add / update server. Beware this may fail (e.g. invalid location).
     redis_server_t *server = unsafe_add_redis_server(ctx, db, config, location, role);
-    AN(server);
+    if (server == NULL) {
+        return 0;
+    }
 
     // Register slots.
     for (int i = start; i <= stop; i++) {
         server->cluster.slots[i] = 1;
     }
+
+    // Done!
+    return 1;
 }
 
 static unsigned
@@ -274,6 +290,7 @@ unsafe_discover_slots_aux(
 
                     // Iterate shards.
                     unsigned parse_errors = 0;
+                    unsigned slot_ranges = 0;
                     for (int i = 0; i < reply->elements; i++) {
                         const redisReply *shard = reply->element[i];
                         if ((shard->type != REDIS_REPLY_ARRAY) &&
@@ -403,23 +420,37 @@ unsafe_discover_slots_aux(
                                 }
 
                                 // Add / update server and register slots.
-                                unsafe_add_slot(
-                                    ctx, db, config, start, end,
-                                    endpoint, effective_port, role);
+                                if (unsafe_add_slot(
+                                        ctx, db, config, start, end,
+                                        endpoint, effective_port, role)) {
+                                    slot_ranges++;
+                                } else {
+                                    parse_errors++;
+                                }
                             }
                         }
                     }
 
                     // Log parse errors.
                     if (parse_errors > 0) {
-                        REDIS_LOG_ERROR(ctx,
-                            "Failed to parse some cluster discovery data (db=%s, server=%s)",
-                            db->name, server->location.raw);
+                        REDIS_LOG_WARNING(ctx,
+                            "Failed to parse some cluster discovery data (parse_errors=%u, db=%s, server=%s)",
+                            parse_errors, db->name, server->location.raw);
                     }
 
-                    // Stop execution.
-                    done = 1;
-                    db->stats.cluster.discoveries.total++;
+                    // Stop execution, but only if some slot range has been
+                    // registered: an empty topology is useless (all execution
+                    // plans would end up empty) ==> it's better to retry the
+                    // discovery using some other server.
+                    if (slot_ranges > 0) {
+                        done = 1;
+                        db->stats.cluster.discoveries.total++;
+                    } else {
+                        REDIS_LOG_ERROR(ctx,
+                            "Failed to discover any slot range (db=%s, server=%s)",
+                            db->name, server->location.raw);
+                        db->stats.cluster.discoveries.failed++;
+                    }
                 } else {
                     REDIS_LOG_ERROR(ctx,
                         "Unexpected cluster discovery reply (type=%d, db=%s, server=%s)",
