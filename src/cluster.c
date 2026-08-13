@@ -259,9 +259,9 @@ parse_node(
         } else if ((strcmp(name, "role") == 0) &&
                    (reply->element[i+1]->type == REDIS_REPLY_STRING)) {
             const char *value = reply->element[i+1]->str;
-            if (strstr(value, "master") != NULL) {
+            if (strcmp(value, "master") == 0) {
                 role = REDIS_SERVER_MASTER_ROLE;
-            } else if (strstr(value, "replica") != NULL) {
+            } else if (strcmp(value, "replica") == 0) {
                 role = REDIS_SERVER_SLAVE_ROLE;
             }
         } else if ((strcmp(name, "health") == 0) &&
@@ -409,7 +409,7 @@ unsafe_discover_slots_aux(
                 // Log reply.
                 if (db->debug) {
                     struct vsb *reply_vsb = redis_reply_to_string(reply);
-                    REDIS_LOG_DEBUG(NULL,
+                    REDIS_LOG_DEBUG(ctx,
                         "Cluster discovery reply received (db=%s, server=%s): %s",
                         db->name, server->location.raw, VSB_data(reply_vsb));
                     VSB_destroy(&reply_vsb);
@@ -453,8 +453,8 @@ unsafe_discover_slots_aux(
                                 (shard->element[j+1]->type == REDIS_REPLY_ARRAY)) {
                                 slots = shard->element[j+1];
                             } else if ((strcmp(key, "nodes") == 0) &&
-                                    (shard->element[j+1]->type == REDIS_REPLY_ARRAY) &&
-                                    (shard->element[j+1]->elements >= 1)) {
+                                       (shard->element[j+1]->type == REDIS_REPLY_ARRAY) &&
+                                       (shard->element[j+1]->elements >= 1)) {
                                 nodes = shard->element[j+1];
                             }
                         }
