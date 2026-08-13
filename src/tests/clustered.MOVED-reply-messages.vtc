@@ -27,6 +27,11 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
             max_command_retries=0,
             shared_connections=true,
             max_connections=32,
+            protocol=${redis_protocol},
+            tls=${redis_tls},
+            tls_cafile="${redis_tls_cafile}",
+            tls_certfile="${redis_tls_certfile}",
+            tls_keyfile="${redis_tls_keyfile}",
             password="",
             sickness_ttl=0,
             ignore_slaves=false,
@@ -43,6 +48,11 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
             max_command_retries=0,
             shared_connections=false,
             max_connections=1,
+            protocol=${redis_protocol},
+            tls=${redis_tls},
+            tls_cafile="${redis_tls_cafile}",
+            tls_certfile="${redis_tls_certfile}",
+            tls_keyfile="${redis_tls_keyfile}",
             password="",
             sickness_ttl=0,
             ignore_slaves=false,
@@ -56,6 +66,11 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
             max_command_retries=0,
             shared_connections=false,
             max_connections=1,
+            protocol=${redis_protocol},
+            tls=${redis_tls},
+            tls_cafile="${redis_tls_cafile}",
+            tls_certfile="${redis_tls_certfile}",
+            tls_keyfile="${redis_tls_keyfile}",
             password="",
             sickness_ttl=0,
             ignore_slaves=false,
@@ -147,10 +162,12 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
             set resp.http.Migration-Reply-5 = master1.get_status_reply();
         }
 
-        # Migrate key.
+        # Migrate key. Beware MIGRATE makes the origin *server* connect to the
+        # destination: without 'tls-cluster' that connection is always
+        # plaintext, so the plain port is used regardless of $TLS.
         master1.command("MIGRATE");
         master1.push("${redis_master2_ip}");
-        master1.push("${redis_master2_port}");
+        master1.push("${redis_master2_plain_port}");
         master1.push("${redis_key_in_master1}");
         master1.push("0");
         master1.push("0");
