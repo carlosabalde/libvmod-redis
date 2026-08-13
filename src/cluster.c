@@ -276,7 +276,8 @@ unsafe_discover_slots_aux(
                     // Iterate shards.
                     for (int i = 0; i < reply->elements; i++) {
                         const redisReply *shard = reply->element[i];
-                        if (shard->type != REDIS_REPLY_ARRAY) {
+                        if ((shard->type != REDIS_REPLY_ARRAY) &&
+                            RESP3_SWITCH(shard->type != REDIS_REPLY_MAP, 1)) {
                             parse_errors++;
                             continue;
                         }
@@ -309,7 +310,8 @@ unsafe_discover_slots_aux(
                         // Iterate nodes.
                         for (int j = 0; j < nodes->elements; j++) {
                             const redisReply *node = nodes->element[j];
-                            if (node->type != REDIS_REPLY_ARRAY) {
+                            if ((node->type != REDIS_REPLY_ARRAY) &&
+                                RESP3_SWITCH(node->type != REDIS_REPLY_MAP, 1)) {
                                 parse_errors++;
                                 continue;
                             }
