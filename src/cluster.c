@@ -310,8 +310,7 @@ unsafe_discover_slots_aux(
 
                             const char *key = shard->element[j]->str;
                             if ((strcmp(key, "slots") == 0) &&
-                                (shard->element[j+1]->type == REDIS_REPLY_ARRAY) &&
-                                (shard->element[j+1]->elements >= 2)) {
+                                (shard->element[j+1]->type == REDIS_REPLY_ARRAY)) {
                                 slots = shard->element[j+1];
                             } else if ((strcmp(key, "nodes") == 0) &&
                                     (shard->element[j+1]->type == REDIS_REPLY_ARRAY) &&
@@ -322,6 +321,17 @@ unsafe_discover_slots_aux(
                         if (slots == NULL || nodes == NULL) {
                             parse_errors++;
                             continue;
+                        }
+
+                        // Beware a shard may legitimately own no slots (e.g.
+                        // while resharding, or when its primary is failing and
+                        // therefore no slot info is available) ==> that's not
+                        // an error, simply skip it.
+                        if (slots->elements == 0) {
+                            continue;
+                        }
+                        if ((slots->elements % 2) != 0) {
+                            parse_errors++;
                         }
 
                         // Iterate nodes.
@@ -402,7 +412,7 @@ unsafe_discover_slots_aux(
                             }
 
                             // Iterate slot ranges.
-                            for (int k = 0; k < slots->elements - 1; k += 2) {
+                            for (int k = 0; k + 1 < slots->elements; k += 2) {
                                 // Extract slot data.
                                 if ((slots->element[k]->type != REDIS_REPLY_INTEGER) ||
                                     (slots->element[k + 1]->type != REDIS_REPLY_INTEGER)) {
