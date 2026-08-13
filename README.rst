@@ -291,6 +291,26 @@ Dependencies:
 * `hiredis <https://github.com/redis/hiredis>`_ - minimalistic C Redis client library.
 * `libev <http://software.schmorp.de/pkg/libev.html>`_ - full-featured and high-performance event loop.
 
+RUNNING TESTS
+=============
+
+The test suite is executed using ``make check``. Each ``.vtc`` test is wrapped by ``src/tests/runner.sh``, which launches the Redis servers required by the test (i.e., standalone masters & replicas plus Sentinels, or a Redis Cluster, depending on the test file name) and injects their locations and other useful macros into the test.
+
+By default tests use plaintext connections and let the VMOD select the protocol version. Both behaviors can be changed using environment variables, both for the whole test suite and for a single test::
+
+    # Whole test suite using TLS connections & the RESP3 protocol.
+    TLS=true PROTOCOL=RESP3 make check
+
+    # Single test using defaults.
+    make check TESTS=tests/standalone.template.vtc
+
+    # Single test using plaintext connections & the RESP2 protocol.
+    PROTOCOL=RESP2 make check TESTS=tests/standalone.template.vtc
+
+* ``PROTOCOL`` (``default``, ``RESP2`` or ``RESP3``; defaults to ``default``): injected into tests as the ``${redis_protocol}`` macro, used by most of them as the value of the ``protocol`` parameter.
+
+* ``TLS`` (``true`` or ``false``; defaults to ``false``): injected into tests as the ``${redis_tls}`` macro, used by most of them as the value of the ``tls`` parameter. When enabled, the ``${redis_*_port}`` macros reference the TLS ports of the launched servers instead of the plaintext ones (both are always available as ``${redis_*_plain_port}`` and ``${redis_*_tls_port}``).
+
 USING DNS NAMES
 ===============
 
