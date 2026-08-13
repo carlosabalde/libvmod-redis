@@ -173,10 +173,10 @@ cluster_execute(
  * UTILITIES.
  *****************************************************************************/
 
-static unsigned
-unsafe_add_slot(
-    VRT_CTX, struct vmod_redis_db *db, vcl_state_t *config, unsigned start,
-    unsigned stop, const char *endpoint, int port, enum REDIS_SERVER_ROLE role)
+static redis_server_t *
+unsafe_add_node(
+    VRT_CTX, struct vmod_redis_db *db, vcl_state_t *config, const char *endpoint,
+    int port, enum REDIS_SERVER_ROLE role, unsigned healthy)
 {
     // Assertions.
     Lck_AssertHeld(&config->mutex);
@@ -190,24 +190,33 @@ unsafe_add_slot(
     int n = snprintf(location, sizeof(location), "%s:%d", endpoint, port);
     if ((n < 0) || ((size_t) n >= sizeof(location))) {
         REDIS_LOG_ERROR(ctx,
-            "Failed to register slots: server location is too long (db=%s, endpoint=%s)",
+            "Failed to register node: server location is too long (db=%s, endpoint=%s)",
             db->name, endpoint);
-        return 0;
+        return NULL;
     }
 
     // Add / update server. Beware this may fail (e.g. invalid location).
     redis_server_t *server = unsafe_add_redis_server(ctx, db, config, location, role);
     if (server == NULL) {
-        return 0;
+        return NULL;
     }
 
-    // Register slots.
-    for (int i = start; i <= stop; i++) {
-        server->cluster.slots[i] = 1;
+    // Flag the server as sick when the node is not online (i.e. it's failing
+    // or still loading its data set). Beware its slots are registered anyway:
+    // this way the server is still used as a last resort when no other server
+    // is available for the slot (see plan_execution()). Also beware
+    // 'unsafe_add_redis_server()' has just flushed the sickness flag.
+    if ((!healthy) && (db->sickness_ttl > 0)) {
+        time_t now = time(NULL);
+        server->sickness.tst = now;
+        server->sickness.exp = now + db->sickness_ttl;
+        REDIS_LOG_INFO(ctx,
+            "Server sickness tag set (db=%s, server=%s)",
+            db->name, server->location.raw);
     }
 
     // Done!
-    return 1;
+    return server;
 }
 
 static unsigned
@@ -348,6 +357,7 @@ unsafe_discover_slots_aux(
                             unsigned port = 0;
                             unsigned tls_port = 0;
                             enum REDIS_SERVER_ROLE role = REDIS_SERVER_TBD_ROLE;
+                            unsigned healthy = 1;
 
                             // Extract node data.
                             for (int k = 0; k + 1 < node->elements; k += 2) {
@@ -383,6 +393,10 @@ unsafe_discover_slots_aux(
                                     } else if (strstr(value, "replica") != NULL) {
                                         role = REDIS_SERVER_SLAVE_ROLE;
                                     }
+                                } else if ((strcmp(name, "health") == 0) &&
+                                            (node->element[k+1]->type == REDIS_REPLY_STRING)) {
+                                    healthy =
+                                        strcmp(node->element[k+1]->str, "online") == 0;
                                 }
                             }
                             // "?" means misconfigured hostname; skip.
@@ -411,6 +425,14 @@ unsafe_discover_slots_aux(
                                 continue;
                             }
 
+                            // Add / update server.
+                            redis_server_t *node_server = unsafe_add_node(
+                                ctx, db, config, endpoint, effective_port, role, healthy);
+                            if (node_server == NULL) {
+                                parse_errors++;
+                                continue;
+                            }
+
                             // Iterate slot ranges.
                             for (int k = 0; k + 1 < slots->elements; k += 2) {
                                 // Extract slot data.
@@ -429,14 +451,11 @@ unsafe_discover_slots_aux(
                                     continue;
                                 }
 
-                                // Add / update server and register slots.
-                                if (unsafe_add_slot(
-                                        ctx, db, config, start, end,
-                                        endpoint, effective_port, role)) {
-                                    slot_ranges++;
-                                } else {
-                                    parse_errors++;
+                                // Register slots.
+                                for (int islot = start; islot <= end; islot++) {
+                                    node_server->cluster.slots[islot] = 1;
                                 }
+                                slot_ranges++;
                             }
                         }
                     }
