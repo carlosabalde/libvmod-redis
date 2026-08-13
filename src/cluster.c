@@ -210,7 +210,6 @@ unsafe_discover_slots_aux(
 
     // Initializations.
     unsigned done = 0;
-    unsigned parse_errors = 0;
 
     // Create context.
     redisContext *rcontext;
@@ -274,6 +273,7 @@ unsafe_discover_slots_aux(
                     }
 
                     // Iterate shards.
+                    unsigned parse_errors = 0;
                     for (int i = 0; i < reply->elements; i++) {
                         const redisReply *shard = reply->element[i];
                         if ((shard->type != REDIS_REPLY_ARRAY) &&
