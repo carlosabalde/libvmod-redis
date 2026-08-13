@@ -166,6 +166,7 @@ Single server
             location="192.168.1.100:6379",
             type=master,
             connection_timeout=500,
+            command_timeout=1000,
             shared_connections=false,
             max_connections=1);
     }
@@ -220,6 +221,7 @@ Multiple servers
             location="192.168.1.100:6379",
             type=master,
             connection_timeout=500,
+            command_timeout=1000,
             shared_connections=false,
             max_connections=2);
         db.add_server("192.168.1.101:6379", slave);
@@ -241,6 +243,33 @@ Multiple servers
         set req.http.X-Foo = db.get_string_reply();
     }
 
+Multiple servers with Sentinels
+-------------------------------
+
+Same example as above, but specifying the location of the Redis Sentinel servers. This configuration will:
+
+* Launch a dedicated thread that will run an initial discovery using the ``SENTINEL masters`` and ``SENTINEL slave`` commands, and then repeat it every 60 seconds to discover sick / healthy servers and changes in their roles.
+* The same thread will use ``PSUBSCRIBE`` to be notified about events published by the Sentinel servers, reacting to role and health changes as soon as they happen instead of waiting for the next periodic discovery.
+* Populate an internal inventory of known Redis servers, compared against the locations of the servers explicitly registered for any database object. Matching servers get their roles and healthiness statuses automatically updated. Beware locations registered in the VCL configuration must exactly match the values advertised by the Sentinel servers. If using DNS names, check the `USING DNS NAMES`_ section for some important considerations to be taken into account.
+
+Beware Sentinels are only used to track servers already registered in the VCL configuration: servers will never be automatically added to (or removed from) database objects as a result of Sentinel discoveries.
+
+::
+
+    sub vcl_init {
+        redis.sentinels(
+            locations={"
+                192.168.1.200:26379,
+                192.168.1.201:26379,
+                192.168.1.202:26379
+            "},
+            period=60,
+            connection_timeout=500,
+            command_timeout=1000);
+
+        new db = ...
+    }
+
 Clustered setup
 ---------------
 
@@ -255,6 +284,7 @@ Clustered setup
             location="192.168.1.100:6379",
             type=cluster,
             connection_timeout=500,
+            command_timeout=1000,
             shared_connections=true,
             max_connections=128,
             max_cluster_hops=16);
