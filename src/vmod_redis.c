@@ -653,8 +653,7 @@ vmod_db_add_server(
         unsigned discovery =
             (server != NULL) &&
             (db->cluster.enabled) &&
-            ((db->stats.cluster.discoveries.total -
-              db->stats.cluster.discoveries.failed) == 0);
+            (db->stats.cluster.discoveries.total == 0);
         Lck_Unlock(&db->mutex);
         Lck_Unlock(&config->mutex);
 
