@@ -173,10 +173,140 @@ cluster_execute(
  * UTILITIES.
  *****************************************************************************/
 
+typedef struct slot_range {
+    int start;
+    int end;
+} slot_range_t;
+
+static unsigned
+parse_slot_range(const redisReply *slots, int i, slot_range_t *range)
+{
+    // Extract slot data. Beware 'integer' is a long long: it must not be
+    // truncated before checking its value.
+    if ((slots->element[i]->type != REDIS_REPLY_INTEGER) ||
+        (slots->element[i + 1]->type != REDIS_REPLY_INTEGER)) {
+        return 0;
+    }
+    long long start = slots->element[i]->integer;
+    long long end = slots->element[i + 1]->integer;
+
+    // Check slot data.
+    if ((start < 0) || (start >= NREDIS_CLUSTER_SLOTS) ||
+        (end < 0) || (end >= NREDIS_CLUSTER_SLOTS) ||
+        (start > end)) {
+        return 0;
+    }
+
+    // Done!
+    range->start = start;
+    range->end = end;
+    return 1;
+}
+
+typedef struct node {
+    // Beware 'endpoint' points to the reply used while parsing the node ==> it
+    // must not be used once that reply has been released.
+    const char *endpoint;
+    unsigned port;
+    enum REDIS_SERVER_ROLE role;
+    unsigned healthy;
+} node_t;
+
+static unsigned
+parse_node(
+    const redisReply *reply, struct vmod_redis_db *db, const redis_server_t *server,
+    node_t *node)
+{
+    // Beware nodes are flattened arrays of key-value pairs when using RESP2,
+    // but maps when using RESP3.
+    if ((reply->type != REDIS_REPLY_ARRAY) &&
+        RESP3_SWITCH(reply->type != REDIS_REPLY_MAP, 1)) {
+        return 0;
+    }
+
+    // Initializations.
+    const char *endpoint = NULL;
+    unsigned port = 0;
+    unsigned tls_port = 0;
+    enum REDIS_SERVER_ROLE role = REDIS_SERVER_TBD_ROLE;
+    unsigned healthy = 1;
+
+    // Extract node data.
+    for (int i = 0; i + 1 < reply->elements; i += 2) {
+        if (reply->element[i]->type != REDIS_REPLY_STRING) {
+            continue;
+        }
+
+        const char *name = reply->element[i]->str;
+        if (strcmp(name, "endpoint") == 0) {
+            if (reply->element[i+1]->type == REDIS_REPLY_STRING) {
+                endpoint = reply->element[i+1]->str;
+            } else if (reply->element[i+1]->type == REDIS_REPLY_NIL) {
+                endpoint = "";
+            }
+        } else if (strcmp(name, "port") == 0) {
+            if ((reply->element[i+1]->type == REDIS_REPLY_INTEGER) &&
+                (reply->element[i+1]->integer > 0) &&
+                (reply->element[i+1]->integer <= UINT16_MAX)) {
+                port = (unsigned) reply->element[i+1]->integer;
+            }
+        } else if (strcmp(name, "tls-port") == 0) {
+            if ((reply->element[i+1]->type == REDIS_REPLY_INTEGER) &&
+                (reply->element[i+1]->integer > 0) &&
+                (reply->element[i+1]->integer <= UINT16_MAX)) {
+                tls_port = (unsigned) reply->element[i+1]->integer;
+            }
+        } else if ((strcmp(name, "role") == 0) &&
+                   (reply->element[i+1]->type == REDIS_REPLY_STRING)) {
+            const char *value = reply->element[i+1]->str;
+            if (strstr(value, "master") != NULL) {
+                role = REDIS_SERVER_MASTER_ROLE;
+            } else if (strstr(value, "replica") != NULL) {
+                role = REDIS_SERVER_SLAVE_ROLE;
+            }
+        } else if ((strcmp(name, "health") == 0) &&
+                   (reply->element[i+1]->type == REDIS_REPLY_STRING)) {
+            healthy = strcmp(reply->element[i+1]->str, "online") == 0;
+        }
+    }
+
+    // "?" means misconfigured hostname; skip.
+    if ((endpoint != NULL) && (strcmp(endpoint, "?") == 0)) {
+        return 0;
+    }
+
+    // NULL or "" means use the server we queried.
+    if ((endpoint == NULL) || (endpoint[0] == '\0')) {
+        endpoint = server->location.parsed.address.host;
+    }
+
+    // Prefer tls-port or port depending on the db configuration.
+#ifdef TLS_ENABLED
+    unsigned effective_port = (db->tls_ssl_ctx != NULL) ? tls_port : port;
+    if (effective_port == 0) {
+        effective_port = (db->tls_ssl_ctx != NULL) ? port : tls_port;
+    }
+#else
+    (void) db;
+    unsigned effective_port = port;
+#endif
+
+    // Check node data.
+    if ((effective_port == 0) || (role == REDIS_SERVER_TBD_ROLE)) {
+        return 0;
+    }
+
+    // Done!
+    node->endpoint = endpoint;
+    node->port = effective_port;
+    node->role = role;
+    node->healthy = healthy;
+    return 1;
+}
+
 static redis_server_t *
 unsafe_add_node(
-    VRT_CTX, struct vmod_redis_db *db, vcl_state_t *config, const char *endpoint,
-    int port, enum REDIS_SERVER_ROLE role, unsigned healthy)
+    VRT_CTX, struct vmod_redis_db *db, vcl_state_t *config, const node_t *node)
 {
     // Assertions.
     Lck_AssertHeld(&config->mutex);
@@ -187,16 +317,17 @@ unsafe_add_node(
     // suffix, which would then be parsed as a UNIX socket path) ==> simply
     // discard it.
     char location[256];
-    int n = snprintf(location, sizeof(location), "%s:%d", endpoint, port);
+    int n = snprintf(location, sizeof(location), "%s:%u", node->endpoint, node->port);
     if ((n < 0) || ((size_t) n >= sizeof(location))) {
         REDIS_LOG_ERROR(ctx,
             "Failed to register node: server location is too long (db=%s, endpoint=%s)",
-            db->name, endpoint);
+            db->name, node->endpoint);
         return NULL;
     }
 
     // Add / update server. Beware this may fail (e.g. invalid location).
-    redis_server_t *server = unsafe_add_redis_server(ctx, db, config, location, role);
+    redis_server_t *server = unsafe_add_redis_server(
+        ctx, db, config, location, node->role);
     if (server == NULL) {
         return NULL;
     }
@@ -206,7 +337,7 @@ unsafe_add_node(
     // this way the server is still used as a last resort when no other server
     // is available for the slot (see plan_execution()). Also beware
     // 'unsafe_add_redis_server()' has just flushed the sickness flag.
-    if ((!healthy) && (db->sickness_ttl > 0)) {
+    if ((!node->healthy) && (db->sickness_ttl > 0)) {
         time_t now = time(NULL);
         server->sickness.tst = now;
         server->sickness.exp = now + db->sickness_ttl;
@@ -343,121 +474,52 @@ unsafe_discover_slots_aux(
                             parse_errors++;
                         }
 
+                        // Extract slot ranges here, once per shard: they are
+                        // shared by all its nodes. Beware 'slots->elements'
+                        // could be 1 (i.e. a malformed odd sized array) ==> avoid
+                        // a zero sized allocation.
+                        unsigned nranges = 0;
+                        slot_range_t *ranges = malloc(
+                            sizeof(slot_range_t) * (slots->elements / 2 + 1));
+                        AN(ranges);
+                        for (int j = 0; j + 1 < slots->elements; j += 2) {
+                            if (parse_slot_range(slots, j, &ranges[nranges])) {
+                                nranges++;
+                            } else {
+                                parse_errors++;
+                            }
+                        }
+
                         // Iterate nodes.
                         for (int j = 0; j < nodes->elements; j++) {
-                            const redisReply *node = nodes->element[j];
-                            if ((node->type != REDIS_REPLY_ARRAY) &&
-                                RESP3_SWITCH(node->type != REDIS_REPLY_MAP, 1)) {
-                                parse_errors++;
-                                continue;
-                            }
-
-                            // Initializations.
-                            const char *endpoint = NULL;
-                            unsigned port = 0;
-                            unsigned tls_port = 0;
-                            enum REDIS_SERVER_ROLE role = REDIS_SERVER_TBD_ROLE;
-                            unsigned healthy = 1;
-
                             // Extract node data.
-                            for (int k = 0; k + 1 < node->elements; k += 2) {
-                                if (node->element[k]->type != REDIS_REPLY_STRING) {
-                                    parse_errors++;
-                                    continue;
-                                }
-
-                                const char *name = node->element[k]->str;
-                                if (strcmp(name, "endpoint") == 0) {
-                                    if (node->element[k+1]->type == REDIS_REPLY_STRING) {
-                                        endpoint = node->element[k+1]->str;
-                                    } else if (node->element[k+1]->type == REDIS_REPLY_NIL) {
-                                        endpoint = "";
-                                    }
-                                } else if (strcmp(name, "port") == 0) {
-                                    if ((node->element[k+1]->type == REDIS_REPLY_INTEGER) &&
-                                                (node->element[k+1]->integer > 0) &&
-                                                (node->element[k+1]->integer <= UINT16_MAX)) {
-                                        port = (unsigned)node->element[k+1]->integer;
-                                    }
-                                } else if (strcmp(name, "tls-port") == 0) {
-                                    if ((node->element[k+1]->type == REDIS_REPLY_INTEGER) &&
-                                                (node->element[k+1]->integer > 0) &&
-                                                (node->element[k+1]->integer <= UINT16_MAX)) {
-                                        tls_port = (unsigned)node->element[k+1]->integer;
-                                    }
-                                } else if ((strcmp(name, "role") == 0) &&
-                                            (node->element[k+1]->type == REDIS_REPLY_STRING)) {
-                                    const char *value = node->element[k+1]->str;
-                                    if (strstr(value, "master") != NULL) {
-                                        role = REDIS_SERVER_MASTER_ROLE;
-                                    } else if (strstr(value, "replica") != NULL) {
-                                        role = REDIS_SERVER_SLAVE_ROLE;
-                                    }
-                                } else if ((strcmp(name, "health") == 0) &&
-                                            (node->element[k+1]->type == REDIS_REPLY_STRING)) {
-                                    healthy =
-                                        strcmp(node->element[k+1]->str, "online") == 0;
-                                }
-                            }
-                            // "?" means misconfigured hostname; skip.
-                            if (endpoint != NULL && strcmp(endpoint, "?") == 0) {
-                                parse_errors++;
-                                continue;
-                            }
-                            // NULL or "" means use the server we queried.
-                            if (endpoint == NULL || endpoint[0] == '\0') {
-                                endpoint = server->location.parsed.address.host;
-                            }
-                            // Prefer tls-port or port depending on the db configuration.
-#ifdef TLS_ENABLED
-                            unsigned effective_port = (db->tls_ssl_ctx != NULL) ? tls_port : port;
-                            if (effective_port == 0) {
-                                effective_port = (db->tls_ssl_ctx != NULL) ? port : tls_port;
-                            }
-#else
-                            unsigned effective_port = port;
-#endif
-                            // Check node data.
-                            if ((endpoint == NULL) ||
-                                (effective_port == 0) ||
-                                (role == REDIS_SERVER_TBD_ROLE)) {
+                            node_t node;
+                            if (!parse_node(nodes->element[j], db, server, &node)) {
                                 parse_errors++;
                                 continue;
                             }
 
                             // Add / update server.
                             redis_server_t *node_server = unsafe_add_node(
-                                ctx, db, config, endpoint, effective_port, role, healthy);
+                                ctx, db, config, &node);
                             if (node_server == NULL) {
                                 parse_errors++;
                                 continue;
                             }
 
-                            // Iterate slot ranges.
-                            for (int k = 0; k + 1 < slots->elements; k += 2) {
-                                // Extract slot data.
-                                if ((slots->element[k]->type != REDIS_REPLY_INTEGER) ||
-                                    (slots->element[k + 1]->type != REDIS_REPLY_INTEGER)) {
-                                    parse_errors++;
-                                    continue;
-                                }
-                                int start = slots->element[k]->integer;
-                                int end = slots->element[k + 1]->integer;
-
-                                // Check slot data.
-                                if ((start < 0) || (start >= NREDIS_CLUSTER_SLOTS) ||
-                                    (end < 0) || (end >= NREDIS_CLUSTER_SLOTS)) {
-                                    parse_errors++;
-                                    continue;
-                                }
-
-                                // Register slots.
-                                for (int islot = start; islot <= end; islot++) {
+                            // Register slots.
+                            for (unsigned k = 0; k < nranges; k++) {
+                                for (int islot = ranges[k].start;
+                                     islot <= ranges[k].end;
+                                     islot++) {
                                     node_server->cluster.slots[islot] = 1;
                                 }
                                 slot_ranges++;
                             }
                         }
+
+                        // Release slot ranges.
+                        free(ranges);
                     }
 
                     // Log parse errors.
