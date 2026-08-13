@@ -4,7 +4,10 @@
 ## Configuration.
 ##
 IPV6=0
+PROTOCOL=${PROTOCOL:-default}
+TLS=${TLS:-false}
 
+DB_TLS_PORT_OFFSET=1000
 DB_STANDALONE_MASTER_SERVERS=2
 DB_STANDALONE_SLAVE_SERVERS=2
 DB_STANDALONE_SENTINEL_SERVERS=3
@@ -68,11 +71,21 @@ if [ -x "$(command -v redis-cli)" ]; then
     CONTEXT="\
         $CONTEXT \
         -Dredis_version=$VERSION \
+        -Dredis_protocol=$PROTOCOL \
+        -Dredis_tls=$TLS \
         -Dredis_tls_cafile=$ROOT/assets/tls-ca-certificate.crt \
         -Dredis_tls_certfile=$ROOT/assets/tls-certificate.crt \
         -Dredis_tls_keyfile=$ROOT/assets/tls-certificate.key"
 else
     echo 'Database not found!'
+    exit 1
+fi
+
+##
+## Fail test if TLS is requested but not supported by the DB.
+##
+if [[ $TLS = true && $VERSION -lt '6000000' ]]; then
+    echo 'TLS is not supported by the DB!'
     exit 1
 fi
 
@@ -87,18 +100,22 @@ if [[ ${@: -1} =~ ^.*\.([0-9]{7,})\.[^\.]*\.vtc(\.disabled)?$ ]]; then
 fi
 
 ##
+## Beware hiredis support for requested 'PROTOCOL' & 'TLS' is not checked.
+##
+
+##
 ## Launch standalone DB servers?
 ##
 if [[ ${@: -1} =~ ^.*standalone(\.[0-9]{7,})?\.[^\.]*\.vtc(\.disabled)?$ ]]; then
     for MASTER_INDEX in $(seq 1 $DB_STANDALONE_MASTER_SERVERS); do
         [[ $IPV6 = 1 ]] && MASTER_IP=::1 || MASTER_IP=127.0.0.$MASTER_INDEX
-        MASTER_PORT=$((DB_STANDALONE_START_PORT+MASTER_INDEX))
-        MASTER_TLS_PORT=$((MASTER_PORT+1000))
+        MASTER_PLAIN_PORT=$((DB_STANDALONE_START_PORT+MASTER_INDEX))
+        MASTER_TLS_PORT=$((MASTER_PLAIN_PORT+DB_TLS_PORT_OFFSET))
         cat > "$TMP/db-master$MASTER_INDEX.conf" <<EOF
         daemonize yes
         dir $TMP
         bind $MASTER_IP
-        port $MASTER_PORT
+        port $MASTER_PLAIN_PORT
         unixsocket $TMP/db-master$MASTER_INDEX.sock
         pidfile $TMP/db-master$MASTER_INDEX.pid
 EOF
@@ -119,22 +136,23 @@ EOF
         CONTEXT="\
             $CONTEXT \
             -Dredis_master${MASTER_INDEX}_ip=$MASTER_IP \
-            -Dredis_master${MASTER_INDEX}_port=$MASTER_PORT \
+            -Dredis_master${MASTER_INDEX}_port=$([[ "$TLS" == "true" ]] && echo "$MASTER_TLS_PORT" || echo "$MASTER_PLAIN_PORT") \
+            -Dredis_master${MASTER_INDEX}_plain_port=$MASTER_PLAIN_PORT \
             -Dredis_master${MASTER_INDEX}_tls_port=$MASTER_TLS_PORT \
             -Dredis_master${MASTER_INDEX}_socket=$TMP/db-master$MASTER_INDEX.sock"
 
         for SLAVE_INDEX in $(seq 1 $DB_STANDALONE_SLAVE_SERVERS); do
             [[ $IPV6 = 1 ]] && SLAVE_IP=::1 || SLAVE_IP=127.0.$MASTER_INDEX.$SLAVE_INDEX
-            SLAVE_PORT=$((DB_STANDALONE_START_PORT+DB_STANDALONE_MASTER_SERVERS+(MASTER_INDEX-1)*DB_STANDALONE_SLAVE_SERVERS+SLAVE_INDEX))
-            SLAVE_TLS_PORT=$((SLAVE_PORT+1000))
+            SLAVE_PLAIN_PORT=$((DB_STANDALONE_START_PORT+DB_STANDALONE_MASTER_SERVERS+(MASTER_INDEX-1)*DB_STANDALONE_SLAVE_SERVERS+SLAVE_INDEX))
+            SLAVE_TLS_PORT=$((SLAVE_PLAIN_PORT+DB_TLS_PORT_OFFSET))
             cat > "$TMP/db-slave${MASTER_INDEX}_$SLAVE_INDEX.conf" <<EOF
             daemonize yes
             dir $TMP
             bind $SLAVE_IP
-            port $SLAVE_PORT
+            port $SLAVE_PLAIN_PORT
             unixsocket $TMP/db-slave${MASTER_INDEX}_$SLAVE_INDEX.sock
             pidfile $TMP/db-slave${MASTER_INDEX}_$SLAVE_INDEX.pid
-            slaveof $MASTER_IP $MASTER_PORT
+            slaveof $MASTER_IP $MASTER_PLAIN_PORT
             slave-announce-ip $SLAVE_IP
 EOF
             if [ "$VERSION" -ge '6000000' ]; then
@@ -147,14 +165,15 @@ EOF
 EOF
             else
                 cat >> "$TMP/db-slave${MASTER_INDEX}_$SLAVE_INDEX.conf" <<EOF
-                slave-announce-port $SLAVE_PORT
+                slave-announce-port $SLAVE_PLAIN_PORT
 EOF
             fi
             redis-server "$TMP/db-slave${MASTER_INDEX}_$SLAVE_INDEX.conf"
             CONTEXT="\
                 $CONTEXT \
                 -Dredis_slave${MASTER_INDEX}_${SLAVE_INDEX}_ip=$SLAVE_IP \
-                -Dredis_slave${MASTER_INDEX}_${SLAVE_INDEX}_port=$SLAVE_PORT \
+                -Dredis_slave${MASTER_INDEX}_${SLAVE_INDEX}_port=$([[ "$TLS" == "true" ]] && echo "$SLAVE_TLS_PORT" || echo "$SLAVE_PLAIN_PORT") \
+                -Dredis_slave${MASTER_INDEX}_${SLAVE_INDEX}_plain_port=$SLAVE_PLAIN_PORT \
                 -Dredis_slave${MASTER_INDEX}_${SLAVE_INDEX}_tls_port=$SLAVE_TLS_PORT \
                 -Dredis_slave${MASTER_INDEX}_${SLAVE_INDEX}_socket=$TMP/db-slave${MASTER_INDEX}_$SLAVE_INDEX.sock"
         done
@@ -166,7 +185,7 @@ EOF
 EOF
             else
                 cat >> "$TMP/db-sentinel$SENTINEL_INDEX.conf" <<EOF
-                sentinel monitor db-master$MASTER_INDEX $MASTER_IP $MASTER_PORT 1
+                sentinel monitor db-master$MASTER_INDEX $MASTER_IP $MASTER_PLAIN_PORT 1
 EOF
             fi
             cat >> "$TMP/db-sentinel$SENTINEL_INDEX.conf" <<EOF
@@ -179,13 +198,13 @@ EOF
 
     for INDEX in $(seq 1 $DB_STANDALONE_SENTINEL_SERVERS); do
         [[ $IPV6 = 1 ]] && SENTINEL_IP=::1 || SENTINEL_IP=127.1.0.$INDEX
-        SENTINEL_PORT=$((DB_STANDALONE_START_PORT+2000+INDEX))
-        SENTINEL_TLS_PORT=$((SENTINEL_PORT+1000))
+        SENTINEL_PLAIN_PORT=$((DB_STANDALONE_START_PORT+2000+INDEX))
+        SENTINEL_TLS_PORT=$((SENTINEL_PLAIN_PORT+DB_TLS_PORT_OFFSET))
         cat >> "$TMP/db-sentinel$INDEX.conf" <<EOF
         daemonize yes
         dir $TMP
         bind $SENTINEL_IP
-        port $SENTINEL_PORT
+        port $SENTINEL_PLAIN_PORT
         pidfile $TMP/db-sentinel$INDEX.pid
         requirepass s3cr3t
         sentinel announce-ip $SENTINEL_IP
@@ -201,14 +220,15 @@ EOF
 EOF
         else
             cat >> "$TMP/db-sentinel$INDEX.conf" <<EOF
-            sentinel announce-port $SENTINEL_PORT
+            sentinel announce-port $SENTINEL_PLAIN_PORT
 EOF
         fi
         redis-server "$TMP/db-sentinel$INDEX.conf" --sentinel
         CONTEXT="\
             $CONTEXT \
             -Dredis_sentinel${INDEX}_ip=$SENTINEL_IP \
-            -Dredis_sentinel${INDEX}_port=$SENTINEL_PORT \
+            -Dredis_sentinel${INDEX}_port=$([[ "$TLS" == "true" ]] && echo "$SENTINEL_TLS_PORT" || echo "$SENTINEL_PLAIN_PORT") \
+            -Dredis_sentinel${INDEX}_plain_port=$SENTINEL_PLAIN_PORT \
             -Dredis_sentinel${INDEX}_tls_port=$SENTINEL_TLS_PORT"
     done
 
@@ -219,18 +239,18 @@ elif [[ ${@: -1} =~ ^.*clustered(\.[0-9]{7,})?\.[^\.]*\.vtc(\.disabled)?$ ]]; th
     SERVERS=""
     for INDEX in $(seq 1 $DB_CLUSTER_SERVERS); do
         [[ $IPV6 = 1 ]] && IP=::1 || IP=127.0.0.$INDEX
-        PORT=$((DB_CLUSTER_START_PORT+INDEX))
-        TLS_PORT=$((PORT+1000))
+        PLAIN_PORT=$((DB_CLUSTER_START_PORT+INDEX))
+        TLS_PORT=$((PLAIN_PORT+DB_TLS_PORT_OFFSET))
         cat > "$TMP/db-server$INDEX.conf" <<EOF
         daemonize yes
         dir $TMP
-        port $PORT
+        port $PLAIN_PORT
         bind $IP
         unixsocket $TMP/db-server$INDEX.sock
         pidfile $TMP/db-server$INDEX.pid
         cluster-enabled yes
         cluster-announce-ip $IP
-        cluster-announce-port $PORT
+        cluster-announce-port $PLAIN_PORT
         cluster-config-file $TMP/db-server$INDEX-nodes.conf
         cluster-node-timeout 5000
         cluster-slave-validity-factor 0
@@ -248,10 +268,11 @@ EOF
         CONTEXT="\
             $CONTEXT \
             -Dredis_server${INDEX}_ip=$IP \
-            -Dredis_server${INDEX}_port=$PORT \
+            -Dredis_server${INDEX}_port=$([[ "$TLS" == "true" ]] && echo "$TLS_PORT" || echo "$PLAIN_PORT") \
+            -Dredis_server${INDEX}_plain_port=$PLAIN_PORT \
             -Dredis_server${INDEX}_tls_port=$TLS_PORT \
             -Dredis_server${INDEX}_socket=$TMP/db-server$INDEX.sock"
-        SERVERS="$SERVERS $IP:$PORT"
+        SERVERS="$SERVERS $IP:$PLAIN_PORT"
     done
 
     # Wait for all nodes to bootstrap and then set up the cluster.
@@ -278,15 +299,23 @@ EOF
 
     # Add to context:
     #   - All master nodes' addresses ordered by the slots they handle
-    #     (redis_master1, redis_master2, ...).
+    #     (redis_master1_*, redis_master2_*, ...).
     #   - An example key for each of those master nodes (redis_key_in_master1,
-    #   redis_key_in_master2, ...).
+    #     redis_key_in_master2, ...).
     INDEX=1
     while read LINE; do
+        MASTER_IP=$(echo $LINE | cut -f 2 -d ' ' | cut -f 1 -d '@' | rev | cut -f 2- -d ':' | rev)
+        # 'CLUSTER NODES' always reports the plaintext ports announced by the
+        # nodes ('cluster-announce-port'); the TLS ones are derived using the
+        # same offset used when launching the servers.
+        MASTER_PLAIN_PORT=$(echo $LINE | cut -f 2 -d ' ' | cut -f 1 -d '@' | rev | cut -f 1 -d ':' | rev)
+        MASTER_TLS_PORT=$((MASTER_PLAIN_PORT+DB_TLS_PORT_OFFSET))
         CONTEXT="\
             $CONTEXT \
-            -Dredis_master${INDEX}_ip=$(echo $LINE | cut -f 2 -d ' ' | cut -f 1 -d '@' | rev | cut -f 2- -d ':' | rev) \
-            -Dredis_master${INDEX}_port=$(echo $LINE | cut -f 2 -d ' ' | cut -f 1 -d '@' | rev | cut -f 1 -d ':' | rev) \
+            -Dredis_master${INDEX}_ip=$MASTER_IP \
+            -Dredis_master${INDEX}_port=$([[ "$TLS" == "true" ]] && echo "$MASTER_TLS_PORT" || echo "$MASTER_PLAIN_PORT") \
+            -Dredis_master${INDEX}_plain_port=$MASTER_PLAIN_PORT \
+            -Dredis_master${INDEX}_tls_port=$MASTER_TLS_PORT \
             -Dredis_key_in_master${INDEX}=$(grep "^$(echo $LINE | cut -f 9 -d ' ' | cut -f 1 -d '-'): " $ROOT/assets/hashslot-keys.txt | cut -f 2 -d ' ')"
         INDEX=$(( INDEX + 1 ))
     done <<< "$(redis-cli -h $HOST -p $((DB_CLUSTER_START_PORT+1)) CLUSTER NODES | grep master | sort -k 9 -n)"

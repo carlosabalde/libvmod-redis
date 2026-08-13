@@ -21,11 +21,30 @@ jobs:
           - distcheck
         configure_flags:
           - ''
+        protocol:
+          - default
+          - RESP2
+          - RESP3
+        tls:
+          - 'false'
+          - 'true'
+        exclude:
+          # Only exercise protocol & TLS combinations with 'make check':
+          # 'make distcheck' already runs the test suite once internally
+          # using the defaults.
+          - make_target: distcheck
+            protocol: RESP2
+          - make_target: distcheck
+            protocol: RESP3
+          - make_target: distcheck
+            tls: 'true'
         include:
           - platform: ubuntu-24.04
             cc: gcc
             make_target: lcov
             configure_flags: --enable-code-coverage
+            protocol: default
+            tls: 'false'
 
     steps:
       - uses: actions/checkout@v6
@@ -61,7 +80,7 @@ jobs:
               ./autogen.sh; \
               CC="${{ matrix.cc }}" ./configure --prefix=/usr ${{ matrix.configure_flags }}; \
               make -j4; \
-              make ${{ matrix.make_target }} -j1'
+              PROTOCOL="${{ matrix.protocol }}" TLS="${{ matrix.tls }}" make ${{ matrix.make_target }} -j1'
 
       - name: Push code coverage
         if: ${{ matrix.make_target == 'lcov' }}
