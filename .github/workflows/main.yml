@@ -28,6 +28,16 @@ jobs:
         tls:
           - 'false'
           - 'true'
+        exclude:
+          # Only exercise protocol & TLS combinations with 'make check':
+          # 'make distcheck' already runs the test suite once internally
+          # using the defaults.
+          - make_target: distcheck
+            protocol: RESP2
+          - make_target: distcheck
+            protocol: RESP3
+          - make_target: distcheck
+            tls: 'true'
         include:
           - platform: ubuntu-24.04
             cc: gcc
