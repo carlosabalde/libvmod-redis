@@ -288,6 +288,7 @@ parse_node(
     }
 #else
     (void) db;
+    (void) tls_port;
     unsigned effective_port = port;
 #endif
 
