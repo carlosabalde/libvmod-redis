@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 7.12
+Version: 7.13
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,6 +36,9 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Fri Aug 14 2026 Carlos Abalde <carlos.abalde@gmail.com> - 7.13-1.20260814
+- Fixed discovery of Redis Cluster topology to register nodes without assigned slots.
+- Improved wait for cluster formation in the test suite runner.
 * Fri Aug 14 2026 Carlos Abalde <carlos.abalde@gmail.com> - 7.12-1.20260814
 - Improved VMOD logging: stderr support & VMOD_REDIS_LOG_SINKS env var.
 - Added support for DNS names when using Redis Cluster.
