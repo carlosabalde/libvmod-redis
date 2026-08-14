@@ -15,15 +15,16 @@ VMOD using the synchronous hiredis library API to access Redis servers from VCL.
 
 $Event event_function
 
-$Function VOID subnets(PRIV_VCL,
-    STRING masks="")
+$Function VOID weights(PRIV_VCL,
+    STRING rules="")
 
 Arguments
-    subnets:
-        Comma-delimited list of weights + subnet masks used to select among
-        servers associated to a database instance when executing commands.
-        Order is relevant. Only IPv4 addresses are supported. If not provided,
-        value in the VMOD_REDIS_SUBNETS environment variable will be used.
+    rules:
+        Newline-delimited list of weights + regexps used to select among host
+        (IP or DNS name) + port servers associated to a database instance when
+        executing commands (UNIX socket always get the minimum weight). Order is
+        relevant. If not provided, value in the VMOD_REDIS_WEIGHTS environment
+        variable will be used.
 
         This is useful in setups using Redis instances deployed across multiple
         data centers or availability zones.
@@ -44,7 +45,8 @@ $Function VOID sentinels(PRIV_VCL,
     STRING tls_certfile="",
     STRING tls_keyfile="",
     STRING tls_sni="",
-    STRING password="")
+    STRING password="",
+    BOOL debug=0)
 
 Arguments
     locations:
@@ -97,6 +99,11 @@ Arguments
     password: if not empty, requests for authentication using the ``AUTH``
     command will be submitted when creating new Redis Sentinel connections.
     This password will be used for all Redis Sentinel servers.
+
+    debug: if enabled, useful troubleshooting information will be logged to VSL
+    using ``Debug`` tags (beware of the default ``vsl_mask`` parameter in
+    Varnish). Same information will also be logged to syslog and/or stderr
+    depending on the value of the ``VMOD_REDIS_LOG_SINKS`` environment variable.
 Description
     Using this function is not mandatory.
 
@@ -341,13 +348,18 @@ $Object db(PRIV_VCL,
     STRING password="",
     INT sickness_ttl=60,
     BOOL ignore_slaves=0,
+    BOOL debug=0,
     INT max_cluster_hops=32)
 
 Arguments
     location: Redis connection string. Both host (IP or DNS name) + port and
-    UNIX sockets are supported. Only the IP + port format is allowed when Redis
-    Cluster support is enabled. **Do not use DNS names in combination with
-    ``redis.subnets()`` or ``redis.sentinels()``**.
+    UNIX sockets are supported. If Redis Cluster support has been enabled only
+    the host + port format is allowed. **When using ``redis.sentinels()``, make
+    sure the location used here exactly matches the value advertised by the
+    Sentinel instances**: the same IP address or the same DNS name, depending on
+    how Redis and Sentinel have been configured. Likewise, **when Redis Cluster
+    support is enabled, the location used here must exactly match the value
+    advertised by the ``CLUSTER SHARDS`` command**.
 
     type: type of the Redis server referenced by ``location``:
 
@@ -356,7 +368,7 @@ Arguments
 
     - The ``cluster`` value enables Redis Cluster support, automatically
       discovering other servers in the cluster and their roles on demand
-      using the ``CLUSTER SLOTS`` command.
+      using the ``CLUSTER SHARDS`` command.
 
     connection_timeout: connection timeout (milliseconds; 0 means no timeout)
     to the Redis server.
@@ -444,6 +456,11 @@ Arguments
     commands. In other words, enabling this option implicitly forces
     ``master == true`` when using the ``.execute()`` method.
 
+    debug: if enabled, useful troubleshooting information will be logged to VSL
+    using ``Debug`` tags (beware of the default ``vsl_mask`` parameter in
+    Varnish). Same information will also be logged to syslog and/or stderr
+    depending on the value of the ``VMOD_REDIS_LOG_SINKS`` environment variable.
+
     max_cluster_hops: maximum number of redirections (0 means no limit) when
     executing a command and Redis Cluster support has been enabled.
 Description
@@ -457,8 +474,12 @@ $Method VOID .add_server(
 Arguments
     location: Redis connection string. Both host (IP or DNS name) + port and
     UNIX sockets are supported. If Redis Cluster support has been enabled only
-    the IP + port format is allowed. **Do not use DNS names in combination with
-    ``redis.subnets()`` or ``redis.sentinels()``**.
+    the host + port format is allowed. **When using ``redis.sentinels()``, make
+    sure the location used here exactly matches the value advertised by the
+    Sentinel instances**: the same IP address or the same DNS name, depending on
+    how Redis and Sentinel have been configured. Likewise, **when Redis Cluster
+    support is enabled, the location used here must exactly match the value
+    advertised by the ``CLUSTER SHARDS`` command**.
 
     type: type of the Redis server referenced by ``location``:
 
@@ -473,7 +494,7 @@ Description
 
     If Redis Cluster support has been enabled other servers in the cluster and
     their roles are automatically discovered by the VMOD using the
-    ``CLUSTER SLOTS`` command. In any case, knowing more cluster servers during
+    ``CLUSTER SHARDS`` command. In any case, knowing more cluster servers during
     startup increases the chances of discover the cluster topology if some server
     is failing.
 
@@ -525,8 +546,8 @@ Description
     Executes a previously enqueued Redis command.
 
     When more than one Redis server is available, the destination server
-    is selected according with ``master`` and with the list of weights +
-    subnet masks provided when calling ``redis.subnets()``.
+    is selected according with ``master`` and with the list of rules provided
+    when calling ``redis.weights()``.
 
     WARNING: allowing execution of commands in slave servers (i.e. ``master ==
     false``) must be carefully used:
@@ -534,7 +555,7 @@ Description
     - When Redis Cluster support is disabled, sending a read-write command to
       a read-only slave server will result in an error reply.
 
-    - It's safe to send read-only LUA scripts using ``EVAL`` or ``EVALSHA``
+    - It's safe to send read-only Lua scripts using ``EVAL`` or ``EVALSHA``
       commands to a read-only slave server when Redis Cluster support is
       disabled. Being a read-only slave server does not block writes in the
       script cache.
@@ -545,7 +566,7 @@ Description
       topology. The client side won't notice the redirection, but triggering
       such an expensive operation on every command is a **terrible idea**.
 
-    - **It's not safe to send read-only LUA scripts using ``EVAL`` or ``EVALSHA``
+    - **It's not safe to send read-only Lua scripts using ``EVAL`` or ``EVALSHA``
       commands to a slave server when Redis Cluster support is enabled**. Redis
       Cluster handles ``EVAL`` and ``EVALSHA1`` command as write operations that
       must be redirected to a master server. Therefore, this would result on a

@@ -10,9 +10,9 @@ VMOD using the `synchronous hiredis library API <https://github.com/redis/hiredi
 
 Highlights:
 
-* **Full support for execution of LUA scripts** (i.e. ``EVAL`` command), including optimistic automatic execution of ``EVALSHA`` commands.
+* **Full support for execution of Lua scripts** (i.e. ``EVAL`` command), including optimistic automatic execution of ``EVALSHA`` commands.
 * **All Redis reply data types are supported**, including partial support to access to components of simple (i.e. not nested) array replies.
-* **Redis pipelines are not (and won't be) supported**. LUA scripting, which is fully supported by the VMOD, it's a much more flexible alternative to pipelines for atomic execution and minimizing latency. Pipelines are hard to use and error prone, specially when using the ``WATCH`` command.
+* **Redis pipelines are not (and won't be) supported**. Lua scripting, which is fully supported by the VMOD, it's a much more flexible alternative to pipelines for atomic execution and minimizing latency. Pipelines are hard to use and error prone, specially when using the ``WATCH`` command.
 * **Support for classic Redis deployments** using multiple replicated Redis servers **and for clustered deployments based on Redis Cluster**.
 * **Support for multiple databases and multiple Redis connections**, local to each Varnish worker thread, or shared using one or more pools.
 * **Support for smart command execution**, selecting the destination server according with the preferred role (i.e. master or slave) and with distance and healthiness metrics collected during execution.
@@ -30,10 +30,10 @@ import redis;
 ::
 
     ##
-    ## Subnets.
+    ## Weights.
     ##
 
-    Function subnets(STRING masks="")
+    Function weights(STRING rules="")
 
     ##
     ## Sentinels.
@@ -51,7 +51,8 @@ import redis;
         STRING tls_certfile="",
         STRING tls_keyfile="",
         STRING tls_sni="",
-        STRING password="")
+        STRING password="",
+        BOOL debug=false)
 
     ##
     ## Proxy.
@@ -94,6 +95,7 @@ import redis;
         STRING password="",
         INT sickness_ttl=60,
         BOOL ignore_slaves=false,
+        BOOL debug=false,
         INT max_cluster_hops=32)
     Method VOID .add_server(
         STRING location,
@@ -155,15 +157,18 @@ EXAMPLES
 Single server
 -------------
 
+Simple case, keeping up to one Redis connection per Varnish worker thread.
+Beware this is just a toy example: **using shared connections is usually a
+better approach**.
+
 ::
 
     sub vcl_init {
-        # VMOD configuration: simple case, keeping up to one Redis connection
-        # per Varnish worker thread.
         new db = redis.db(
             location="192.168.1.100:6379",
             type=master,
             connection_timeout=500,
+            command_timeout=1000,
             shared_connections=false,
             max_connections=1);
     }
@@ -178,7 +183,7 @@ Single server
         # Alternatively, the same can be achieved with one single command
         db.easy_execute("SET", "foo", "Hello world!");
 
-        # LUA scripting.
+        # Lua scripting.
         db.command("EVAL");
         db.push({"
             redis.call('SET', KEYS[1], ARGV[1])
@@ -205,22 +210,21 @@ Single server
 Multiple servers
 ----------------
 
+Master-slave replication, keeping up to two Redis connections per Varnish worker thread (up to one to the master server & up to one to the closest slave server). Beware this is just a toy example: **using shared connections is usually a better approach**.
+
 ::
 
     sub vcl_init {
-        # VMOD configuration: master-slave replication, keeping up to two
-        # Redis connections per Varnish worker thread (up to one to the master
-        # server & up to one to the closest slave server).
-        redis.subnets(
-            masks={"
-                0 192.168.1.102/32,
-                1 192.168.1.103/32,
-                2 0.0.0.0/32
+        redis.weights(
+            rules={"
+                0 ^192[.]168[.]1[.]102:.*$
+                1 ^192[.]168[.]1[.]103:.*$
             "});
         new db = redis.db(
             location="192.168.1.100:6379",
             type=master,
             connection_timeout=500,
+            command_timeout=1000,
             shared_connections=false,
             max_connections=2);
         db.add_server("192.168.1.101:6379", slave);
@@ -242,20 +246,46 @@ Multiple servers
         set req.http.X-Foo = db.get_string_reply();
     }
 
-Clustered setup
----------------
+Multiple servers with Sentinels
+-------------------------------
+
+Same example as above, but specifying the location of the Redis Sentinel servers. This configuration will:
+
+* Launch a dedicated thread that will run an initial discovery using the ``SENTINEL masters`` and ``SENTINEL slaves`` commands, and then repeat it every 60 seconds to discover sick / healthy servers and changes in their roles.
+* The same thread will use ``PSUBSCRIBE`` to be notified about events published by the Sentinel servers, reacting to role and health changes as soon as they happen instead of waiting for the next periodic discovery.
+* Populate an internal inventory of known Redis servers, compared against the locations of the servers explicitly registered for any database object. Matching servers get their roles and healthiness statuses automatically updated. Beware locations registered in the VCL configuration must exactly match the values advertised by the Sentinel servers. If using DNS names, check the `USING DNS NAMES`_ section for some important considerations to be taken into account.
+
+Beware Sentinels are only used to track servers already registered in the VCL configuration: **servers will never be automatically added to (or removed from) database objects as a result of Sentinel discoveries**.
 
 ::
 
     sub vcl_init {
-        # VMOD configuration: clustered setup, keeping up to 100 Redis
-        # connections per server, all shared between all Varnish worker threads.
-        # Two initial cluster servers are provided; remaining servers are
-        # automatically discovered.
+        redis.sentinels(
+            locations={"
+                192.168.1.200:26379,
+                192.168.1.201:26379,
+                192.168.1.202:26379
+            "},
+            period=60,
+            connection_timeout=500,
+            command_timeout=1000);
+
+        new db = ...
+    }
+
+Clustered setup
+---------------
+
+Clustered setup keeping up to 128 Redis connections per server, all shared between all Varnish worker threads. Two initial cluster servers are provided; remaining servers are automatically discovered using the ``CLUSTER SHARDS`` command.
+
+::
+
+    sub vcl_init {
         new db = redis.db(
             location="192.168.1.100:6379",
             type=cluster,
             connection_timeout=500,
+            command_timeout=1000,
             shared_connections=true,
             max_connections=128,
             max_cluster_hops=16);
@@ -287,6 +317,34 @@ Dependencies:
 
 * `hiredis <https://github.com/redis/hiredis>`_ - minimalistic C Redis client library.
 * `libev <http://software.schmorp.de/pkg/libev.html>`_ - full-featured and high-performance event loop.
+
+RUNNING TESTS
+=============
+
+The test suite is executed using ``make check``. Each ``.vtc`` test is wrapped by ``src/tests/runner.sh``, which launches the Redis servers required by the test (i.e., standalone masters & replicas plus Sentinels, or a Redis Cluster, depending on the test file name) and injects their locations and other useful macros into the test.
+
+By default tests use plaintext connections and let the VMOD select the protocol version. Both behaviors can be changed using environment variables, both for the whole test suite and for a single test::
+
+    # Whole test suite using TLS connections & the RESP3 protocol.
+    TLS=true PROTOCOL=RESP3 make check
+
+    # Single test using defaults.
+    make check TESTS=tests/standalone.template.vtc
+
+    # Single test using plaintext connections & the RESP2 protocol.
+    PROTOCOL=RESP2 make check TESTS=tests/standalone.template.vtc
+
+* ``PROTOCOL`` (``default``, ``RESP2`` or ``RESP3``; defaults to ``default``): injected into tests as the ``${redis_protocol}`` macro, used by most of them as the value of the ``protocol`` parameter.
+
+* ``TLS`` (``true`` or ``false``; defaults to ``false``): injected into tests as the ``${redis_tls}`` macro, used by most of them as the value of the ``tls`` parameter. When enabled, the ``${redis_*_port}`` macros reference the TLS ports of the launched servers instead of the plaintext ones (both are always available as ``${redis_*_plain_port}`` and ``${redis_*_tls_port}``).
+
+USING DNS NAMES
+===============
+
+This VMOD supports the use of DNS names when configuring the Redis server locations, but some considerations must be taken into account:
+
+* When using a **Redis Sentinel setup**, the names used in the VCL configuration must be the exact same names advertised by the Sentinel servers in order for the VMOD to be able to perform automatic discovery of sick / healthy servers and changes in their roles. So, when using DNS names, all Redis instances should be configured using hostnames for properties ``replica-announce-ip`` and ``replicaof``, whereas the Sentinel instances should be configured using hostnames as well for properties ``sentinel monitor`` and ``sentinel announce-ip``. Finally, ``sentinel resolve-hostnames`` and ``sentinel announce-hostnames`` should be set to ``yes`` in the Sentinel configuration files as well. Check `the official Redis documentation <https://redis.io/docs/latest/operate/oss_and_stack/management/sentinel/#ip-addresses-and-dns-names>`_ for more details on this topic.
+* When using a **Redis Cluster setup**, the cluster must be explicitly configured to use DNS names or by default it will use IP addresses. This includes setting the ``cluster-announce-hostname`` property in the configuration files of all Redis instances to the hostname of the server, as well as setting ``cluster-preferred-endpoint-type`` to ``hostname``. Regarding VCL configuration, same considerations apply as in the Sentinel case, i.e. names used in the VCL configuration must be the exact same names advertised by cluster commands like ``CLUSTER SHARDS``.
 
 COPYRIGHT
 =========

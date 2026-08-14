@@ -13,8 +13,8 @@ varnish v1 -vcl+backend {
     import ${vmod_redis};
 
     sub vcl_init {
-        redis.subnets(
-            masks={""});
+        redis.weights(
+            rules={""});
 
         redis.sentinels(
             locations={"
@@ -29,7 +29,8 @@ varnish v1 -vcl+backend {
             tls=true,
             tls_cafile="${redis_tls_cafile}",
             tls_certfile="${redis_tls_certfile}",
-            tls_keyfile="${redis_tls_keyfile}");
+            tls_keyfile="${redis_tls_keyfile}",
+            debug=true);
     }
 } -start
 
@@ -38,8 +39,8 @@ varnish v2 -vcl+backend {
     import ${vmod_redis};
 
     sub vcl_init {
-        redis.subnets(
-            masks={""});
+        redis.weights(
+            rules={""});
 
         redis.sentinels(
             locations={"
@@ -55,7 +56,8 @@ varnish v2 -vcl+backend {
             tls_cafile="${redis_tls_cafile}",
             tls_certfile="${redis_tls_certfile}",
             tls_keyfile="${redis_tls_keyfile}",
-            password="wrong-password");
+            password="wrong-password",
+            debug=true);
     }
 } -start
 
@@ -64,8 +66,8 @@ varnish v3 -vcl+backend {
     import ${vmod_redis};
 
     sub vcl_init {
-        redis.subnets(
-            masks={""});
+        redis.weights(
+            rules={""});
 
         redis.sentinels(
             locations={"
@@ -81,7 +83,8 @@ varnish v3 -vcl+backend {
             tls_cafile="${redis_tls_cafile}",
             tls_certfile="${redis_tls_certfile}",
             tls_keyfile="${redis_tls_keyfile}",
-            password="s3cr3t");
+            password="s3cr3t",
+            debug=true);
 
         new db = redis.db(
             location="${redis_master1_ip}:${redis_master1_tls_port}",
@@ -100,6 +103,7 @@ varnish v3 -vcl+backend {
             password="",
             sickness_ttl=0,
             ignore_slaves=false,
+            debug=true,
             max_cluster_hops=0);
         db.add_server("${redis_slave1_1_ip}:${redis_slave1_1_tls_port}", auto);
         db.add_server("${redis_slave1_2_ip}:${redis_slave1_2_tls_port}", auto);
@@ -127,9 +131,9 @@ client c1 -connect ${v1_sock} {
 } -run
 
 logexpect l1 {
-    expect * 0 VCL_Error   {^\[REDIS\]\[helloCallback:.*Failed to negotiate protocol in Sentinel connection.*NOAUTH.*}
-    expect * 0 VCL_Error   {^\[REDIS\]\[disconnectCallback:.*Sentinel connection lost.*NOAUTH.*}
-    expect * 0 VCL_Error   {^\[REDIS\]\[discover_servers:.*Failed to execute Sentinel HELLO command.*NOAUTH.*}
+    expect * 0 VCL_Error   {^\[REDIS\]\[\d+\]\[helloCallback:.*Failed to negotiate protocol in Sentinel connection.*NOAUTH.*}
+    expect * 0 VCL_Error   {^\[REDIS\]\[\d+\]\[disconnectCallback:.*Sentinel connection lost.*NOAUTH.*}
+    expect * 0 VCL_Error   {^\[REDIS\]\[\d+\]\[discover_servers:.*Failed to execute Sentinel HELLO command.*NOAUTH.*}
 } -start
 
 logexpect l1 -wait
@@ -142,9 +146,9 @@ client c2 -connect ${v2_sock} {
 } -run
 
 logexpect l2 {
-    expect * 0 VCL_Error   {^\[REDIS\]\[authorizeCallback:.*Failed to authenticate Sentinel connection.*WRONGPASS.*}
-    expect * 0 VCL_Error   {^\[REDIS\]\[disconnectCallback:.*Sentinel connection lost.*NOAUTH.*}
-    expect * 0 VCL_Error   {^\[REDIS\]\[discover_servers:.*Failed to execute Sentinel AUTH command.*WRONGPASS.*}
+    expect * 0 VCL_Error   {^\[REDIS\]\[\d+\]\[authorizeCallback:.*Failed to authenticate Sentinel connection.*WRONGPASS.*}
+    expect * 0 VCL_Error   {^\[REDIS\]\[\d+\]\[disconnectCallback:.*Sentinel connection lost.*NOAUTH.*}
+    expect * 0 VCL_Error   {^\[REDIS\]\[\d+\]\[discover_servers:.*Failed to execute Sentinel AUTH command.*WRONGPASS.*}
 } -start
 
 logexpect l2 -wait
