@@ -1,6 +1,6 @@
 FROM ubuntu:resolute-20260421
 
-ARG VARNISH_CC=gcc
+ARG VCC=gcc
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -11,13 +11,16 @@ RUN apt update \
     && apt install -y \
         apt-transport-https \
         automake \
+        autoconf-archive \
         autotools-dev \
         bindfs \
         binutils \
         bsdextrautils \
         clang \
+        cpio \
         curl \
         dpkg-dev \
+        furo \
         git \
         gpg \
         graphviz \
@@ -50,7 +53,15 @@ RUN git clone https://github.com/varnish/varnish.git /tmp/varnish \
     && cd /tmp/varnish \
     && git submodule update --init \
     && ./autogen.sh \
-    && CC="${VARNISH_CC}" ./configure \
+    && CC="${VCC}" ./configure \
+    && make \
+    && make PREFIX='/usr/local' install \
+    && ldconfig
+
+RUN git clone --recursive https://code.vinyl-cache.org/vinyl-cache/vinyl-cache /tmp/vinyl-cache \
+    && cd /tmp/vinyl-cache \
+    && ./autogen.sh \
+    && CC="${VCC}" ./configure \
     && make \
     && make PREFIX='/usr/local' install \
     && ldconfig
