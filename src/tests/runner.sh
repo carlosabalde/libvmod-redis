@@ -277,25 +277,28 @@ EOF
 
     # Wait for all nodes to bootstrap and then set up the cluster.
     sleep 1
-    if [ "$VERSION" -ge '5000000' ]; then
-        yes yes | redis-cli --cluster create $SERVERS --cluster-replicas $DB_CLUSTER_REPLICAS > /dev/null
-    else
-        yes yes | redis-trib.rb create --replicas $DB_CLUSTER_REPLICAS $SERVERS > /dev/null
-    fi
+    yes yes | redis-cli --cluster create $SERVERS --cluster-replicas $DB_CLUSTER_REPLICAS > /dev/null
 
-    # Wait for cluster formation in a rudementary way. Beware 'cluster_state'
-    # only checks all slots are covered (i.e. 'cluster-require-full-coverage'
-    # is enabled), but replicas do not handle slots, so the number of known
-    # nodes needs to be checked too.
-    [[ $IPV6 = 1 ]] && HOST=::1 || HOST=127.0.0.1
-    while true; do
-        INFO=$(redis-cli -h $HOST -p $((DB_CLUSTER_START_PORT+1)) CLUSTER INFO | tr -d '\r')
-        STATE=$(echo "$INFO" | sed -n 's/^cluster_state:\(.*\)$/\1/p')
-        KNOWN=$(echo "$INFO" | sed -n 's/^cluster_known_nodes:\(.*\)$/\1/p')
-        [[ "$STATE" == 'ok' && "$KNOWN" -ge $DB_CLUSTER_SERVERS ]] && break
-        sleep 1
+    # Wait for cluster formation: every node must see the full topology with
+    # settled roles, i.e. every member connected, not flagged as failing, and
+    # either flagged as a replica or owning some slot (a would-be replica
+    # still shows up as a slot-less master until 'CLUSTER REPLICATE'
+    # propagates). Entries in handshake state (no role / slots yet) and in
+    # noaddr state (no address ==> no link ==> never 'connected') are
+    # implicitly excluded, so 'fail' is the only flag needing an explicit
+    # filter: a failing node keeps its role / slots and its line may still
+    # show 'connected'. Beware 'CLUSTER INFO' is not enough here:
+    # 'cluster_state' only checks all slots are covered, and
+    # 'cluster_known_nodes' also counts nodes still in HANDSHAKE state that
+    # are not proper members of the cluster yet.
+    for INDEX in $(seq 1 $DB_CLUSTER_SERVERS); do
+        [[ $IPV6 = 1 ]] && IP=::1 || IP=127.0.0.$INDEX
+        while true; do
+            NODES=$(redis-cli -h $IP -p $((DB_CLUSTER_START_PORT+INDEX)) CLUSTER NODES | tr -d '\r')
+            [[ $(echo "$NODES" | awk '$3 !~ /fail/ && $8 == "connected" && ($3 ~ /slave/ || NF > 8)' | grep -c '') -eq $DB_CLUSTER_SERVERS ]] && break
+            sleep 1
+        done
     done
-    sleep 1
 
     # Add to context:
     #   - All master nodes' addresses ordered by the slots they handle
@@ -303,6 +306,7 @@ EOF
     #   - An example key for each of those master nodes (redis_key_in_master1,
     #     redis_key_in_master2, ...).
     INDEX=1
+    [[ $IPV6 = 1 ]] && HOST=::1 || HOST=127.0.0.1
     while read LINE; do
         MASTER_IP=$(echo $LINE | cut -f 2 -d ' ' | cut -f 1 -d '@' | rev | cut -f 2- -d ':' | rev)
         # 'CLUSTER NODES' always reports the plaintext ports announced by the
