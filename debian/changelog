@@ -1,3 +1,18 @@
+libvmod-redis (22.3-1) stable; urgency=low
+
+  * Improved VMOD logging: stderr support & VMOD_REDIS_LOG_SINKS env var
+  * Added support for DNS names when using Redis Cluster
+  * Added 'debug' parameter to redis.sentinels() and redis.db()
+  * Fixed command execution timeout, now set before TLS handshake & AUTH/HELLO
+  * Fixed broken hiredis version check that silently disabled TCP keep-alive when using hiredis >= 1.0
+  * Enabled TCP keep-alive for asynchronous Sentinel connections
+  * Added support for EVAL_RO & EVALSHA_RO commands when extracting keys for Redis Cluster slot routing
+  * Improved error reporting when parsing Sentinel discovery replies
+  * Replaced redis.subnets() with regexp-based redis.weights()
+  * Use CLUSTER SHARDS command instead of CLUSTER SLOTS to discover cluster topology (requires Redis >= 7.0)
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Fri, 14 Aug 2026 16:00:00 +0200
+
 libvmod-redis (22.2-1) stable; urgency=low
 
   * Fixed several ARM64 portability issues

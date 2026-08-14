@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 22.2
+Version: 22.3
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,6 +36,17 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+* Fri Aug 14 2026 Carlos Abalde <carlos.abalde@gmail.com> - 22.3-1.20260814
+- Improved VMOD logging: stderr support & VMOD_REDIS_LOG_SINKS env var.
+- Added support for DNS names when using Redis Cluster.
+- Added 'debug' parameter to redis.sentinels() and redis.db().
+- Fixed command execution timeout, now set before TLS handshake & AUTH/HELLO.
+- Fixed broken hiredis version check that silently disabled TCP keep-alive when using hiredis >= 1.0.
+- Enabled TCP keep-alive for asynchronous Sentinel connections.
+- Added support for EVAL_RO & EVALSHA_RO commands when extracting keys for Redis Cluster slot routing.
+- Improved error reporting when parsing Sentinel discovery replies.
+- Replaced redis.subnets() with regexp-based redis.weights().
+- Use CLUSTER SHARDS command instead of CLUSTER SLOTS to discover cluster topology (requires Redis >= 7.0).
 * Tue Mar 31 2026 Carlos Abalde <carlos.abalde@gmail.com> - 22.2-1.20260331
 - Fixed several ARM64 portability issues.
 * Tue Mar 17 2026 Carlos Abalde <carlos.abalde@gmail.com> - 22.1-1.20260317
