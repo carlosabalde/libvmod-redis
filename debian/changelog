@@ -1,3 +1,10 @@
+libvmod-redis (23.3-1) stable; urgency=low
+
+  * Fixed discovery of Redis Cluster topology to register nodes without assigned slots
+  * Improved wait for cluster formation in the test suite runner
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Fri, 14 Aug 2026 17:00:00 +0200
+
 libvmod-redis (23.2-1) stable; urgency=low
 
   * Improved VMOD logging: stderr support & VMOD_REDIS_LOG_SINKS env var

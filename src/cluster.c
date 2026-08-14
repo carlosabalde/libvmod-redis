@@ -471,26 +471,22 @@ unsafe_discover_slots_aux(
                             parse_errors++;
                             continue;
                         }
-
-                        // Beware a shard may legitimately own no slots (e.g.
-                        // while resharding, or when its primary is failing and
-                        // therefore no slot info is available) ==> that's not
-                        // an error, simply skip it.
-                        if (slots->elements == 0) {
-                            continue;
-                        }
                         if ((slots->elements % 2) != 0) {
                             parse_errors++;
+                            continue;
                         }
 
                         // Extract slot ranges here, once per shard: they are
                         // shared by all its nodes. Beware 'slots->elements'
-                        // could be 1 (i.e. a malformed odd sized array) ==> avoid
-                        // a zero sized allocation.
+                        // could be 0 (i.e. a shard may legitimately own no
+                        // slots while resharding, or when its primary is
+                        // failing and therefore no slot info is available).
                         unsigned nranges = 0;
-                        slot_range_t *ranges = malloc(
-                            sizeof(slot_range_t) * (slots->elements / 2 + 1));
-                        AN(ranges);
+                        slot_range_t *ranges = NULL;
+                        if (slots->elements > 0) {
+                            ranges = malloc(sizeof(slot_range_t) * (slots->elements / 2));
+                            AN(ranges);
+                        }
                         for (int j = 0; j + 1 < slots->elements; j += 2) {
                             if (parse_slot_range(slots, j, &ranges[nranges])) {
                                 nranges++;
