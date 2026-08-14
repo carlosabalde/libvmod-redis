@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+set -euo pipefail
+IFS=$'\n\t'
+
 mkdir -p /mnt/host
 
 # Beware 'privileged: true' is required for this.
@@ -13,4 +16,4 @@ bindfs \
     /mnt/host.raw \
     /mnt/host
 
-tail -f /dev/null
+exec sleep infinity

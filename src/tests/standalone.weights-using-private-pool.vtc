@@ -1,4 +1,4 @@
-varnishtest "Tests subnets using private pool"
+varnishtest "Tests weights using private pool"
 
 server s1 {
    rxreq
@@ -9,10 +9,10 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     import ${vmod_redis};
 
     sub vcl_init {
-        redis.subnets(
-            masks={"
-                1 ${redis_slave1_1_ip}/32,
-                0 ${redis_slave1_2_ip}/32
+        redis.weights(
+            rules={"
+                1 ^${redis_slave1_1_ip}:.*$
+                0 ^${redis_slave1_2_ip}:.*$
             "});
 
         redis.sentinels(
@@ -30,6 +30,11 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
             max_command_retries=0,
             shared_connections=false,
             max_connections=2,
+            protocol=${redis_protocol},
+            tls=${redis_tls},
+            tls_cafile="${redis_tls_cafile}",
+            tls_certfile="${redis_tls_certfile}",
+            tls_keyfile="${redis_tls_keyfile}",
             password="",
             sickness_ttl=0,
             ignore_slaves=false,
@@ -77,10 +82,10 @@ client c1 {
     rxresp
 
     expect resp.http.Reply-1 == "master"
-    expect resp.http.Reply-2 == "${redis_master1_port}"
+    expect resp.http.Reply-2 == "${redis_master1_plain_port}"
 
     expect resp.http.Reply-3 == "slave"
-    expect resp.http.Reply-4 == "${redis_slave1_2_port}"
+    expect resp.http.Reply-4 == "${redis_slave1_2_plain_port}"
 
     expect resp.http.db-servers-total == "3"
     expect resp.http.db-connections-total == "2"

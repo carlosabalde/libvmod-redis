@@ -10,10 +10,6 @@
 #ifdef TLS_ENABLED
 #include <hiredis/hiredis_ssl.h>
 #endif
-#include <arpa/inet.h>
-#ifdef __FreeBSD__
-#include <sys/socket.h>
-#endif
 
 #include "cache/cache.h"
 
@@ -29,7 +25,9 @@ vmod_state_t vmod_state = {
     .locks.refs = 0,
     .locks.vsc_seg = NULL,
     .locks.config = NULL,
-    .locks.db = NULL
+    .locks.db = NULL,
+    .log.syslog_enabled = 0,
+    .log.stderr_enabled = 0
 };
 
 struct plan {
@@ -70,6 +68,8 @@ static redisReply *get_redis_repy(
 
 static const char *sha1(VRT_CTX, const char *script);
 
+static void serialize_redis_reply(struct vsb *vsb, const redisReply *reply);
+
 redis_server_t *
 new_redis_server(
     struct vmod_redis_db *db, const char *location, enum REDIS_SERVER_ROLE role)
@@ -78,7 +78,7 @@ new_redis_server(
     ALLOC_OBJ(result, REDIS_SERVER_MAGIC);
     AN(result);
 
-    char *ptr = strrchr(location, ':');
+    const char *ptr = strrchr(location, ':');
     if (ptr != NULL) {
         result->location.type = REDIS_SERVER_LOCATION_HOST_TYPE;
         result->location.parsed.address.host = strndup(location, ptr - location);
@@ -90,15 +90,11 @@ new_redis_server(
         AN(result->location.parsed.path);
     }
 
-    // Do not continue if this is a clustered database but the location is not
-    // provided using the IP + port format.
-    struct in_addr ia4;
-    struct in6_addr ia6;
+    // Do not continue if this is a clustered database but the location has been
+    // provided using the socket format.
     if ((db->cluster.enabled) &&
-        ((result->location.type != REDIS_SERVER_LOCATION_HOST_TYPE) ||
-         ((inet_pton(AF_INET, result->location.parsed.address.host, &ia4) == 0) &&
-          (inet_pton(AF_INET6, result->location.parsed.address.host, &ia6) == 0)))) {
-        free((void *) result->location.parsed.address.host);
+        (result->location.type == REDIS_SERVER_LOCATION_SOCKET_TYPE)) {
+        free((void *) result->location.parsed.path);
         FREE_OBJ(result);
         return NULL;
     }
@@ -223,7 +219,8 @@ new_vmod_redis_db(
     redisSSLContext *tls_ssl_ctx,
 #endif
     const char *user, const char *password, unsigned sickness_ttl,
-    unsigned ignore_slaves, unsigned clustered, unsigned max_cluster_hops)
+    unsigned ignore_slaves, unsigned debug,
+    unsigned clustered, unsigned max_cluster_hops)
 {
     struct vmod_redis_db *result;
     ALLOC_OBJ(result, VMOD_REDIS_DATABASE_MAGIC);
@@ -265,6 +262,7 @@ new_vmod_redis_db(
     }
     result->sickness_ttl = sickness_ttl;
     result->ignore_slaves = ignore_slaves;
+    result->debug = debug;
 
     result->cluster.enabled = clustered;
     result->cluster.max_hops = max_cluster_hops;
@@ -339,6 +337,7 @@ free_vmod_redis_db(struct vmod_redis_db *db)
     }
     db->sickness_ttl = 0;
     db->ignore_slaves = 0;
+    db->debug = 0;
 
     db->cluster.enabled = 0;
     db->cluster.max_hops = 0;
@@ -424,7 +423,7 @@ new_vcl_state()
 
     Lck_New(&result->mutex, vmod_state.locks.config);
 
-    VTAILQ_INIT(&result->subnets);
+    VTAILQ_INIT(&result->weight_rules);
 
     VTAILQ_INIT(&result->dbs);
 
@@ -442,6 +441,7 @@ new_vcl_state()
     result->sentinels.tls_sni = NULL;
 #endif
     result->sentinels.password = NULL;
+    result->sentinels.debug = 0;
     result->sentinels.thread = 0;
     result->sentinels.active = 0;
     result->sentinels.discovery = 0;
@@ -459,12 +459,12 @@ free_vcl_state(vcl_state_t *priv)
 
    CHECK_OBJ_NOTNULL(priv, VCL_STATE_MAGIC);
 
-    subnet_t *isubnet;
-    while (!VTAILQ_EMPTY(&priv->subnets)) {
-        isubnet = VTAILQ_FIRST(&priv->subnets);
-        CHECK_OBJ_NOTNULL(isubnet, SUBNET_MAGIC);
-        VTAILQ_REMOVE(&priv->subnets, isubnet, list);
-        free_subnet(isubnet);
+    weight_rule_t *iweight_rule;
+    while (!VTAILQ_EMPTY(&priv->weight_rules)) {
+        iweight_rule = VTAILQ_FIRST(&priv->weight_rules);
+        CHECK_OBJ_NOTNULL(iweight_rule, WEIGHT_RULE_MAGIC);
+        VTAILQ_REMOVE(&priv->weight_rules, iweight_rule, list);
+        free_weight_rule(iweight_rule);
     }
 
     database_t *idb;
@@ -512,35 +512,46 @@ free_vcl_state(vcl_state_t *priv)
     }
     priv->sentinels.thread = 0;
     priv->sentinels.active = 0;
+    priv->sentinels.debug = 0;
     priv->sentinels.discovery = 0;
 
     FREE_OBJ(priv);
 }
 
-subnet_t *
-new_subnet(unsigned weight, struct in_addr ia4, unsigned bits)
+weight_rule_t *
+new_weight_rule(unsigned weight, const char *regexp)
 {
-    subnet_t *result;
-    ALLOC_OBJ(result, SUBNET_MAGIC);
+    weight_rule_t *result;
+    ALLOC_OBJ(result, WEIGHT_RULE_MAGIC);
     AN(result);
 
     result->weight = weight;
-    result->mask.s_addr = (bits == 0 ? 0x0 : (0xffffffff << (32 - bits)));
-    result->address.s_addr = ntohl(ia4.s_addr) & result->mask.s_addr;
+
+    const char *error;
+    int erroroffset;
+    result->vre = VRE_compile(regexp, 0, &error, &erroroffset);
+    if (result->vre == NULL) {
+        REDIS_LOG_ERROR(NULL,
+            "Failed to compile regular expression (regexp=%s): %s",
+            regexp, error);
+    }
 
     return result;
 }
 
 void
-free_subnet(subnet_t *subnet)
+free_weight_rule(weight_rule_t *weight_rule)
 {
-    CHECK_OBJ_NOTNULL(subnet, SUBNET_MAGIC);
+    CHECK_OBJ_NOTNULL(weight_rule, WEIGHT_RULE_MAGIC);
 
-    subnet->weight = 0;
-    subnet->mask = (struct in_addr){ 0 };
-    subnet->address = (struct in_addr){ 0 };
+    weight_rule->weight = 0;
 
-    FREE_OBJ(subnet);
+    if (weight_rule->vre != NULL) {
+        VRE_free(&weight_rule->vre);
+        weight_rule->vre = NULL;
+    }
+
+    FREE_OBJ(weight_rule);
 }
 
 database_t *
@@ -755,22 +766,21 @@ unsafe_add_redis_server(
                 result->role = unsafe_discover_redis_server_role(ctx, result);
             }
 
-            // Calculate weight.
+            // Calculate weight. Beware 'VRT_re_match()' asserts on a NULL
+            // 'ctx'. That's fine for now: all callers (i.e., VCL initialization,
+            // '.add_server()' and cluster discovery) provide a valid one. If
+            // servers ever get registered from a context-less thread (e.g.,
+            // the Sentinel thread), switching to 'VRE_match() could be
+            // considered.
             if (result->location.type == REDIS_SERVER_LOCATION_HOST_TYPE) {
-                struct in_addr ia4;
-                if (inet_pton(AF_INET, result->location.parsed.address.host, &ia4)) {
-                    result->weight = NREDIS_SERVER_WEIGHTS - 1;
-                    subnet_t *isubnet;
-                    VTAILQ_FOREACH(isubnet, &config->subnets, list) {
-                        CHECK_OBJ_NOTNULL(isubnet, SUBNET_MAGIC);
-                        if ((ntohl(ia4.s_addr) & isubnet->mask.s_addr) ==
-                            (isubnet->address.s_addr & isubnet->mask.s_addr)) {
-                            result->weight = isubnet->weight;
-                            break;
-                        }
+                result->weight = NREDIS_SERVER_WEIGHTS - 1;
+                weight_rule_t *iweight_rule;
+                VTAILQ_FOREACH(iweight_rule, &config->weight_rules, list) {
+                    CHECK_OBJ_NOTNULL(iweight_rule, WEIGHT_RULE_MAGIC);
+                    if (VRT_re_match(ctx, result->location.raw, iweight_rule->vre)) {
+                        result->weight = iweight_rule->weight;
+                        break;
                     }
-                } else {
-                    result->weight = NREDIS_SERVER_WEIGHTS - 1;
                 }
             } else {
                 result->weight = 0;
@@ -828,6 +838,16 @@ unsafe_add_redis_server(
 
     // Done!
     return result;
+}
+
+struct vsb *
+redis_reply_to_string(const redisReply *reply)
+{
+    struct vsb *vsb = VSB_new_auto();
+    AN(vsb);
+    serialize_redis_reply(vsb, reply);
+    AZ(VSB_finish(vsb));
+    return vsb;
 }
 
 /******************************************************************************
@@ -892,6 +912,18 @@ new_rcontext(
         result = NULL;
     }
 
+    // Set command execution timeout early: this also bounds the upcoming TLS
+    // handshake & AUTH / HELLO commands; otherwise a server hanging right after
+    // accepting the connection would block the worker thread indefinitely.
+    if (result != NULL) {
+        int tr = redisSetTimeout(result, server->db->command_timeout);
+        if (tr != REDIS_OK) {
+            REDIS_LOG_ERROR(ctx,
+                "Failed to set command execution timeout (error=%d, db=%s, server=%s)",
+                tr, server->db->name, server->location.raw);
+        }
+    }
+
     // Optionally setup TLS & submit AUTH / HELLO command.
     if (result != NULL) {
         REDIS_BLESS_CONTEXT(
@@ -927,11 +959,15 @@ new_rcontext(
     }
     if (!dblocked) Lck_Unlock(&server->db->mutex);
 
-#if HIREDIS_MAJOR >= 0 && HIREDIS_MINOR >= 12
+#if HIREDIS_MAJOR > 0 || (HIREDIS_MAJOR == 0 && HIREDIS_MINOR >= 12)
     // Enable TCP keep-alive.
     if ((result != NULL) &&
         (server->location.type == REDIS_SERVER_LOCATION_HOST_TYPE)) {
-        redisEnableKeepAlive(result);
+        if (redisEnableKeepAlive(result) != REDIS_OK) {
+            REDIS_LOG_WARNING(ctx,
+                "Failed to enable keepalive in connection (db=%s, server=%s)",
+                server->db->name, server->location.raw);
+        }
     }
 #endif
 
@@ -951,14 +987,6 @@ unsafe_discover_redis_server_role(VRT_CTX, redis_server_t *server)
     // Create context.
     redisContext *rcontext = new_rcontext(ctx, server, time(NULL), 1, 1);
     if ((rcontext != NULL) && (!rcontext->err)) {
-        // Set command execution timeout.
-        int tr = redisSetTimeout(rcontext, server->db->command_timeout);
-        if (tr != REDIS_OK) {
-            REDIS_LOG_ERROR(ctx,
-                "Failed to set role discovery command execution timeout (error=%d, db=%s, server=%s)",
-                tr, server->db->name, server->location.raw);
-        }
-
         // Send command.
         redisReply *reply = redisCommand(rcontext, ROLE_DISCOVERY_COMMAND);
 
@@ -1609,4 +1637,124 @@ sha1(VRT_CTX, const char *script)
 
     // Done!
     return result;
+}
+
+static void
+serialize_redis_reply(struct vsb *vsb, const redisReply *reply)
+{
+    // Handle NULL replies.
+    if (reply == NULL) {
+        AZ(VSB_cat(vsb, "\"(null)\""));
+        return;
+    }
+
+    // Check type of reply. Every scalar is serialized as a JSON string using
+    // an annotated textual format (e.g., '(integer) 42'); JSON only contributes
+    // the structure, in order to ease pretty printing.
+    switch (reply->type) {
+        case REDIS_REPLY_STATUS:
+            AZ(VSB_cat(vsb, "\"(status) "));
+            VSB_quote(vsb, reply->str, reply->len, VSB_QUOTE_JSON);
+            AZ(VSB_putc(vsb, '"'));
+            break;
+
+        case REDIS_REPLY_ERROR:
+            AZ(VSB_cat(vsb, "\"(error) "));
+            VSB_quote(vsb, reply->str, reply->len, VSB_QUOTE_JSON);
+            AZ(VSB_putc(vsb, '"'));
+            break;
+
+        case REDIS_REPLY_INTEGER:
+            AZ(VSB_printf(vsb, "\"(integer) %lld\"", reply->integer));
+            break;
+
+        case REDIS_REPLY_NIL:
+            AZ(VSB_cat(vsb, "\"(nil)\""));
+            break;
+
+        case REDIS_REPLY_STRING:
+            AZ(VSB_putc(vsb, '"'));
+            VSB_quote(vsb, reply->str, reply->len, VSB_QUOTE_JSON);
+            AZ(VSB_putc(vsb, '"'));
+            break;
+
+#ifdef RESP3_ENABLED
+        case REDIS_REPLY_DOUBLE:
+            if (reply->len > 0) {
+                AZ(VSB_printf(vsb, "\"(double) %s\"", reply->str));
+            } else {
+                AZ(VSB_printf(vsb, "\"(double) %.17g\"", reply->dval));
+            }
+            break;
+
+        case REDIS_REPLY_BOOL:
+            AZ(VSB_cat(vsb, reply->integer ? "\"(bool) true\"" : "\"(bool) false\""));
+            break;
+
+        case REDIS_REPLY_VERB:
+            AZ(VSB_printf(vsb, "\"(verbatim %.3s) ", reply->vtype));
+            VSB_quote(vsb, reply->str, reply->len, VSB_QUOTE_JSON);
+            AZ(VSB_putc(vsb, '"'));
+            break;
+
+#ifdef REDIS_REPLY_BIGNUM
+        case REDIS_REPLY_BIGNUM:
+            AZ(VSB_printf(vsb, "\"(bignum) %s\"", reply->str));
+            break;
+#endif
+#endif
+
+        case REDIS_REPLY_ARRAY:
+#ifdef RESP3_ENABLED
+        case REDIS_REPLY_SET:
+        case REDIS_REPLY_PUSH:
+            // Sets & pushes are wrapped in a single-key object in order not to
+            // lose the type information.
+            if (reply->type == REDIS_REPLY_SET) {
+                AZ(VSB_cat(vsb, "{\"(set)\": "));
+            } else if (reply->type == REDIS_REPLY_PUSH) {
+                AZ(VSB_cat(vsb, "{\"(push)\": "));
+            }
+#endif
+            AZ(VSB_putc(vsb, '['));
+            for (size_t i = 0; i < reply->elements; i++) {
+                if (i > 0) {
+                    AZ(VSB_cat(vsb, ", "));
+                }
+                serialize_redis_reply(vsb, reply->element[i]);
+            }
+            AZ(VSB_putc(vsb, ']'));
+#ifdef RESP3_ENABLED
+            if (reply->type == REDIS_REPLY_SET ||
+                reply->type == REDIS_REPLY_PUSH) {
+                AZ(VSB_putc(vsb, '}'));
+            }
+#endif
+            break;
+
+#ifdef RESP3_ENABLED
+        case REDIS_REPLY_MAP:
+        case REDIS_REPLY_ATTR:
+            // Attributes are wrapped in a single-key object in order not to
+            // lose the type information.
+            if (reply->type == REDIS_REPLY_ATTR) {
+                AZ(VSB_cat(vsb, "{\"(attr)\": "));
+            }
+            AZ(VSB_putc(vsb, '{'));
+            for (size_t i = 0; i < reply->elements; i++) {
+                if (i > 0) {
+                    AZ(VSB_cat(vsb, (i % 2 == 1) ? ": " : ", "));
+                }
+                serialize_redis_reply(vsb, reply->element[i]);
+            }
+            AZ(VSB_putc(vsb, '}'));
+            if (reply->type == REDIS_REPLY_ATTR) {
+                AZ(VSB_putc(vsb, '}'));
+            }
+            break;
+#endif
+
+        default:
+            AZ(VSB_printf(vsb, "\"(unknown type %d)\"", reply->type));
+    }
 }

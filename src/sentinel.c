@@ -13,7 +13,6 @@
 #endif
 #include <hiredis/async.h>
 #include <hiredis/adapters/libev.h>
-#include <arpa/inet.h>
 
 #include "cache/cache.h"
 
@@ -79,6 +78,7 @@ struct state {
     redisSSLContext *tls_ssl_ctx;
 #endif
     const char *password;
+    unsigned debug;
 
     // Timestamps.
     time_t last_change;
@@ -96,7 +96,7 @@ static struct state *new_state(
 #ifdef TLS_ENABLED
     redisSSLContext *tls_ssl_ctx,
 #endif
-    const char *password);
+    const char *password, unsigned debug);
 static void free_state(struct state *state);
 
 static void unsafe_set_locations(struct state *state, const char *locations);
@@ -147,7 +147,8 @@ unsafe_sentinel_start(vcl_state_t *config)
 #ifdef TLS_ENABLED
         tls_ssl_ctx,
 #endif
-        config->sentinels.password);
+        config->sentinels.password,
+        config->sentinels.debug);
     unsafe_set_locations(state, config->sentinels.locations);
     if (!VTAILQ_EMPTY(&state->sentinels)) {
         AZ(pthread_create(
@@ -197,16 +198,22 @@ unsafe_sentinel_stop(vcl_state_t *config)
 static void
 connectCallback(const redisAsyncContext *context, int status)
 {
-    if (status != REDIS_OK) {
-        struct sentinel *sentinel;
-        CAST_OBJ_NOTNULL(sentinel, context->data, SENTINEL_MAGIC);
+    struct sentinel *sentinel;
+    CAST_OBJ_NOTNULL(sentinel, context->data, SENTINEL_MAGIC);
 
+    if (status != REDIS_OK) {
         sentinel->context = NULL;
 
         REDIS_LOG_ERROR(NULL,
             "Failed to establish Sentinel connection (error=%d, status=%d, sentinel=%s:%d): %s",
             context->err, status, sentinel->host, sentinel->port,
             HIREDIS_ERRSTR(context));
+    } else {
+        if (sentinel->state->debug) {
+            REDIS_LOG_DEBUG(NULL,
+                "Sentinel connection established (sentinel=%s:%d)",
+                sentinel->host, sentinel->port);
+        }
     }
 }
 
@@ -223,6 +230,12 @@ disconnectCallback(const redisAsyncContext *context, int status)
             "Sentinel connection lost (error=%d, status=%d, sentinel=%s:%d): %s",
             context->err, status, sentinel->host, sentinel->port,
             HIREDIS_ERRSTR(context));
+    } else {
+        if (sentinel->state->debug) {
+            REDIS_LOG_DEBUG(NULL,
+                "Sentinel connection closed (sentinel=%s:%d)",
+                sentinel->host, sentinel->port);
+        }
     }
 }
 
@@ -241,6 +254,12 @@ authorizeCallback(redisAsyncContext *context, void *r, void *s)
             "Failed to authenticate Sentinel connection (error=%d, sentinel=%s:%d): %s",
             context->err, sentinel->host, sentinel->port,
             HIREDIS_ERRSTR(context, reply));
+    } else {
+        if (sentinel->state->debug) {
+            REDIS_LOG_DEBUG(NULL,
+                "Sentinel connection authenticated (sentinel=%s:%d)",
+                sentinel->host, sentinel->port);
+        }
     }
 }
 
@@ -259,6 +278,12 @@ helloCallback(redisAsyncContext *context, void *r, void *s)
             "Failed to negotiate protocol in Sentinel connection (error=%d, sentinel=%s:%d): %s",
             context->err, sentinel->host, sentinel->port,
             HIREDIS_ERRSTR(context, reply));
+    } else {
+        if (sentinel->state->debug) {
+            REDIS_LOG_DEBUG(NULL,
+                "Sentinel connection protocol negotiated (sentinel=%s:%d)",
+                sentinel->host, sentinel->port);
+        }
     }
 }
 
@@ -310,6 +335,13 @@ sentinel_loop(void *object)
         // Is time to execute a new discovery?
         if ((state->config->sentinels.discovery) ||
             ((state->period > 0) && (state->next_discovery <= now))) {
+            if (state->debug) {
+                REDIS_LOG_DEBUG(NULL,
+                    "Sentinel discovery triggered (locations=%s, discovery=%d, period=%d)",
+                    state->config->sentinels.locations,
+                    state->config->sentinels.discovery,
+                    state->period);
+            }
             Lck_Unlock(&state->config->mutex);
             discover_servers(state);
             Lck_Lock(&state->config->mutex);
@@ -342,6 +374,15 @@ sentinel_loop(void *object)
                     }
 #endif
                     if (isentinel->context != NULL) {
+#if HIREDIS_MAJOR > 0 || (HIREDIS_MAJOR == 0 && HIREDIS_MINOR >= 12)
+                        // Enable TCP keep-alive.
+                        if (redisEnableKeepAlive(&isentinel->context->c) != REDIS_OK) {
+                            REDIS_LOG_WARNING(NULL,
+                                "Failed to enable keepalive in Sentinel connection (sentinel=%s:%d)",
+                                isentinel->host, isentinel->port);
+                        }
+#endif
+
                         isentinel->context->data = isentinel;
                         redisLibevAttach(loop, isentinel->context);
                         redisAsyncSetConnectCallback(isentinel->context, connectCallback);
@@ -411,6 +452,13 @@ sentinel_loop(void *object)
         Lck_Lock(&state->config->mutex);
         if ((state->config->sentinels.discovery) ||
             (state->last_change >= now)) {
+            if (state->debug) {
+                REDIS_LOG_DEBUG(NULL,
+                    "Sentinel update DBs triggered (locations=%s, discovery=%d, last_change=%ld)",
+                    state->config->sentinels.locations,
+                    state->config->sentinels.discovery,
+                    state->last_change);
+            }
             unsafe_update_dbs(state);
             state->config->sentinels.discovery = 0;
         }
@@ -520,7 +568,7 @@ new_state(
 #ifdef TLS_ENABLED
     redisSSLContext *tls_ssl_ctx,
 #endif
-    const char *password)
+    const char *password, unsigned debug)
 {
     struct state *result;
     ALLOC_OBJ(result, STATE_MAGIC);
@@ -542,6 +590,7 @@ new_state(
     } else {
         result->password = NULL;
     }
+    result->debug = debug;
 
     result->last_change = 0;
     result->next_discovery = 0;
@@ -579,6 +628,7 @@ free_state(struct state *state)
         free((void *) state->password);
         state->password = NULL;
     }
+    state->debug = 0;
 
     state->last_change = 0;
     state->next_discovery = 0;
@@ -686,23 +736,51 @@ store_sentinel_reply(
 
     // Register / update server.
     if (server == NULL) {
+        if (sentinel->state->debug) {
+            REDIS_LOG_DEBUG(NULL,
+                "New server found through Sentinel reply has been added to inventory (sentinel=%s:%d, host=%s, port=%d, role=%d, down=%d)",
+                sentinel->host, sentinel->port, host, port, role, down > 0);
+        }
         server = new_server(sentinel, host, port, role, down > 0);
         VTAILQ_INSERT_TAIL(&sentinel->state->servers, server, list);
         sentinel->state->last_change = time(NULL);
     } else if ((server->role != role) ||
                ((down >= 0) && (server->down != down))) {
+        if (sentinel->state->debug) {
+            REDIS_LOG_DEBUG(NULL,
+                "Server in inventory has been updated through Sentinel reply (sentinel=%s:%d, host=%s, port=%d, role=%d->%d, down=%d->%d)",
+                sentinel->host, sentinel->port, server->host, server->port,
+                server->role, role, server->down,
+                (down >= 0) ? (down > 0) : server->down);
+        }
         server->sentinel = sentinel;
         server->role = role;
         if (down >= 0) {
             server->down = down;
         }
         sentinel->state->last_change = time(NULL);
+    } else {
+        if (sentinel->state->debug) {
+            REDIS_LOG_DEBUG(NULL,
+                "Server in inventory remains unchanged through Sentinel reply (sentinel=%s:%d, host=%s, port=%d, role=%d, down=%d)",
+                sentinel->host, sentinel->port, server->host, server->port,
+                server->role, server->down);
+        }
     }
 }
 
 static void
 parse_sentinel_notification(struct sentinel *sentinel, redisReply *reply)
 {
+    // Log reply.
+    if (reply != NULL && sentinel->state->debug) {
+        struct vsb *reply_vsb = redis_reply_to_string(reply);
+        REDIS_LOG_DEBUG(NULL,
+            "Sentinel 'PSUBSCRIBE' notification received (sentinel=%s:%d): %s",
+            sentinel->host, sentinel->port, VSB_data(reply_vsb));
+        VSB_destroy(&reply_vsb);
+    }
+
     // Check reply format.
     if ((reply != NULL) &&
         ((reply->type == REDIS_REPLY_ARRAY ||
@@ -824,14 +902,29 @@ stop:
 
         // Release payload.
         free(payload);
+    } else {
+        if (reply != NULL && sentinel->state->debug) {
+            REDIS_LOG_DEBUG(NULL,
+                "Ignored Sentinel notification (sentinel=%s:%d)",
+                sentinel->host, sentinel->port);
+        }
     }
 }
 
 static void
 parse_sentinel_discovery(
-    struct state *state, struct sentinel *sentinel,
+    struct state *state, struct sentinel *sentinel, const char *command,
     redisReply *reply, const char ***master_names)
 {
+    // Log reply.
+    if (sentinel->state->debug) {
+        struct vsb *reply_vsb = redis_reply_to_string(reply);
+        REDIS_LOG_DEBUG(NULL,
+            "Sentinel '%s' discovery reply received (sentinel=%s:%d): %s",
+            command, sentinel->host, sentinel->port, VSB_data(reply_vsb));
+        VSB_destroy(&reply_vsb);
+    }
+
     // Initializations.
     if (master_names != NULL) {
         *master_names = NULL;
@@ -898,13 +991,21 @@ parse_sentinel_discovery(
                     (port > 0) &&
                     (role != REDIS_SERVER_TBD_ROLE)) {
                     store_sentinel_reply(sentinel, host, port, role, down);
+                } else {
+                    REDIS_LOG_ERROR(NULL,
+                        "Incomplete Sentinel '%s' discovery reply element (sentinel=%s:%d)",
+                        command, sentinel->host, sentinel->port);
                 }
+            } else {
+                REDIS_LOG_ERROR(NULL,
+                    "Unexpected Sentinel '%s' discovery reply element (type=%d, sentinel=%s:%d)",
+                    command, reply->element[i]->type, sentinel->host, sentinel->port);
             }
         }
     } else {
         REDIS_LOG_ERROR(NULL,
-            "Unexpected Sentinel discovery command reply (type=%d, sentinel=%s:%d)",
-            reply->type, sentinel->host, sentinel->port);
+            "Unexpected Sentinel '%s' discovery reply (type=%d, sentinel=%s:%d)",
+            command, reply->type, sentinel->host, sentinel->port);
     }
 }
 
@@ -941,6 +1042,17 @@ discover_servers(struct state *state)
                 isentinel->port, HIREDIS_ERRSTR(rcontext));
             redisFree(rcontext);
             rcontext = NULL;
+        }
+
+        // Set command execution timeout early: this also bounds the upcoming
+        // TLS handshake & AUTH / HELLO commands.
+        if (rcontext != NULL) {
+            int tr = redisSetTimeout(rcontext, state->command_timeout);
+            if (tr != REDIS_OK) {
+                REDIS_LOG_ERROR(NULL,
+                    "Failed to set Sentinel command execution timeout (error=%d, sentinel=%s:%d)",
+                    tr, isentinel->host, isentinel->port);
+            }
         }
 
 #ifdef TLS_ENABLED
@@ -1000,20 +1112,12 @@ discover_servers(struct state *state)
 
         // Check context.
         if (rcontext != NULL) {
-            // Set command execution timeout.
-            int tr = redisSetTimeout(rcontext, state->command_timeout);
-            if (tr != REDIS_OK) {
-                REDIS_LOG_ERROR(NULL,
-                    "Failed to set Sentinel command execution timeout (error=%d, sentinel=%s:%d)",
-                    tr, isentinel->host, isentinel->port);
-            }
-
             // Send 'SENTINEL masters' command in order to get a list of
             // monitored masters and their state.
             const char **master_names = NULL;
             redisReply *reply1 = redisCommand(rcontext, "SENTINEL masters");
             if (reply1 != NULL) {
-                parse_sentinel_discovery(state, isentinel, reply1, &master_names);
+                parse_sentinel_discovery(state, isentinel, "SENTINEL masters", reply1, &master_names);
 
                 // Send 'SENTINEL slaves <master name>' command for each
                 // discovered master name in order to get the list of
@@ -1023,7 +1127,7 @@ discover_servers(struct state *state)
                         if (!rcontext->err) {
                             redisReply *reply2 = redisCommand(rcontext, "SENTINEL slaves %s", master_names[i]);
                             if (reply2 != NULL) {
-                                parse_sentinel_discovery(state, isentinel, reply2, NULL);
+                                parse_sentinel_discovery(state, isentinel, "SENTINEL slaves", reply2, NULL);
                                 freeReplyObject(reply2);
                             } else {
                                 REDIS_LOG_ERROR(NULL,
@@ -1064,11 +1168,14 @@ unsafe_update_dbs_aux(struct state *state, redis_server_t *server)
     Lck_AssertHeld(&server->db->mutex);
 
     // Look for a discovered server matching this one.
+    unsigned found = 0;
     struct server *is;
     VTAILQ_FOREACH(is, &state->servers, list) {
         CHECK_OBJ_NOTNULL(is, SERVER_MAGIC);
         if ((server->location.parsed.address.port == is->port) &&
             (strcmp(server->location.parsed.address.host, is->host) == 0)) {
+            found = 1;
+
             // Change role?
             if (server->role != is->role) {
                 VTAILQ_REMOVE(
@@ -1110,6 +1217,13 @@ unsafe_update_dbs_aux(struct state *state, redis_server_t *server)
             // Found!
             break;
         }
+    }
+
+    // Report server not found?
+    if (!found && state->debug) {
+        REDIS_LOG_DEBUG(NULL,
+            "Server referenced in DB not found in Sentinel inventory (db=%s, server=%s)",
+            server->db->name, server->location.raw);
     }
 }
 
