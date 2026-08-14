@@ -3,6 +3,7 @@
 
 #include <syslog.h>
 #include <pthread.h>
+#include <time.h>
 #include <hiredis/hiredis.h>
 #ifdef TLS_ENABLED
 #include <hiredis/hiredis_ssl.h>
@@ -11,6 +12,8 @@
 #include <inttypes.h>
 
 #include "vqueue.h"
+#include "vsb.h"
+#include "vre.h"
 
 #define NREDIS_SERVER_ROLES 3
 #define NREDIS_SERVER_WEIGHTS 4
@@ -145,6 +148,7 @@ struct vmod_redis_db {
     const char *password;
     time_t sickness_ttl;
     unsigned ignore_slaves;
+    unsigned debug;
 
     // Redis servers (rw field -allocated in the heap- to be protected by the
     // associated mutex), clustered by weight & role.
@@ -251,23 +255,20 @@ typedef struct task_state {
     } command;
 } task_state_t;
 
-typedef struct subnet {
+typedef struct weight_rule {
     // Object marker.
-#define SUBNET_MAGIC 0x27facd57
+#define WEIGHT_RULE_MAGIC 0x27facd58
     unsigned magic;
 
     // Weight.
     unsigned weight;
 
-    // Address and mask stored in unsigned 32 bit variables (in_addr.s_addr)
-    // using host byte oder.
-    // XXX: only IPv4 subnets supported.
-    struct in_addr address;
-    struct in_addr mask;
+    // Regular expression.
+    vre_t *vre;
 
     // Tail queue.
-    VTAILQ_ENTRY(subnet) list;
-} subnet_t;
+    VTAILQ_ENTRY(weight_rule) list;
+} weight_rule_t;
 
 typedef struct database {
     // Object marker.
@@ -289,8 +290,8 @@ struct vcl_state {
     // Mutex.
     struct lock mutex;
 
-    // Subnets (rw field to be protected by the associated mutex).
-    VTAILQ_HEAD(,subnet) subnets;
+    // Weight rules (rw field to be protected by the associated mutex).
+    VTAILQ_HEAD(,weight_rule) weight_rules;
 
     // Databases (rw field to be protected by the associated mutex).
     VTAILQ_HEAD(,database) dbs;
@@ -312,6 +313,7 @@ struct vcl_state {
         const char *tls_sni;
 #endif
         const char *password;
+        unsigned debug;
 
         // Thread reference + shared state.
         pthread_t thread;
@@ -337,6 +339,12 @@ typedef struct vmod_state {
         struct VSC_lck *config;
         struct VSC_lck *db;
     } locks;
+
+    // Logging configuration.
+    struct {
+        unsigned syslog_enabled;
+        unsigned stderr_enabled;
+    } log;
 } vmod_state_t;
 
 extern vmod_state_t vmod_state;
@@ -357,43 +365,43 @@ extern vmod_state_t vmod_state;
         HIREDIS_ERRSTR_2(__VA_ARGS__), \
         HIREDIS_ERRSTR_1(__VA_ARGS__))
 
-#if HIREDIS_MAJOR >= 1 && HIREDIS_MINOR >= 0
+#if HIREDIS_MAJOR >= 1
 #define RESP3_ENABLED 1
 #define RESP3_SWITCH(a, b) a
 #else
 #define RESP3_SWITCH(a, b) b
 #endif
 
+// Both 'syslog()' and 'fprintf()' serialize threads. Each grabs a process-wide
+// lock (glibc's internal lock and stdio's FILE lock, respectively) across its
+// syscall. Therefore, do NOT use this macro in hot paths. Syslog (which doesn't
+// matter much in containers) and stderr (which is gated by a pipe consumed by
+// the Varnish management process) logging should be rare, especially when
+// handling requests.
+//
+// Alternative: enable/disable syslog and/or stderr logging using the env var
+// (see VMOD event function), or adjust this macro to limit syslog and stderr to
+// non-request stuff (no VXID cases: initializations, helper threads, etc.).
+// Better for performance, but not ideal for visibility.
 #define REDIS_LOG(ctx, priority, fmt, ...) \
     do { \
+        long _tst = (long) time(NULL); \
+        \
+        if (vmod_state.log.syslog_enabled) { \
+            syslog(priority, "[REDIS][%s:%d] " fmt, __func__, __LINE__, ##__VA_ARGS__); \
+        } \
+        \
+        if (vmod_state.log.stderr_enabled) { \
+            fprintf(stderr, "[REDIS][%ld][%d][%s:%d] " fmt "\n", _tst, priority, __func__, __LINE__, ##__VA_ARGS__); \
+        } \
+        \
         const struct vrt_ctx *_ctx = ctx; \
-        \
-        char *_buffer; \
-        if (priority <= LOG_ERR) { \
-            assert(asprintf( \
-                &_buffer, \
-                "[REDIS][%s:%d] %s", __func__, __LINE__, fmt) > 0); \
+        unsigned _slt = ((priority) <= LOG_ERR) ? SLT_VCL_Error : ((priority) < LOG_DEBUG) ? SLT_VCL_Log : SLT_Debug; \
+        if (_ctx != NULL && _ctx->vsl != NULL) { \
+            VSLb(_ctx->vsl, _slt, "[REDIS][%ld][%s:%d] " fmt, _tst, __func__, __LINE__, ##__VA_ARGS__); \
         } else { \
-            assert(asprintf( \
-                &_buffer, \
-                "[REDIS] %s", fmt) > 0); \
+            VSL(_slt, NO_VXID, "[REDIS][%ld][%s:%d] " fmt, _tst, __func__, __LINE__, ##__VA_ARGS__); \
         } \
-        \
-        syslog(priority, _buffer, ##__VA_ARGS__); \
-        \
-        unsigned _tag; \
-        if (priority <= LOG_ERR) { \
-            _tag = SLT_VCL_Error; \
-        } else { \
-            _tag = SLT_VCL_Log; \
-        } \
-        if ((_ctx != NULL) && (_ctx->vsl != NULL)) { \
-            VSLb(_ctx->vsl, _tag, _buffer, ##__VA_ARGS__); \
-        } else { \
-            VSL(_tag, NO_VXID, _buffer, ##__VA_ARGS__); \
-        } \
-        \
-        free(_buffer); \
     } while (0)
 
 #define REDIS_LOG_ERROR(ctx, fmt, ...) \
@@ -402,10 +410,12 @@ extern vmod_state_t vmod_state;
     REDIS_LOG(ctx, LOG_WARNING, fmt, ##__VA_ARGS__)
 #define REDIS_LOG_INFO(ctx, fmt, ...) \
     REDIS_LOG(ctx, LOG_INFO, fmt, ##__VA_ARGS__)
+#define REDIS_LOG_DEBUG(ctx, fmt, ...) \
+    REDIS_LOG(ctx, LOG_DEBUG, fmt, ##__VA_ARGS__)
 
 #define REDIS_FAIL(ctx, result, fmt, ...) \
     do { \
-        syslog(LOG_ALERT, "[REDIS][%s:%d] " fmt, __func__, __LINE__, ##__VA_ARGS__); \
+        REDIS_LOG(ctx, LOG_ALERT, fmt, ##__VA_ARGS__); \
         VRT_fail(ctx, "[REDIS][%s:%d] " fmt, __func__, __LINE__, ##__VA_ARGS__); \
         return result; \
     } while (0)
@@ -501,7 +511,8 @@ struct vmod_redis_db *new_vmod_redis_db(
     redisSSLContext *tls_ssl_ctx,
 #endif
     const char *user, const char *password, unsigned sickness_ttl,
-    unsigned ignore_slaves, unsigned clustered, unsigned max_cluster_hops);
+    unsigned ignore_slaves, unsigned debug,
+    unsigned clustered, unsigned max_cluster_hops);
 void free_vmod_redis_db(struct vmod_redis_db *db);
 
 task_state_t *new_task_state();
@@ -510,8 +521,8 @@ void free_task_state(task_state_t *state);
 vcl_state_t *new_vcl_state();
 void free_vcl_state(vcl_state_t *priv);
 
-subnet_t *new_subnet(unsigned weight, struct in_addr ia4, unsigned bits);
-void free_subnet(subnet_t *subnet);
+weight_rule_t *new_weight_rule(unsigned weight, const char *regexp);
+void free_weight_rule(weight_rule_t *weight_rule);
 
 database_t *new_database(struct vmod_redis_db *db);
 void free_database(database_t *db);
@@ -524,5 +535,7 @@ redisReply *redis_execute(
 redis_server_t * unsafe_add_redis_server(
     VRT_CTX, struct vmod_redis_db *db, vcl_state_t *config,
     const char *location, enum REDIS_SERVER_ROLE role);
+
+struct vsb *redis_reply_to_string(const redisReply *reply);
 
 #endif
