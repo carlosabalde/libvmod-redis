@@ -41,10 +41,6 @@ VARNISH_VMODS([redis])
 VMOD_TESTS="$(cd $srcdir/src && echo tests/*.vtc)"
 AC_SUBST(VMOD_TESTS)
 
-PKG_CHECK_VAR([LIBVARNISHAPI_LIBDIR], [varnishapi], [libdir])
-AC_SUBST([VARNISH_LIBRARY_PATH],
-	[$LIBVARNISHAPI_LIBDIR:$LIBVARNISHAPI_LIBDIR/varnish])
-
 # Check for libhiredis.
 AC_CHECK_LIB(
 	hiredis, redisCommand, [],
