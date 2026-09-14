@@ -1138,16 +1138,17 @@ vmod_db_stats(
     VCL_STRING prometheus_name_prefix, VCL_BOOL prometheus_default_labels,
     VCL_STRING prometheus_extra_labels)
 {
-    struct vsb *vsb = NULL;
-    if (stream && (
-        (ctx->method == VCL_MET_SYNTH) ||
-        (ctx->method == VCL_MET_BACKEND_ERROR))) {
-        CAST_OBJ_NOTNULL(vsb, ctx->specific, VSB_MAGIC);
-    } else {
+    // Streaming used to write directly into the 'ctx->specific' VSB, but that
+    // VSB is no longer read by the synth storage engine (see
+    // 'append_response_body()'): the response is now always built in a private
+    // VSB and 'stream' only decides whether it is appended to the response
+    // body or returned to the caller.
+    if ((ctx->method != VCL_MET_SYNTH) &&
+        (ctx->method != VCL_MET_BACKEND_ERROR)) {
         stream = 0;
-        vsb = VSB_new_auto();
-        AN(vsb);
     }
+    struct vsb *vsb = VSB_new_auto();
+    AN(vsb);
 
     Lck_Lock(&db->mutex);
     if (format == enum_vmod_redis_json) {
@@ -1231,9 +1232,7 @@ vmod_db_stats(
             (prometheus_default_labels) ? db->name : "",
             (prometheus_default_labels) ? "\"" : "");
         if (labels == NULL) {
-            if (!stream) {
-                VSB_destroy(&vsb);
-            }
+            VSB_destroy(&vsb);
             Lck_Unlock(&db->mutex);
             REDIS_FAIL_WS(ctx, NULL);
         }
@@ -1312,18 +1311,21 @@ vmod_db_stats(
     }
     Lck_Unlock(&db->mutex);
 
-    const char *result = NULL;
-    if (stream) {
-        result = WS_Copy(ctx->ws, "", -1);
-    } else {
-        AZ(VSB_putc(vsb, '\0'));
-        AZ(VSB_finish(vsb));
-        result = WS_Copy(ctx->ws, VSB_data(vsb), VSB_len(vsb));
-        VSB_destroy(&vsb);
-    }
+    AZ(VSB_putc(vsb, '\0'));
+    AZ(VSB_finish(vsb));
+    const char *result = WS_Copy(ctx->ws, VSB_data(vsb), VSB_len(vsb));
+    VSB_destroy(&vsb);
     if (result == NULL) {
         REDIS_FAIL_WS(ctx, NULL);
     }
+
+    if (stream) {
+        // 'result' is workspace-allocated, satisfying the until-delivery
+        // lifetime required by 'append_response_body()'.
+        append_response_body(ctx, result);
+        return "";
+    }
+
     return result;
 }
 

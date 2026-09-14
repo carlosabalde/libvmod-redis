@@ -49,12 +49,12 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
                 prometheus_default_labels=(req.http.default-labels == "1"),
                 prometheus_extra_labels=req.http.extra-labels);
         } else {
-            synthetic(db.stats(
+            set resp.body = db.stats(
                 format=prometheus,
                 stream=false,
                 prometheus_name_prefix=req.http.prefix,
                 prometheus_default_labels=(req.http.default-labels == "1"),
-                prometheus_extra_labels=req.http.extra-labels));
+                prometheus_extra_labels=req.http.extra-labels);
         }
         return (deliver);
     }

@@ -820,8 +820,7 @@ $Method STRING .stats(
 Arguments
     format: format of the output string.
 
-    stream: if enabled, the response object will be streamed as a synthetic
-    response.
+    stream: if enabled, the stats will be delivered as a synthetic response.
 
     prometheus_name_prefix: prefix to be used in all Prometheus metric names.
     It's used as a raw value; no validations or transformations at all.
@@ -836,8 +835,11 @@ Description
 
     If called during ``vcl_synth`` or ``vcl_backend_error`` with the ``stream``
     argument enabled, this function will return an empty string and behave as
-    a call to the ``synthetic`` VCL function with the response object as input.
-    This highly reduces the amount of required workspace memory.
+    setting ``resp.body`` with the response.
+
+    Beware that after 9.0.x the response is no longer streamed: it is always
+    built on the workspace, even when the ``stream`` argument is enabled, so
+    enough free workspace to hold the whole response is required.
 
 $Method INT .counter(STRING name)
 

@@ -538,4 +538,29 @@ redis_server_t * unsafe_add_redis_server(
 
 struct vsb *redis_reply_to_string(const redisReply *reply);
 
+// Appends 'value' to the synthetic response body being built by 'vcl_synth' /
+// 'vcl_backend_error'. This used to be implemented writing into the
+// 'synth_body' VSB exposed through 'ctx->specific', but since the introduction
+// of the special-purpose synth storage engine that VSB is ignored whenever the
+// response is backed by that engine, which is the new default: bodies must be
+// assigned through 'VRT_l_resp_body()' / 'VRT_l_beresp_body()' instead, just
+// like 'set (be)resp.body = ...' does.
+//
+// BEWARE: on the 'vcl_synth' side the synth storage engine keeps *references*
+// to the body constituents and only reads them during delivery. Therefore
+// 'value' must remain valid and immutable until the response has been sent:
+// workspace-allocated strings and VCL_STRINGs are fine; heap memory that may
+// be freed or mutated by other threads is not.
+//
+// Because of this new behavior, callers now stage 'value' on the workspace,
+// which caps synthetic bodies at the free workspace size. The old
+// not-limited-by-workspace behavior could be restored by staging on the heap
+// instead: build the body in a private 'VSB_new_auto()', hang it off a
+// PRIV_TASK with a free callback, and pass 'VSB_data()' here. Client task privs
+// are only released at request teardown, after 'cnt_transmit()' has delivered
+// the body, so a task-owned heap buffer satisfies the until-delivery lifetime
+// required by the synth storage engine; on the 'vcl_backend_error' side
+// 'VRT_l_(be)resp_body()' copies the string right away, so it works there too.
+void append_response_body(VRT_CTX, const char *value);
+
 #endif
