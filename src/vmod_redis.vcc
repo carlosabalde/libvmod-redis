@@ -115,6 +115,9 @@ Description
     Sets the current database instance to be used by proxied methods (if none
     is specified with their ``db`` argument).
 
+    Beware calling this function discards the previously enqueued command and
+    its reply, if any, no matter which database instance they belong to.
+
 $Function VOID add_server(
     PRIV_VCL,
     PRIV_TASK,
@@ -407,9 +410,16 @@ Arguments
         location) pair is available, incrementing this limit allows recycling of
         Redis connections.
 
-        WARNING: when creating multiple database instances, always use the same
-        value in all instances using private connections. Otherwise you may
-        experience inconsistent behavior.
+        WARNING: when multiple database instances using private connections
+        are created, they do not get a separate pool of connections each.
+        Instead, all of them share a single pool of private connections. The
+        ``max_connections`` limit of the instance currently executing a command
+        is enforced against that shared pool, and when the limit is reached the
+        oldest connection in the pool is closed, even if it belongs to a
+        different database instance. Therefore, always use the same value in
+        all instances using private connections. Otherwise, instances configured
+        with a lower limit will needlessly close connections owned by instances
+        configured with a higher limit.
 
     protocol: protocol to be used when talking to Redis Server servers. Beware
     switching from ``RESP2`` to ``RESP3`` is only possible since Redis 6.0 and
@@ -465,6 +475,16 @@ Arguments
     executing a command and Redis Cluster support has been enabled.
 Description
     Creates a new database instance.
+
+    WARNING: when multiple database instances are created, they do not get a
+    separate execution state each. Instead, during each VCL task (e.g., a client
+    request or a backend fetch), all of them share a single execution state able
+    to hold just one enqueued command and its reply. Enqueueing a new command
+    with ``.command()`` or ``.easy_execute()``, as well as calling ``.free()``
+    or ``redis.use()``, discards the previously enqueued command and its reply,
+    no matter which instance they belong to. Therefore, do not interleave
+    executions of multiple database instances: fully process the reply of one
+    instance before enqueueing a command in another one.
 
 $Method VOID .add_server(
     PRIV_VCL,
@@ -806,9 +826,11 @@ Return value
 $Method VOID .free(PRIV_TASK)
 
 Description
-    Frees memory internally used by Redis commands an replies. It's recommended to
-    use this function, but if not called this will be handled automatically during
-    the next call to ``.command()`` using the same object.
+    Frees memory internally used by Redis commands and replies. It's recommended
+    to use this function, but if not called this will be handled automatically
+    during the next call to ``.command()`` or ``.easy_execute()``, no matter the
+    database instance, during the next call to ``redis.use()``, or when the VCL
+    task finishes.
 
 $Method STRING .stats(
     ENUM { json, prometheus } format="json",
