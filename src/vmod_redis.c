@@ -1138,16 +1138,25 @@ vmod_db_stats(
     VCL_STRING prometheus_name_prefix, VCL_BOOL prometheus_default_labels,
     VCL_STRING prometheus_extra_labels)
 {
-    // Streaming used to write directly into the 'ctx->specific' VSB, but that
-    // VSB is no longer read by the synth storage engine (see
-    // 'append_response_body()'): the response is now always built in a private
-    // VSB and 'stream' only decides whether it is appended to the response
-    // body or returned to the caller.
+    // Stream mode is only supported in VCL methods that allow streaming of the
+    // response body.
     if ((ctx->method != VCL_MET_SYNTH) &&
         (ctx->method != VCL_MET_BACKEND_ERROR)) {
         stream = 0;
     }
-    struct vsb *vsb = VSB_new_auto();
+
+    // In streaming mode the dump is built directly in a task-owned heap VSB
+    // handed over to 'append_synth_response_body()', so it is not limited by
+    // the available workspace. Similarly, in non-streaming mode a temporary VSB
+    // is used to keep the code simple and avoid duplicating the logic for
+    // building the dump, but in the end the result is copied to the workspace,
+    // so its size limitations still apply.
+    struct vsb *vsb = NULL;
+    if (stream) {
+        vsb = new_task_synth_vsb(ctx);
+    } else {
+        vsb = VSB_new_auto();
+    }
     AN(vsb);
 
     Lck_Lock(&db->mutex);
@@ -1232,7 +1241,9 @@ vmod_db_stats(
             (prometheus_default_labels) ? db->name : "",
             (prometheus_default_labels) ? "\"" : "");
         if (labels == NULL) {
-            VSB_destroy(&vsb);
+            if (!stream) {
+                VSB_destroy(&vsb);
+            }
             Lck_Unlock(&db->mutex);
             REDIS_FAIL_WS(ctx, NULL);
         }
@@ -1311,21 +1322,18 @@ vmod_db_stats(
     }
     Lck_Unlock(&db->mutex);
 
-    AZ(VSB_putc(vsb, '\0'));
-    AZ(VSB_finish(vsb));
-    const char *result = WS_Copy(ctx->ws, VSB_data(vsb), VSB_len(vsb));
-    VSB_destroy(&vsb);
+    const char *result = NULL;
+    if (stream) {
+        append_synth_response_body(ctx, vsb);
+        result = WS_Copy(ctx->ws, "", -1);
+    } else {
+        AZ(VSB_finish(vsb));
+        result = WS_Copy(ctx->ws, VSB_data(vsb), VSB_len(vsb));
+        VSB_destroy(&vsb);
+    }
     if (result == NULL) {
         REDIS_FAIL_WS(ctx, NULL);
     }
-
-    if (stream) {
-        // 'result' is workspace-allocated, satisfying the until-delivery
-        // lifetime required by 'append_response_body()'.
-        append_response_body(ctx, result);
-        return "";
-    }
-
     return result;
 }
 

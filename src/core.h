@@ -538,29 +538,28 @@ redis_server_t * unsafe_add_redis_server(
 
 struct vsb *redis_reply_to_string(const redisReply *reply);
 
-// Appends 'value' to the synthetic response body being built by 'vcl_synth' /
-// 'vcl_backend_error'. This used to be implemented writing into the
-// 'synth_body' VSB exposed through 'ctx->specific', but since the introduction
-// of the special-purpose synth storage engine that VSB is ignored whenever the
-// response is backed by that engine, which is the new default: bodies must be
-// assigned through 'VRT_l_resp_body()' / 'VRT_l_beresp_body()' instead, just
-// like 'set (be)resp.body = ...' does.
+// Creates a heap VSB owned by the current task: it is registered in a dynamic
+// per-task priv, keyed by the VSB pointer itself [1], so every VSB gets its own
+// priv and the VMOD's PRIV_TASK argument priv is not disturbed. Its free
+// callback destroys it when the task ends, i.e., after delivery.
 //
-// BEWARE: on the 'vcl_synth' side the synth storage engine keeps *references*
-// to the body constituents and only reads them during delivery. Therefore
-// 'value' must remain valid and immutable until the response has been sent:
-// workspace-allocated strings and VCL_STRINGs are fine; heap memory that may
-// be freed or mutated by other threads is not.
+// [1] https://www.varnish.org/docs/reference/vmod/#private-pointers-and-objects.
+struct vsb *new_task_synth_vsb(VRT_CTX);
+
+// Finishes 'vsb', a VSB previously returned by 'new_task_synth_vsb()' during
+// the same task (a precondition asserted at runtime, looking the VSB up in the
+// task priv registry), and appends its contents to the synthetic response
+// body being built by 'vcl_synth' / 'vcl_backend_error'. This used to be
+// implemented writing into the VSB exposed through 'ctx->specific', but since
+// the introduction of the special-purpose synth storage engine that VSB is
+// ignored: bodies must be assigned through 'VRT_l_resp_body()' /
+// 'VRT_l_beresp_body()' instead, just like 'set (be)resp.body += ...' does.
 //
-// Because of this new behavior, callers now stage 'value' on the workspace,
-// which caps synthetic bodies at the free workspace size. The old
-// not-limited-by-workspace behavior could be restored by staging on the heap
-// instead: build the body in a private 'VSB_new_auto()', hang it off a
-// PRIV_TASK with a free callback, and pass 'VSB_data()' here. Client task privs
-// are only released at request teardown, after 'cnt_transmit()' has delivered
-// the body, so a task-owned heap buffer satisfies the until-delivery lifetime
-// required by the synth storage engine; on the 'vcl_backend_error' side
-// 'VRT_l_(be)resp_body()' copies the string right away, so it works there too.
-void append_response_body(VRT_CTX, const char *value);
+// The synth storage engine keeps *references* to the body constituents and
+// only reads them during delivery. Task-owned heap VSBs satisfy that lifetime,
+// are not limited by the available workspace, and, each one being an
+// independent allocation, allow true append semantics: multiple appends compose
+// with each other and with bodies previously assigned from VCL.
+void append_synth_response_body(VRT_CTX, struct vsb *vsb);
 
 #endif

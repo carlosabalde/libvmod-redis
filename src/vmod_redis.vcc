@@ -835,11 +835,8 @@ Description
 
     If called during ``vcl_synth`` or ``vcl_backend_error`` with the ``stream``
     argument enabled, this function will return an empty string and behave as
-    setting ``resp.body`` with the response.
-
-    Beware that after 9.0.x the response is no longer streamed: it is always
-    built on the workspace, even when the ``stream`` argument is enabled, so
-    enough free workspace to hold the whole response is required.
+    appending the JSON object to ``resp.body``. This highly reduces the amount
+    of required workspace memory, specially for large JSON objects.
 
 $Method INT .counter(STRING name)
 
