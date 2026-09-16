@@ -53,7 +53,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       # docker build \
-      #   --build-arg VARNISH_CC='${{ matrix.cc }}' \
+      #   --build-arg VCC='${{ matrix.cc }}' \
       #   --tag libvmod-redis-dev \
       #   .
       - name: Build Docker image
@@ -62,7 +62,7 @@ jobs:
           context: .
           load: true
           tags: libvmod-redis-dev
-          build-args: VARNISH_CC=${{ matrix.cc }}
+          build-args: VCC=${{ matrix.cc }}
           cache-from: type=gha,scope=${{ matrix.platform }}-${{ matrix.cc }}
           cache-to: type=gha,mode=max,scope=${{ matrix.platform }}-${{ matrix.cc }}
 

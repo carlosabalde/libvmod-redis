@@ -27,6 +27,8 @@
 
 static task_state_t *get_task_state(VRT_CTX, struct vmod_priv *task_priv, unsigned flush);
 static void flush_task_state(task_state_t *state);
+static unsigned validate_command_state(
+    VRT_CTX, task_state_t *state, struct vmod_redis_db *db, const char *action);
 
 static enum REDIS_SERVER_ROLE type2role(VCL_ENUM type);
 
@@ -672,6 +674,10 @@ vmod_db_command(
         state->command.max_retries = db->max_command_retries;
         state->command.argc = 1;
         state->command.argv[0] = name;
+    } else {
+        REDIS_LOG_ERROR(ctx,
+            "Failed to enqueue command (db=%s): empty command name",
+            db->name);
     }
 }
 
@@ -689,7 +695,7 @@ vmod_db_timeout(
 
     // Do not continue if the initial call to .command() was not executed
     // or if running this in a different database.
-    if ((state->command.argc >= 1) && (state->command.db == db)) {
+    if (validate_command_state(ctx, state, db, "set command timeout")) {
         state->command.timeout.tv_sec = command_timeout / 1000;
         state->command.timeout.tv_usec = (command_timeout % 1000) * 1000;
     }
@@ -709,7 +715,7 @@ vmod_db_retries(
 
     // Do not continue if the initial call to .command() was not executed
     // or if running this in a different database.
-    if ((state->command.argc >= 1) && (state->command.db == db)) {
+    if (validate_command_state(ctx, state, db, "set command retries")) {
         state->command.max_retries = max_command_retries;
     }
 }
@@ -726,24 +732,24 @@ vmod_db_push(
     // Fetch thread state.
     task_state_t *state = get_task_state(ctx, task_priv, 0);
 
-    // Do not continue if the maximum number of allowed arguments has been
-    // reached or if the initial call to .command() was not executed or
-    // if running this in a different database.
-    if ((state->command.argc >= 1) &&
-        (state->command.argc < MAX_REDIS_COMMAND_ARGS) &&
-        (state->command.db == db)) {
-        // Handle NULL arguments as empty strings.
-        if (arg == NULL) {
-            arg = WS_Copy(ctx->ws, "", -1);
+    // Do not continue if the initial call to .command() was not executed
+    // or if running this in a different database or if the maximum number
+    // of allowed arguments has been reached.
+    if (validate_command_state(ctx, state, db, "push command argument")) {
+        if (state->command.argc < MAX_REDIS_COMMAND_ARGS) {
+            // Handle NULL arguments as empty strings.
             if (arg == NULL) {
-                REDIS_FAIL_WS(ctx, );
+                arg = WS_Copy(ctx->ws, "", -1);
+                if (arg == NULL) {
+                    REDIS_FAIL_WS(ctx, );
+                }
             }
+            state->command.argv[state->command.argc++] = arg;
+        } else {
+            REDIS_LOG_ERROR(ctx,
+                "Failed to push command argument (db=%s): too many arguments (limit=%d)",
+                db->name, MAX_REDIS_COMMAND_ARGS);
         }
-        state->command.argv[state->command.argc++] = arg;
-    } else {
-        REDIS_LOG_ERROR(ctx,
-            "Failed to push argument (db=%s, limit=%d)",
-            db->name, MAX_REDIS_COMMAND_ARGS);
     }
 }
 
@@ -759,11 +765,9 @@ vmod_db_execute(
     // Fetch thread state.
     task_state_t *state = get_task_state(ctx, task_priv, 0);
 
-    // Do not continue if the initial call to redis.command() was not executed
-    // or if running this in a different database or if the workspace is
-    // already overflowed.
-    if ((state->command.argc >= 1) &&
-        (state->command.db == db)) {
+    // Do not continue if the initial call to .command() was not executed
+    // or if running this in a different database.
+    if (validate_command_state(ctx, state, db, "execute command")) {
         // Initializations.
         vcl_state_t *config = vcl_priv->priv;
         unsigned retries = 0;
@@ -831,9 +835,9 @@ vmod_db_execute(
  * and sadly we can't use VMOD_PROXIED_METHOD because of this
  */
 
-#define EASY_EXEC(name, arg_type)						\
+#define EASY_EXEC(fname, arg_type)						\
 VCL_VOID									\
-name(										\
+fname(										\
     VRT_CTX, struct vmod_redis_db *db,						\
     struct arg_type *args)							\
 {										\
@@ -843,6 +847,13 @@ name(										\
     AN(args->arg1);								\
     AN(args->arg2);							\
 										\
+    if ((args->command == NULL) || (strlen(args->command) == 0)) {           \
+        REDIS_LOG_ERROR(ctx,                                                 \
+            "Failed to enqueue command (db=%s): empty command name",         \
+            db->name);                                                       \
+        return;                                                              \
+    }                                                                        \
+                                                                             \
     vmod_db_command(ctx, db, args->arg2, args->command);			\
     HANDLE_ARG(1);   HANDLE_ARG(2);   HANDLE_ARG(3);   HANDLE_ARG(4);		\
     HANDLE_ARG(5);   HANDLE_ARG(6);   HANDLE_ARG(7);   HANDLE_ARG(8);		\
@@ -1304,7 +1315,6 @@ vmod_db_stats(
     if (stream) {
         result = WS_Copy(ctx->ws, "", -1);
     } else {
-        AZ(VSB_putc(vsb, '\0'));
         AZ(VSB_finish(vsb));
         result = WS_Copy(ctx->ws, VSB_data(vsb), VSB_len(vsb));
         VSB_destroy(&vsb);
@@ -1639,6 +1649,25 @@ flush_task_state(task_state_t *state)
         freeReplyObject(state->command.reply);
         state->command.reply = NULL;
     }
+}
+
+static unsigned
+validate_command_state(
+    VRT_CTX, task_state_t *state, struct vmod_redis_db *db, const char *action)
+{
+    if (state->command.argc < 1) {
+        REDIS_LOG_ERROR(ctx,
+            "Failed to %s (db=%s): no command enqueued",
+            action, db->name);
+        return 0;
+    }
+    if (state->command.db != db) {
+        REDIS_LOG_ERROR(ctx,
+            "Failed to %s (db=%s): enqueued command is owned by another database instance (db=%s)",
+            action, db->name, state->command.db->name);
+        return 0;
+    }
+    return 1;
 }
 
 static enum REDIS_SERVER_ROLE

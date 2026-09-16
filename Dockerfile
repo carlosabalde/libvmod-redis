@@ -1,6 +1,6 @@
 FROM ubuntu:noble-20260410
 
-ARG VARNISH_CC=gcc
+ARG VCC=gcc
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -47,18 +47,18 @@ RUN apt update \
     && rm -rf /var/lib/apt/lists/*
 
 RUN cd /tmp \
-    && wget --no-check-certificate https://github.com/varnish/varnish/releases/download/varnish-6.0.17/varnish-6.0.17.tar.gz \
+    && wget https://github.com/varnish/varnish/releases/download/varnish-6.0.17/varnish-6.0.17.tar.gz \
     && tar zxvf varnish-*.tar.gz \
     && rm -f varnish-*.tar.gz \
     && cd varnish-* \
     && ./autogen.sh \
-    && CC="${VARNISH_CC}" ./configure \
+    && CC="${VCC}" ./configure \
     && make \
     && make PREFIX='/usr/local' install \
     && ldconfig
 
 RUN cd /tmp \
-    && wget --no-check-certificate https://github.com/redis/hiredis/archive/v1.4.1.zip -O hiredis-1.4.1.zip \
+    && wget https://github.com/redis/hiredis/archive/v1.4.1.zip -O hiredis-1.4.1.zip \
     && unzip hiredis-*.zip \
     && rm -f hiredis-*.zip \
     && cd hiredis* \
@@ -67,7 +67,7 @@ RUN cd /tmp \
     && ldconfig
 
 RUN cd /tmp \
-    && wget --no-check-certificate https://github.com/redis/redis/archive/refs/tags/8.10.0.tar.gz -O redis-8.10.0.tar.gz \
+    && wget https://github.com/redis/redis/archive/refs/tags/8.10.1.tar.gz -O redis-8.10.1.tar.gz \
     && tar zxvf redis-*.tar.gz \
     && rm -f redis-*.tar.gz \
     && cd redis-* \

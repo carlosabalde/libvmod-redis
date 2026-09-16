@@ -314,6 +314,19 @@ Dependencies:
 * `hiredis <https://github.com/redis/hiredis>`_ - minimalistic C Redis client library.
 * `libev <http://software.schmorp.de/pkg/libev.html>`_ - full-featured and high-performance event loop.
 
+LOGGING
+=======
+
+Messages logged by the VMOD are always sent to the Varnish Shared memory Log (VSL), using the ``VCL_Error`` tag for errors, the ``VCL_Log`` tag for other relevant messages, and the ``Debug`` tag for debug messages. Whenever possible messages are attached to the transaction being processed; otherwise they are logged without a VXID (e.g., messages generated during initializations or by background threads).
+
+Additionally, messages can be duplicated to extra sinks selected using the ``VMOD_REDIS_LOG_SINKS`` environment variable, which is checked for occurrences of the following tokens:
+
+* ``syslog``: messages are also submitted to syslog. This is the default behavior when the environment variable is not set.
+
+* ``stderr``: messages are also written to the standard error output. This is specially useful in containerized environments, where syslog is usually not available and where the ``varnishd`` standard error output is typically forwarded to the container logs.
+
+Multiple sinks can be combined (e.g., ``VMOD_REDIS_LOG_SINKS=syslog,stderr``), and both can be disabled using any value not containing those tokens (e.g., ``VMOD_REDIS_LOG_SINKS=none``). In any case, VSL logging is always enabled.
+
 RUNNING TESTS
 =============
 
