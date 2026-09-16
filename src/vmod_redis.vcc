@@ -102,7 +102,7 @@ Arguments
 
     debug: if enabled, useful troubleshooting information will be logged to VSL
     using ``Debug`` tags (beware of the default ``vsl_mask`` parameter in
-    Varnish). Same information will also be logged to syslog and/or stderr
+    VCache). Same information will also be logged to syslog and/or stderr
     depending on the value of the ``VMOD_REDIS_LOG_SINKS`` environment variable.
 Description
     Using this function is not mandatory.
@@ -389,13 +389,13 @@ Arguments
     execution. It can be overridden during command execution with
     ``.retries()``.
 
-    shared_connections: if enabled, Redis connections are not local to Varnish
+    shared_connections: if enabled, Redis connections are not local to VCache
     worker threads, but shared by all threads using one or more pools.
 
     max_connections:
         When ``shared_connections`` is enabled, the VMOD creates one pool of
         Redis connections per location and database instance. This option sets
-        the maximum number of connections in each pool. All Varnish worker
+        the maximum number of connections in each pool. All VCache worker
         threads using the same database instance will share connections in these
         pools. Pools are not shared between database instances.
 
@@ -404,8 +404,8 @@ Arguments
         location (IP + port).
 
         When ``shared_connections`` is disabled, Redis connections are local to
-        each Varnish worker thread. This option sets the maximum number of Redis
-        connections per Varnish worker thread. Each thread keeps up to one
+        each VCache worker thread. This option sets the maximum number of Redis
+        connections per VCache worker thread. Each thread keeps up to one
         connection per location and database instance. If more than one (database,
         location) pair is available, incrementing this limit allows recycling of
         Redis connections.
@@ -468,7 +468,7 @@ Arguments
 
     debug: if enabled, useful troubleshooting information will be logged to VSL
     using ``Debug`` tags (beware of the default ``vsl_mask`` parameter in
-    Varnish). Same information will also be logged to syslog and/or stderr
+    VCache). Same information will also be logged to syslog and/or stderr
     depending on the value of the ``VMOD_REDIS_LOG_SINKS`` environment variable.
 
     max_cluster_hops: maximum number of redirections (0 means no limit) when

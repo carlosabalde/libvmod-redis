@@ -129,7 +129,7 @@ struct vmod_redis_db {
     // Configuration.
     // XXX: required because PRIV_VCL pointers are not available when the
     // VMOD releases database instances. This should be fixed in future
-    // Varnish releases.
+    // VCache releases.
     vcl_state_t *config;
 
     // General options (allocated in the heap).
@@ -332,7 +332,7 @@ typedef struct vmod_state {
     // threads; and (2) regenerate pooled connections shared between threads.
     unsigned version;
 
-    // Varnish locks.
+    // VCache locks.
     struct {
         unsigned refs;
         struct vsc_seg *vsc_seg;
@@ -376,7 +376,7 @@ extern vmod_state_t vmod_state;
 // lock (glibc's internal lock and stdio's FILE lock, respectively) across its
 // syscall. Therefore, do NOT use this macro in hot paths. Syslog (which doesn't
 // matter much in containers) and stderr (which is gated by a pipe consumed by
-// the Varnish management process) logging should be rare, especially when
+// the VCache management process) logging should be rare, especially when
 // handling requests.
 //
 // Alternative: enable/disable syslog and/or stderr logging using the env var

@@ -1,4 +1,4 @@
-varnishtest "Tests Sentinels + TLS + RESP3."
+vtest "Tests Sentinels + TLS + RESP3."
 
 server s1 {
    rxreq
@@ -8,8 +8,8 @@ server s1 {
 # Let Sentinels discover all master and slave servers.
 delay 15
 
-# Varnish configured with no password to connect to sentinels.
-varnish v1 -vcl+backend {
+# VCache configured with no password to connect to sentinels.
+vcache v1 -vcl+backend {
     import ${vmod_redis};
 
     sub vcl_init {
@@ -34,8 +34,8 @@ varnish v1 -vcl+backend {
     }
 } -start
 
-# Varnish configured with an incorrect password to connect to sentinels.
-varnish v2 -vcl+backend {
+# VCache configured with an incorrect password to connect to sentinels.
+vcache v2 -vcl+backend {
     import ${vmod_redis};
 
     sub vcl_init {
@@ -61,8 +61,8 @@ varnish v2 -vcl+backend {
     }
 } -start
 
-# Varnish configured with a correct password to connect to sentinels.
-varnish v3 -vcl+backend {
+# VCache configured with a correct password to connect to sentinels.
+vcache v3 -vcl+backend {
     import ${vmod_redis};
 
     sub vcl_init {
@@ -162,6 +162,6 @@ delay 5
 
 # XXX: not really an useful test at the moment.
 
-varnish v1 -expect client_req == 1
-varnish v2 -expect client_req == 1
-varnish v3 -expect client_req == 1
+vcache v1 -expect client_req == 1
+vcache v2 -expect client_req == 1
+vcache v3 -expect client_req == 1

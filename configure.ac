@@ -33,10 +33,12 @@ AC_ARG_WITH([rst2man],
     [RST2MAN="$withval"],
     [AC_CHECK_PROGS(RST2MAN, [rst2man rst2man.py], [])])
 
-m4_ifndef([VARNISH_PREREQ], AC_MSG_ERROR([Need varnish.m4 -- see README.rst]))
+m4_ifndef([VCACHE_REQUIRE], AC_MSG_ERROR([Need varnish.m4 / vinyl.m4 -- see README.rst]))
 
-#VARNISH_PREREQ([5.0], [5.1])
-VARNISH_VMODS([redis])
+VCACHE_REQUIRE(
+    [[varnish], [trunk]],
+    [[vinyl], [trunk]])
+VCACHE_VMODS([redis])
 
 VMOD_TESTS="$(cd $srcdir/src && echo tests/*.vtc)"
 AC_SUBST(VMOD_TESTS)

@@ -13,6 +13,8 @@ jobs:
         platform:
           - ubuntu-24.04
           - ubuntu-24.04-arm
+        vcache:
+          - varnish
         cc:
           - gcc
           - clang
@@ -39,7 +41,25 @@ jobs:
           - make_target: distcheck
             tls: 'true'
         include:
+          # Vinyl: representative smoke coverage on one platform x compiler
+          # diagonal, defaults only.
           - platform: ubuntu-24.04
+            vcache: vinyl
+            cc: gcc
+            make_target: check
+            configure_flags: ''
+            protocol: default
+            tls: 'false'
+          - platform: ubuntu-24.04-arm
+            vcache: vinyl
+            cc: clang
+            make_target: check
+            configure_flags: ''
+            protocol: default
+            tls: 'false'
+          # Code coverage: single job.
+          - platform: ubuntu-24.04
+            vcache: varnish
             cc: gcc
             make_target: lcov
             configure_flags: --enable-code-coverage
@@ -78,7 +98,7 @@ jobs:
               set -e; \
               git config --global --add safe.directory /workspace; \
               ./autogen.sh; \
-              CC="${{ matrix.cc }}" ./configure --prefix=/usr ${{ matrix.configure_flags }}; \
+              CC="${{ matrix.cc }}" ./configure --with-vcache=${{ matrix.vcache }} --prefix=/usr ${{ matrix.configure_flags }}; \
               make -j4; \
               PROTOCOL="${{ matrix.protocol }}" TLS="${{ matrix.tls }}" make ${{ matrix.make_target }} -j1'
 

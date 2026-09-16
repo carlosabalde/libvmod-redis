@@ -1,11 +1,11 @@
-varnishtest "Test VCL temperature and discard."
+vtest "Test VCL temperature and discard."
 
 server s1 {
    rxreq
    txresp
 } -repeat 1 -start
 
-varnish v1 -vcl+backend {
+vcache v1 -vcl+backend {
     import ${vmod_redis};
 
     sub vcl_init {
@@ -58,17 +58,17 @@ varnish v1 -vcl+backend {
     }
 } -start
 
-varnish v1 -vcl+backend {
+vcache v1 -vcl+backend {
 }
 
-varnish v1 -cliok "vcl.state vcl1 cold"
+vcache v1 -cliok "vcl.state vcl1 cold"
 
-varnish v1 -cliok "vcl.state vcl1 warm"
+vcache v1 -cliok "vcl.state vcl1 warm"
 
-varnish v1 -cliok "vcl.use vcl1"
+vcache v1 -cliok "vcl.use vcl1"
 
-varnish v1 -cliok "vcl.use vcl2"
+vcache v1 -cliok "vcl.use vcl2"
 
-varnish v1 -cliok "vcl.discard vcl1"
+vcache v1 -cliok "vcl.discard vcl1"
 
-varnish v1 -expect MGT.child_panic == 0
+vcache v1 -expect MGT.child_panic == 0

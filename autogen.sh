@@ -35,13 +35,12 @@ else
 	esac
 fi
 
-# check for varnishapi.m4 in custom paths
-dataroot=$(pkg-config --variable=datarootdir varnishapi 2>/dev/null)
+dataroot=$(pkg-config --variable=datarootdir varnishapi 2>/dev/null || pkg-config --variable=datarootdir vinylapi 2>/dev/null)
 if [ -z "$dataroot" ] ; then
 	cat >&2 <<'EOF'
-Package varnishapi was not found in the pkg-config search path.
-Perhaps you should add the directory containing `varnishapi.pc'
-to the PKG_CONFIG_PATH environment variable
+Package varnishapi / vinylapi was not found in the pkg-config search path.
+Perhaps you should add the directory containing it to the PKG_CONFIG_PATH
+environment variable
 EOF
 	exit 1
 fi

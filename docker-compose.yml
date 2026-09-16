@@ -6,7 +6,7 @@
 #   $ docker compose up --build --detach
 #   $ docker compose exec --user dev --workdir /mnt/host dev bash
 #     $ ./autogen.sh
-#     $ ./configure
+#     $ ./configure --with-vcache=varnish
 #     $ make
 #     $ make check
 #   $ docker compose down --volumes --remove-orphans

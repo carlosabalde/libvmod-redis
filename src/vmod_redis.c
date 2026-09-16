@@ -16,7 +16,7 @@
 #include "vcc_redis_if.h"
 
 #ifdef TLS_ENABLED
-#ifdef HAVE_LIBVARNISH_SSLHELPER
+#ifdef HAVE_LIBVCACHE_SSLHELPER
 #include <vsslh.h>
 #endif
 #endif
@@ -55,7 +55,7 @@ static const struct vmod_priv_methods vcl_state_priv_methods[1] = {{
 static int
 handle_vcl_load_event(VRT_CTX, struct vmod_priv *vcl_priv)
 {
-    // Initialize Varnish locks.
+    // Initialize VCache locks.
     if (vmod_state.locks.refs == 0) {
         vmod_state.locks.config = Lck_CreateClass(
             &vmod_state.locks.vsc_seg, "redis.config");
@@ -72,7 +72,7 @@ handle_vcl_load_event(VRT_CTX, struct vmod_priv *vcl_priv)
 
 #ifdef TLS_ENABLED
     // Ensure OpenSSL global state is initialized only once.
-#ifdef HAVE_LIBVARNISH_SSLHELPER
+#ifdef HAVE_LIBVCACHE_SSLHELPER
     AN(VSSLH_status());
 #else
     static int openssl_initialized = 0;
@@ -189,7 +189,7 @@ handle_vcl_discard_event(VRT_CTX, vcl_state_t *config)
     // Assertions.
     assert(vmod_state.locks.refs > 0);
 
-    // Release Varnish locks.
+    // Release VCache locks.
     vmod_state.locks.refs--;
     if (vmod_state.locks.refs == 0) {
         Lck_DestroyClass(&vmod_state.locks.vsc_seg);

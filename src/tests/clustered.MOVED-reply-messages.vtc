@@ -1,11 +1,11 @@
-varnishtest "Tests handling of MOVED reply messages"
+vtest "Tests handling of MOVED reply messages"
 
 server s1 {
    rxreq
    txresp
 } -repeat 1 -start
 
-varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
+vcache v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     import ${vmod_redis};
 
     sub vcl_init {
@@ -236,4 +236,4 @@ client c1 {
     expect resp.http.db-cluster-replies-ask == "0"
 } -run
 
-varnish v1 -expect client_req == 1
+vcache v1 -expect client_req == 1

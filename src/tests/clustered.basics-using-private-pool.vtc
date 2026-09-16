@@ -1,11 +1,11 @@
-varnishtest "Tests basics using private pool"
+vtest "Tests basics using private pool"
 
 server s1 {
    rxreq
    txresp
 } -repeat 1 -start
 
-varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
+vcache v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     import ${vmod_redis};
 
     sub vcl_init {
@@ -191,7 +191,7 @@ varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
 } -start
 
 # Needed for testing purposes, to store scripts in HTTP headers.
-varnish v1 -cliok "param.set feature -validate_headers"
+vcache v1 -cliok "param.set feature -validate_headers"
 
 client c1 {
     txreq
@@ -235,4 +235,4 @@ client c1 {
     expect resp.http.db-cluster-replies-ask == "0"
 } -run
 
-varnish v1 -expect client_req == 1
+vcache v1 -expect client_req == 1

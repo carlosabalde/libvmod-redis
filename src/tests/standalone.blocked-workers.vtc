@@ -1,11 +1,11 @@
-varnishtest "Tests workers are blocked when using a small shared pool"
+vtest "Tests workers are blocked when using a small shared pool"
 
 server s1 {
    rxreq
    txresp
 } -repeat 2 -start
 
-varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
+vcache v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     import ${vmod_redis};
 
     sub vcl_init {
@@ -85,4 +85,4 @@ client c2 {
     expect resp.http.db-commands-total == "2"
 } -run
 
-varnish v1 -expect client_req == 2
+vcache v1 -expect client_req == 2

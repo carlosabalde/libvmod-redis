@@ -1,11 +1,11 @@
-varnishtest "Tests weights using private pool"
+vtest "Tests weights using private pool"
 
 server s1 {
    rxreq
    txresp
 } -repeat 1 -start
 
-varnish v1 -arg "-p vsl_reclen=1024" -vcl+backend {
+vcache v1 -arg "-p vsl_reclen=1024" -vcl+backend {
     import ${vmod_redis};
 
     sub vcl_init {
@@ -93,4 +93,4 @@ client c1 {
     expect resp.http.db-commands-error == "0"
 } -run
 
-varnish v1 -expect client_req == 1
+vcache v1 -expect client_req == 1

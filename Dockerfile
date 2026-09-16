@@ -49,25 +49,36 @@ RUN apt update \
     && apt clean \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone https://github.com/varnish/varnish.git /tmp/varnish \
+RUN git clone --recurse-submodules https://github.com/varnish/varnish.git /tmp/varnish \
     && cd /tmp/varnish \
-    && git submodule update --init \
     && ./autogen.sh \
-    && CC="${VCC}" ./configure \
+    && CC="${VCC}" ./configure --prefix=/opt/varnish \
     && make \
-    && make PREFIX='/usr/local' install \
+    && make install \
+    && echo /opt/varnish/lib > /etc/ld.so.conf.d/varnish.conf \
     && ldconfig
 
-RUN git clone --recursive https://code.vinyl-cache.org/vinyl-cache/vinyl-cache /tmp/vinyl-cache \
+RUN git clone --recurse-submodules https://code.vinyl-cache.org/vinyl-cache/vinyl-cache /tmp/vinyl-cache \
     && cd /tmp/vinyl-cache \
     && ./autogen.sh \
-    && CC="${VCC}" ./configure \
+    && CC="${VCC}" ./configure --prefix=/opt/vinyl-cache \
     && make \
-    && make PREFIX='/usr/local' install \
+    && make install \
+    && echo /opt/vinyl-cache/lib > /etc/ld.so.conf.d/vinyl-cache.conf \
     && ldconfig
 
+# Varnish & Vinyl are installed under separate '/opt' prefixes because both ship
+# a 'vtest' hard link (varnishtest / vinyltest) that would otherwise collide in
+# '/usr/local/bin', with the winner silently decided by install order. Separate
+# prefixes also guarantee the vtest core and the -E extension always come from
+# the same project, even if their vtest2 submodules diverge. Exposing both
+# pkgconfig dirs is unambiguous since the module names differ (varnishapi vs.
+# vinylapi): './configure --with-vcache=<flavor>' picks one, and every other
+# path (PATH for tests, LD_LIBRARY_PATH, VTESTEXT, vmoddir) is derived from it.
+ENV PKG_CONFIG_PATH=/opt/varnish/lib/pkgconfig:/opt/vinyl-cache/lib/pkgconfig
+
 RUN cd /tmp \
-    && wget --no-check-certificate https://github.com/redis/hiredis/archive/v1.4.1.zip -O hiredis-1.4.1.zip \
+    && wget https://github.com/redis/hiredis/archive/v1.4.1.zip -O hiredis-1.4.1.zip \
     && unzip hiredis-*.zip \
     && rm -f hiredis-*.zip \
     && cd hiredis* \
@@ -76,7 +87,7 @@ RUN cd /tmp \
     && ldconfig
 
 RUN cd /tmp \
-    && wget --no-check-certificate https://github.com/redis/redis/archive/refs/tags/8.10.1.tar.gz -O redis-8.10.1.tar.gz \
+    && wget https://github.com/redis/redis/archive/refs/tags/8.10.1.tar.gz -O redis-8.10.1.tar.gz \
     && tar zxvf redis-*.tar.gz \
     && rm -f redis-*.tar.gz \
     && cd redis-* \

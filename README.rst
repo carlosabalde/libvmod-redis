@@ -14,13 +14,13 @@ Highlights:
 * **All Redis reply data types are supported**, including partial support to access to components of simple (i.e. not nested) array replies.
 * **Redis pipelines are not (and won't be) supported**. Lua scripting, which is fully supported by the VMOD, it's a much more flexible alternative to pipelines for atomic execution and minimizing latency. Pipelines are hard to use and error prone, specially when using the ``WATCH`` command.
 * **Support for classic Redis deployments** using multiple replicated Redis servers **and for clustered deployments based on Redis Cluster**.
-* **Support for multiple databases and multiple Redis connections**, local to each Varnish worker thread, or shared using one or more pools.
+* **Support for multiple databases and multiple Redis connections**, local to each VCache worker thread, or shared using one or more pools.
 * **Support for smart command execution**, selecting the destination server according with the preferred role (i.e. master or slave) and with distance and healthiness metrics collected during execution.
 * **Support for Redis Sentinel**, allowing automatic discovery of sick / healthy servers and changes in their roles.
 
 Please, check out `the project wiki <https://github.com/carlosabalde/libvmod-redis/wiki>`_ for some extra information and useful links.
 
-Looking for official support for this VMOD? Please, contact `Allenta Consulting <https://www.allenta.com>`_, a `Varnish Software Premium partner <https://www.varnish-software.com/partner/allenta-consulting>`_.
+Vinyl Cache, Varnish Cache, and Varnish Enterprise are all supported by this VMOD. Looking for official support? Please contact `Allenta Consulting <https://www.allenta.com>`_, a `Varnish Software Premium partner <https://www.varnish-software.com/partner/allenta-consulting>`_.
 
 SYNOPSIS
 ========
@@ -157,8 +157,7 @@ EXAMPLES
 Single server
 -------------
 
-Simple case, keeping up to one Redis connection per Varnish worker thread.
-Beware this is just a toy example: **using shared connections is usually a
+Simple case, keeping up to one Redis connection per VCache worker thread. Beware this is just a toy example: **using shared connections is usually a
 better approach**.
 
 ::
@@ -210,7 +209,7 @@ better approach**.
 Multiple servers
 ----------------
 
-Master-slave replication, keeping up to two Redis connections per Varnish worker thread (up to one to the master server & up to one to the closest slave server). Beware this is just a toy example: **using shared connections is usually a better approach**.
+Master-slave replication, keeping up to two Redis connections per VCache worker thread (up to one to the master server & up to one to the closest slave server). Beware this is just a toy example: **using shared connections is usually a better approach**.
 
 ::
 
@@ -276,7 +275,7 @@ Beware Sentinels are only used to track servers already registered in the VCL co
 Clustered setup
 ---------------
 
-Clustered setup keeping up to 128 Redis connections per server, all shared between all Varnish worker threads. Two initial cluster servers are provided; remaining servers are automatically discovered using the ``CLUSTER SHARDS`` command.
+Clustered setup keeping up to 128 Redis connections per server, all shared between all VCache worker threads. Two initial cluster servers are provided; remaining servers are automatically discovered using the ``CLUSTER SHARDS`` command.
 
 ::
 
@@ -309,9 +308,9 @@ Clustered setup keeping up to 128 Redis connections per server, all shared betwe
 INSTALLATION
 ============
 
-The source tree is based on autotools to configure the building, and does also have the necessary bits in place to do functional unit tests using the varnishtest tool.
+The source tree is based on autotools to configure the building, and does also have the necessary bits in place to do functional unit tests using the test tool.
 
-**Beware this project contains multiples branches (main, 4.1, 4.0, etc.). Please, select the branch to be used depending on your Varnish Cache version (Varnish trunk → main, Varnish 4.1.x → 4.1, Varnish 4.0.x → 4.0, etc.).**
+**Beware this project contains multiples branches (main, 4.1, 4.0, etc.). Please, select the branch to be used depending on your VCache version (VCache trunk → main, VCache 4.1.x → 4.1, VCache 4.0.x → 4.0, etc.).**
 
 Dependencies:
 
@@ -321,13 +320,13 @@ Dependencies:
 LOGGING
 =======
 
-Messages logged by the VMOD are always sent to the Varnish Shared memory Log (VSL), using the ``VCL_Error`` tag for errors, the ``VCL_Log`` tag for other relevant messages, and the ``Debug`` tag for debug messages. Whenever possible messages are attached to the transaction being processed; otherwise they are logged without a VXID (e.g., messages generated during initializations or by background threads).
+Messages logged by the VMOD are always sent to the VCache Shared memory Log (VSL), using the ``VCL_Error`` tag for errors, the ``VCL_Log`` tag for other relevant messages, and the ``Debug`` tag for debug messages. Whenever possible messages are attached to the transaction being processed; otherwise they are logged without a VXID (e.g., messages generated during initializations or by background threads).
 
 Additionally, messages can be duplicated to extra sinks selected using the ``VMOD_REDIS_LOG_SINKS`` environment variable, which is checked for occurrences of the following tokens:
 
 * ``syslog``: messages are also submitted to syslog. This is the default behavior when the environment variable is not set.
 
-* ``stderr``: messages are also written to the standard error output. This is specially useful in containerized environments, where syslog is usually not available and where the ``varnishd`` standard error output is typically forwarded to the container logs.
+* ``stderr``: messages are also written to the standard error output. This is specially useful in containerized environments, where syslog is usually not available and where the manager process standard error output is typically forwarded to the container logs.
 
 Multiple sinks can be combined (e.g., ``VMOD_REDIS_LOG_SINKS=syslog,stderr``), and both can be disabled using any value not containing those tokens (e.g., ``VMOD_REDIS_LOG_SINKS=none``). In any case, VSL logging is always enabled.
 
