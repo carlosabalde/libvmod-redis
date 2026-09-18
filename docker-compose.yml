@@ -12,14 +12,13 @@
 #   $ docker compose down --volumes --remove-orphans
 #
 
-name: libvmod-redis-main
+name: libvmod-redis-9_1
 
 services:
   dev:
     hostname: dev
     build:
       context: .
-      no_cache: true
     init: true
     privileged: true
     environment:

@@ -49,9 +49,11 @@ RUN apt update \
     && apt clean \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone --recurse-submodules https://github.com/varnish/varnish.git /tmp/varnish \
-    && cd /tmp/varnish \
-    && git checkout 4c2d0772625ce03912bcbf69143c39c1e779195a \
+RUN cd /tmp \
+    && wget https://github.com/varnish/varnish/archive/4c2d0772625ce03912bcbf69143c39c1e779195a.zip \
+    && unzip 4c2d0772625ce03912bcbf69143c39c1e779195a.zip \
+    && rm -f 4c2d0772625ce03912bcbf69143c39c1e779195a.zip \
+    && cd varnish-4c2d0772625ce03912bcbf69143c39c1e779195a \
     && ./autogen.sh \
     && CC="${VCC}" ./configure --prefix=/opt/varnish \
     && make \
@@ -59,8 +61,11 @@ RUN git clone --recurse-submodules https://github.com/varnish/varnish.git /tmp/v
     && echo /opt/varnish/lib > /etc/ld.so.conf.d/varnish.conf \
     && ldconfig
 
-RUN git clone --recurse-submodules https://code.vinyl-cache.org/vinyl-cache/vinyl-cache /tmp/vinyl-cache \
-    && cd /tmp/vinyl-cache \
+RUN cd /tmp \
+    && wget https://vinyl-cache.org/downloads/vinyl-cache-9.1.0.tgz \
+    && tar zxvf vinyl-cache-9.1.0.tgz \
+    && rm -f vinyl-cache-9.1.0.tgz \
+    && cd vinyl-cache-9.1.0 \
     && ./autogen.sh \
     && CC="${VCC}" ./configure --prefix=/opt/vinyl-cache \
     && make \
