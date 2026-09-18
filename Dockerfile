@@ -49,11 +49,9 @@ RUN apt update \
     && apt clean \
     && rm -rf /var/lib/apt/lists/*
 
-RUN cd /tmp \
-    && wget https://github.com/varnish/varnish/archive/4c2d0772625ce03912bcbf69143c39c1e779195a.zip \
-    && unzip 4c2d0772625ce03912bcbf69143c39c1e779195a.zip \
-    && rm -f 4c2d0772625ce03912bcbf69143c39c1e779195a.zip \
-    && cd varnish-4c2d0772625ce03912bcbf69143c39c1e779195a \
+RUN git clone --recurse-submodules https://github.com/varnish/varnish.git /tmp/varnish \
+    && cd /tmp/varnish \
+    && git checkout 4c2d0772625ce03912bcbf69143c39c1e779195a \
     && ./autogen.sh \
     && CC="${VCC}" ./configure --prefix=/opt/varnish \
     && make \
