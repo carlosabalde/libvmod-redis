@@ -11,8 +11,8 @@ jobs:
     strategy:
       matrix:
         platform:
-          - ubuntu-24.04
-          - ubuntu-24.04-arm
+          - ubuntu-26.04
+          - ubuntu-26.04-arm
         cc:
           - gcc
           - clang
@@ -39,7 +39,7 @@ jobs:
           - make_target: distcheck
             tls: 'true'
         include:
-          - platform: ubuntu-24.04
+          - platform: ubuntu-26.04
             cc: gcc
             make_target: lcov
             configure_flags: --enable-code-coverage
