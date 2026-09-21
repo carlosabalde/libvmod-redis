@@ -1,6 +1,6 @@
 Summary: Redis VMOD for Varnish
 Name: vmod-redis
-Version: 23.3
+Version: 23.4
 Release: 1%{?dist}
 License: BSD
 URL: https://github.com/carlosabalde/libvmod-redis
@@ -36,6 +36,8 @@ Redis VMOD for Varnish
 %{_mandir}/man?/*
 
 %changelog
+- Wed Sep 16 2026 Carlos Abalde <carlos.abalde@gmail.com> - 23.4-1.20260916
+- Improved handling of multiple database instances per VCL task.
 * Fri Aug 14 2026 Carlos Abalde <carlos.abalde@gmail.com> - 23.3-1.20260814
 - Fixed discovery of Redis Cluster topology to register nodes without assigned slots.
 - Improved wait for cluster formation in the test suite runner.

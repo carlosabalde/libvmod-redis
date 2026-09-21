@@ -1,3 +1,9 @@
+libvmod-redis (23.4-1) stable; urgency=low
+
+  * Improved handling of multiple database instances per VCL task
+
+ -- Carlos Abalde <carlos.abalde@gmail.com>  Wed, 16 Sep 2026 17:00:00 +0200
+
 libvmod-redis (23.3-1) stable; urgency=low
 
   * Fixed discovery of Redis Cluster topology to register nodes without assigned slots
