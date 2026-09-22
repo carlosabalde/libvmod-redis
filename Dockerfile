@@ -49,9 +49,11 @@ RUN apt update \
     && apt clean \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone --recurse-submodules https://github.com/varnish/varnish.git /tmp/varnish \
-    && cd /tmp/varnish \
-    && git checkout varnish-9.1.0 \
+RUN cd /tmp \
+    && wget https://github.com/varnish/varnish/releases/download/varnish-9.1.0/varnish-9.1.0.tar.gz \
+    && tar zxvf varnish-9.1.0.tar.gz \
+    && rm -f varnish-9.1.0.tar.gz \
+    && cd varnish-9.1.0 \
     && ./autogen.sh \
     && CC="${VCC}" ./configure --prefix=/opt/varnish \
     && make \
