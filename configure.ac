@@ -36,8 +36,8 @@ AC_ARG_WITH([rst2man],
 m4_ifndef([VCACHE_REQUIRE], AC_MSG_ERROR([Need varnish.m4 / vinyl.m4 -- see README.rst]))
 
 VCACHE_REQUIRE(
-    [[varnish], [trunk]],
-    [[vinyl], [trunk]])
+    [[varnish], [9.1]],
+    [[vinyl], [9.1]])
 VCACHE_VMODS([redis])
 
 VMOD_TESTS="$(cd $srcdir/src && echo tests/*.vtc)"
