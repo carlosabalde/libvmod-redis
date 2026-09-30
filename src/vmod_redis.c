@@ -362,7 +362,7 @@ vmod_sentinels(
 
 #ifndef RESP3_ENABLED
     // Abort if RESP3 is not available.
-    if (protocol == vmod_enum_RESP3) {
+    if (protocol == enum_vmod_redis_RESP3) {
         REDIS_LOG_ERROR(ctx,
             "%s is not supported",
             "RESP3");
@@ -475,7 +475,7 @@ vmod_db__init(
 
 #ifndef RESP3_ENABLED
     // Abort if RESP3 is not available.
-    if (protocol == vmod_enum_RESP3) {
+    if (protocol == enum_vmod_redis_RESP3) {
         REDIS_LOG_ERROR(ctx,
             "%s is not supported",
             "RESP3");
@@ -870,8 +870,8 @@ fname(										\
     vmod_db_execute(ctx, db, args->arg1, args->arg2, args->master);	\
 }
 
-EASY_EXEC(vmod_db_easy_execute, vmod_db_easy_execute_arg);
-EASY_EXEC(vmod_db_easy_execute_proxy, vmod_easy_execute_arg);
+EASY_EXEC(vmod_db_easy_execute, arg_vmod_redis_db_easy_execute);
+EASY_EXEC(vmod_db_easy_execute_proxy, arg_vmod_redis_easy_execute);
 
 #undef HANDLE_ARG
 
@@ -1149,7 +1149,7 @@ vmod_db_stats(
     }
 
     Lck_Lock(&db->mutex);
-    if (format == vmod_enum_json) {
+    if (format == enum_vmod_redis_json) {
         AZ(VSB_printf(vsb,
             "{"
                 "\"servers\": {"
@@ -1209,7 +1209,7 @@ vmod_db_stats(
             db->stats.cluster.discoveries.failed,
             db->stats.cluster.replies.moved,
             db->stats.cluster.replies.ask));
-    } else if (format == vmod_enum_prometheus) {
+    } else if (format == enum_vmod_redis_prometheus) {
         // Beware:
         //   - Some best practices (e.g. naming of metrics described in
         //     https://prometheus.io/docs/practices/naming/#metric-names) are
@@ -1432,7 +1432,7 @@ vmod_use(
 }
 
 VCL_VOID
-vmod_easy_execute(VRT_CTX, struct vmod_easy_execute_arg *args)
+vmod_easy_execute(VRT_CTX, struct arg_vmod_redis_easy_execute *args)
 {
     struct vmod_redis_db *instance;
 
@@ -1692,11 +1692,11 @@ static enum REDIS_PROTOCOL
 parse_protocol(VCL_ENUM protocol)
 {
     enum REDIS_PROTOCOL result;
-    if (protocol == vmod_enum_default) {
+    if (protocol == enum_vmod_redis_default) {
         result = REDIS_PROTOCOL_DEFAULT;
-    } else if (protocol == vmod_enum_RESP2) {
+    } else if (protocol == enum_vmod_redis_RESP2) {
         result = REDIS_PROTOCOL_RESP2;
-    } else if (protocol == vmod_enum_RESP3) {
+    } else if (protocol == enum_vmod_redis_RESP3) {
         result = REDIS_PROTOCOL_RESP3;
     } else {
         WRONG("Invalid protocol value.");

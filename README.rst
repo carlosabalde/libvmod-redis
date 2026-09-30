@@ -107,6 +107,7 @@ import redis;
     Method VOID .retries(INT max_command_retries)
     Method VOID .push(STRING arg)
     Method VOID .execute(BOOL master=true)
+    Method VOID .easy_execute(STRING command, [STRING command_args...], BOOL master=true, INT command_timeout, INT max_command_retries)
 
     # Access to replies.
     Method BOOL .replied()
@@ -178,6 +179,9 @@ better approach**.
         db.push("foo");
         db.push("Hello world!");
         db.execute();
+
+        # Alternatively, the same can be achieved with one single command
+        db.easy_execute("SET", "foo", "Hello world!");
 
         # Lua scripting.
         db.command("EVAL");
