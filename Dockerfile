@@ -46,16 +46,13 @@ RUN apt update \
     && apt clean \
     && rm -rf /var/lib/apt/lists/*
 
-RUN cd /tmp \
-    && wget https://github.com/varnish/varnish/releases/download/varnish-6.0.17/varnish-6.0.17.tar.gz \
-    && tar zxvf varnish-*.tar.gz \
-    && rm -f varnish-*.tar.gz \
-    && cd varnish-* \
-    && ./autogen.sh \
-    && CC="${VCC}" ./configure \
-    && make \
-    && make PREFIX='/usr/local' install \
-    && ldconfig
+RUN curl -L -s https://packagecloud.io/install/repositories/varnishplus/60-enterprise/script.deb.sh | bash \
+    && apt update \
+    && apt install -y \
+        varnish-plus \
+        varnish-plus-dev \
+    && apt clean \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN cd /tmp \
     && wget https://github.com/redis/hiredis/archive/v1.4.1.zip -O hiredis-1.4.1.zip \

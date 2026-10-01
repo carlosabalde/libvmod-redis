@@ -12,7 +12,7 @@
 #   $ docker compose down --volumes --remove-orphans
 #
 
-name: libvmod-redis-6_0
+name: libvmod-redis-6_0-enterprise
 
 services:
   dev:

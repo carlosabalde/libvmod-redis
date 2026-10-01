@@ -6,8 +6,6 @@ on:
 
 jobs:
   test:
-    if: github.ref_name != '6.0-enterprise'
-
     runs-on: ${{ matrix.platform }}
 
     strategy:
