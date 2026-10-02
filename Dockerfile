@@ -28,7 +28,7 @@ RUN apt update \
         libev-dev \
         libjemalloc-dev \
         libncurses-dev \
-        libpcre3-dev \
+        libpcre2-dev \
         libssl-dev \
         libtool \
         make \
