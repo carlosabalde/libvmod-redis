@@ -58,7 +58,7 @@ RUN cd /tmp \
     && ldconfig
 
 RUN cd /tmp \
-    && wget https://github.com/redis/hiredis/archive/v1.4.1.zip -O hiredis-1.4.1.zip \
+    && wget https://github.com/redis/hiredis/archive/v1.5.0.zip -O hiredis-1.5.0.zip \
     && unzip hiredis-*.zip \
     && rm -f hiredis-*.zip \
     && cd hiredis* \
@@ -67,7 +67,7 @@ RUN cd /tmp \
     && ldconfig
 
 RUN cd /tmp \
-    && wget https://github.com/redis/redis/archive/refs/tags/8.10.1.tar.gz -O redis-8.10.1.tar.gz \
+    && wget https://github.com/redis/redis/archive/refs/tags/8.10.2.tar.gz -O redis-8.10.2.tar.gz \
     && tar zxvf redis-*.tar.gz \
     && rm -f redis-*.tar.gz \
     && cd redis-* \
