@@ -2,9 +2,6 @@
 .. image:: https://github.com/carlosabalde/libvmod-redis/actions/workflows/main.yml/badge.svg?branch=6.0-enterprise
    :alt: GitHub Actions CI badge
    :target: https://github.com/carlosabalde/libvmod-redis/actions
-.. image:: https://codecov.io/gh/carlosabalde/libvmod-redis/branch/6.0-enterprise/graph/badge.svg
-   :alt: Codecov badge
-   :target: https://codecov.io/gh/carlosabalde/libvmod-redis
 
 VMOD using the `synchronous hiredis library API <https://github.com/redis/hiredis>`_ to access Redis servers from VCL. For an alternative using libvalkey + Valkey, please check the `libvmod-valkey VMOD <https://github.com/carlosabalde/libvmod-valkey>`_ project.
 
