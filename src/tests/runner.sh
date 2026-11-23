@@ -255,6 +255,7 @@ elif [[ ${@: -1} =~ ^.*clustered(\.[0-9]{7,})?\.[^\.]*\.vtc(\.disabled)?$ ]]; th
         cluster-node-timeout 5000
         cluster-slave-validity-factor 0
         cluster-require-full-coverage yes
+        cluster-bus-port-protected-mode no
 EOF
         if [ "$VERSION" -ge '6000000' ]; then
             cat >> "$TMP/db-server$INDEX.conf" <<EOF
